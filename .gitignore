@@ -1,9 +1,40 @@
-*.pth
-*.t7
-#output/*
-.idea
-experiments/*
-logs/*
+# Python
 .venv/
 __pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+*:Zone.Identifier
+
+# Model files
+*.pth
+*.pth.tar
+*.t7
+
+# Training artifacts
+experiments/
+experiments_improved/
+logs/
+logs_improved/
+
+# Generated outputs
+output/
+output_*/
+output_best_*/
 output_pytorch/
+
+# Report generated artifacts (keep scripts under report_assets/data)
+report_assets/figures/
+report_assets/images/
+report_assets/data/*.csv
+report_assets/data/*.json
+report_assets/data/__pycache__/
+
+# Local docs export artifacts
+docs/reports/*.html
+docs/reports/*.pdf

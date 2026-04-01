@@ -1,61 +1,134 @@
 # pytorch-AdaIN
 
-This is an unofficial pytorch implementation of a paper, Arbitrary Style Transfer in Real-time with Adaptive Instance Normalization [Huang+, ICCV2017].
-I'm really grateful to the [original implementation](https://github.com/xunhuang1995/AdaIN-style) in Torch by the authors, which is very useful.
+Unofficial PyTorch implementation of:
+
+- X. Huang and S. Belongie, *Arbitrary Style Transfer in Real-time with Adaptive Instance Normalization* (ICCV 2017)
+
+Original Torch implementation:
+https://github.com/xunhuang1995/AdaIN-style
 
 ![Results](results.png)
 
-## Requirements
-Please install requirements by `pip install -r requirements.txt`
+Korean guide: `README.ko.md`
 
-- Python 3.5+
-- PyTorch 0.4+
-- TorchVision
-- Pillow
+## 1) Environment Setup
 
-(optional, for training)
-- tqdm
-- TensorboardX
-
-## Usage
-
-### Download models
-Download decoder.pth / vgg_normalized.pth from [release](https://github.com/naoto0804/pytorch-AdaIN/releases/tag/v0.0.0) and put them under `models/`.
-
-### Test
-Use `--content` and `--style` to provide the respective path to the content and style image.
-```
-CUDA_VISIBLE_DEVICES=<gpu_id> python test.py --content input/content/cornell.jpg --style input/style/woman_with_hat_matisse.jpg
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
 ```
 
-You can also run the code on directories of content and style images using `--content_dir` and `--style_dir`. It will save every possible combination of content and styles to the output directory.
-```
-CUDA_VISIBLE_DEVICES=<gpu_id> python test.py --content_dir input/content --style_dir input/style
+Recommended Python: **3.10 ~ 3.12**.
+
+## 2) Project Layout
+
+```text
+.
+├── input/                      # content/style sample datasets
+├── models/                     # pretrained weights (decoder.pth, vgg_normalised.pth)
+├── output/                     # generated images (ignored by git)
+├── report_assets/              # report generation scripts + generated assets
+├── docs/
+│   ├── papers/                 # source papers
+│   └── reports/                # generated report docs
+├── test.py                     # image stylization
+├── test_video.py               # video stylization
+├── train.py                    # baseline training
+├── train_improved.py           # improved/generalization training
+├── train_generalize.sh         # recommended improved training preset
+├── run.sh                      # RGB-safe inference wrapper (single/multi-style)
+└── run_best.sh                 # RGB-safe inference wrapper for best decoder
 ```
 
-This is an example of mixing four styles by specifying `--style` and `--style_interpolation_weights` option.
+## 3) Prepare Models
+
+Put model files under `models/`:
+
+- `models/decoder.pth`
+- `models/vgg_normalised.pth`
+
+You can download baseline checkpoints from the original release:
+https://github.com/naoto0804/pytorch-AdaIN/releases/tag/v0.0.0
+
+## 4) Inference
+
+### Single content + single style
+
+```bash
+python test.py \
+  --content input/content/cornell.jpg \
+  --style input/style/woman_with_hat_matisse.jpg \
+  --output output
 ```
-CUDA_VISIBLE_DEVICES=<gpu_id> python test.py --content input/content/avril.jpg --style input/style/picasso_self_portrait.jpg,input/style/impronte_d_artista.jpg,input/style/trial.jpg,input/style/antimonocromatismo.jpg --style_interpolation_weights 1,1,1,1 --content_size 512 --style_size 512 --crop
+
+### Batch: all content x all style combinations
+
+```bash
+python test.py \
+  --content_dir input/content/PNG \
+  --style_dir input/style/test \
+  --output output
 ```
 
-Some other options:
-* `--content_size`: New (minimum) size for the content image. Keeping the original size if set to 0.
-* `--style_size`: New (minimum) size for the content image. Keeping the original size if set to 0.
-* `--alpha`: Adjust the degree of stylization. It should be a value between 0.0 and 1.0 (default).
-* `--preserve_color`: Preserve the color of the content image.
+### Blend multiple style images as one style
 
-
-### Train
-Use `--content_dir` and `--style_dir` to provide the respective directory to the content and style images.
-```
-CUDA_VISIBLE_DEVICES=<gpu_id> python train.py --content_dir <content_dir> --style_dir <style_dir>
+```bash
+python test.py \
+  --content_dir input/content/PNG \
+  --style input/style/a.jpg,input/style/b.jpg,input/style/c.jpg \
+  --style_interpolation_weights 1,1,1 \
+  --content_size 64 --style_size 64 --crop \
+  --output output
 ```
 
-For more details and parameters, please refer to --help option.
+Note: in style interpolation mode, style tensors must share the same spatial size. Using `--content_size`, `--style_size`, and `--crop` is the safe option.
 
-I share the model trained by this code as `iter_1000000.pth
-` at [release](https://github.com/naoto0804/pytorch-AdaIN/releases/tag/v0.0.0).
+### Recommended wrapper (handles RGBA PNG -> RGB conversion)
+
+```bash
+./run_best.sh \
+  --decoder experiments_improved/<run_name>/best_decoder.pth.tar \
+  --content_dir input/content/PNG \
+  --style_dir input/style/test \
+  --output output/new_run
+```
+
+## 5) Training
+
+### Baseline
+
+```bash
+python train.py --content_dir <content_dir> --style_dir <style_dir>
+```
+
+### Improved generalization training preset
+
+```bash
+./train_generalize.sh
+```
+
+Main logs/checkpoints are written to:
+
+- `logs_improved/`
+- `experiments_improved/`
+
+## 6) Report
+
+Generate report assets:
+
+```bash
+python report_assets/data/generate_report_assets.py
+python report_assets/data/generate_generalization_report.py
+```
+
+Report documents are in:
+
+- `docs/reports/research_paper_adain_improvement.md`
+- `docs/reports/research_paper_adain_improvement.html`
+- `docs/reports/research_paper_adain_improvement.pdf`
 
 ## References
-- [1]: X. Huang and S. Belongie. "Arbitrary Style Transfer in Real-time with Adaptive Instance Normalization.", in ICCV, 2017.
-- [2]: [Original implementation in Torch](https://github.com/xunhuang1995/AdaIN-style)
+
+- [1] X. Huang and S. Belongie. *Arbitrary Style Transfer in Real-time with Adaptive Instance Normalization*, ICCV 2017.
+- [2] https://github.com/xunhuang1995/AdaIN-style
