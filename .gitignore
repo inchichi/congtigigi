@@ -1,0 +1,10 @@
+venv/
+__pycache__/
+*.py[cod]
+.vscode/
+CNN_Images/
+textile/models/*.pth
+*.pt
+*.pth
+*.ckpt
+*.log
