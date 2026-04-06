@@ -15,7 +15,7 @@ from textile.utils.create_model import CreateModel
 
 
 class Textile(nn.Module):
-    def __init__(self, model_path: str = "textile/models/textile.pth", lambda_value: float = 0.25, resolution = (512, 512), number_tiles = 2):
+    def __init__(self, model_path: str = "textile/models/textile.pth", lambda_value: float = 0.25, resolution=(512, 512), number_tiles=2):
         """
         Implementation of TexTile: A Differentiable Metric for Texture Tileability
         :param model_path: Path to pretrained model
@@ -25,10 +25,10 @@ class Textile(nn.Module):
         """
         super(Textile, self).__init__()
 
-        assert torch.cuda.is_available()
         assert model_path.endswith('.pth')
         assert lambda_value >= 0 and lambda_value <= 1
 
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
         is_model_on_disc = os.path.exists(model_path)
         if not is_model_on_disc:
@@ -42,15 +42,15 @@ class Textile(nn.Module):
                 print('Could not retrieve pretrained model')
                 raise e
 
-        self.model = CreateModel(model_path).cuda().eval()
-        self.lambda_value = torch.tensor(lambda_value)
+        self.model = CreateModel(model_path, device=self.device).to(self.device).eval()
+        self.lambda_value = torch.tensor(lambda_value, device=self.device)
         self.t_resized = transforms.Resize(resolution, antialias=True)
         self.transform = nn.Sequential(
             transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
         )
         self.number_tiles = number_tiles
 
-    def forward(self, image: torch.Tensor, return_logits: bool = False, normalize = True, rescale = True, tile = True):
+    def forward(self, image: torch.Tensor, return_logits: bool = False, normalize=True, rescale=True, tile=True):
         """
         Forward function
         :param image: Tiled image
@@ -72,7 +72,8 @@ class Textile(nn.Module):
         if normalize:
             image = self.transform(image)
 
-        result = self.model(image.float().cuda())
+        image = image.float().to(self.device)
+        result = self.model(image)
         if return_logits is False:
             result = 1 / (1 + torch.exp((-self.lambda_value * result)))
 

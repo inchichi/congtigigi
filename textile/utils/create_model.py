@@ -5,10 +5,11 @@ from torchvision.models import convnext_base
 from textile.architectures.layers.attention.attention import LinearAttention
 
 
-def CreateModel(pre_trained_network=None):
+def CreateModel(pre_trained_network=None, device=None):
     """
     Creates model with pre-trained weights.
     :param pre_trained_network: Path to pre-trained weights
+    :param device: torch.device to load checkpoints on
     :return: Textile model
     """
 
@@ -35,7 +36,9 @@ def CreateModel(pre_trained_network=None):
     model.features = nn.Sequential(*layers)
 
     if pre_trained_network is not None:
-        # print("Reading model from disc")
-        model_weights = torch.load(pre_trained_network)
+        if device is None:
+            model_weights = torch.load(pre_trained_network)
+        else:
+            model_weights = torch.load(pre_trained_network, map_location=device)
         model.load_state_dict(model_weights, strict=False)
     return model
