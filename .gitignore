@@ -7,3 +7,5 @@ textile/models/*.pth
 *.pth
 *.ckpt
 *.log
+CNN_Images/gametile/
+gradcam_outputs/
