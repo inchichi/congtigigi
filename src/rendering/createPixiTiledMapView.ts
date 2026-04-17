@@ -4,10 +4,16 @@ import {
   Assets,
   Container,
   Rectangle,
+  Sprite,
   Texture,
   groupD8
 } from 'pixi.js'
 
+import {
+  getPlayerMoveDirectionFromKey,
+  movePlayerState
+} from '../game/playerState'
+import type { PlayerState } from '../game/playerState'
 import type {
   ParsedTiledMap,
   ParsedTiledTile,
@@ -17,6 +23,7 @@ import type {
 type CreatePixiTiledMapViewInput = {
   mountElement: HTMLElement
   map: ParsedTiledMap
+  player: PlayerState
   imageUrls: Record<string, string>
 }
 
@@ -28,6 +35,7 @@ type TilesetRenderResources = {
 export const createPixiTiledMapView = async ({
   mountElement,
   map,
+  player,
   imageUrls
 }: CreatePixiTiledMapViewInput): Promise<Application> => {
   const app = new Application()
@@ -84,6 +92,54 @@ export const createPixiTiledMapView = async ({
     world.addChild(tilemap)
   }
 
+  const playerTileset = map.tilesets[0]
+  const playerRenderResources = tilesetResources.get(playerTileset.source)
+
+  if (!playerRenderResources) {
+    throw new Error(`Missing render resources for tileset ${playerTileset.source}`)
+  }
+
+  const playerTexture = playerRenderResources.tileTextures[player.tileLocalId]
+
+  if (!playerTexture) {
+    throw new Error(`Missing player texture for tile ${player.tileLocalId}`)
+  }
+
+  const playerSprite = new Sprite(playerTexture)
+  let playerState = player
+
+  playerSprite.label = 'player'
+  world.addChild(playerSprite)
+
+  const syncPlayerSpritePosition = () => {
+    playerSprite.position.set(
+      playerState.position.x * map.tileWidth,
+      playerState.position.y * map.tileHeight
+    )
+  }
+
+  const handleKeyDown = (event: KeyboardEvent) => {
+    const direction = getPlayerMoveDirectionFromKey(event.key)
+
+    if (!direction) {
+      return
+    }
+
+    event.preventDefault()
+    const nextPlayerState = movePlayerState({
+      player: playerState,
+      direction,
+      mapWidth: map.width,
+      mapHeight: map.height
+    })
+
+    playerState = nextPlayerState
+    syncPlayerSpritePosition()
+  }
+
+  window.addEventListener('keydown', handleKeyDown)
+  syncPlayerSpritePosition()
+
   const layoutWorld = () => {
     const availableWidth = app.screen.width
     const availableHeight = app.screen.height
@@ -111,6 +167,7 @@ export const createPixiTiledMapView = async ({
 
   if (import.meta.hot) {
     import.meta.hot.dispose(() => {
+      window.removeEventListener('keydown', handleKeyDown)
       resizeObserver.disconnect()
       app.destroy({ removeView: true }, { children: true })
     })
