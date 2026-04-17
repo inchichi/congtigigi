@@ -57,6 +57,20 @@ describe('parseTiledMap', () => {
         source: 'tiny-dungeon-16.png',
         width: 192,
         height: 176
+      },
+      tileProperties: {
+        0: {
+          wall: true
+        },
+        4: {
+          wall: true
+        },
+        27: {
+          wall: true
+        },
+        59: {
+          wall: true
+        }
       }
     })
     expect(map.layers[0].tiles[0]).toMatchObject({

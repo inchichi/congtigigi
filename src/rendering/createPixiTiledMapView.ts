@@ -5,8 +5,7 @@ import {
   Container,
   Rectangle,
   Sprite,
-  Texture,
-  groupD8
+  Texture
 } from 'pixi.js'
 
 import {
@@ -14,11 +13,19 @@ import {
   movePlayerState
 } from '../game/playerState'
 import type { PlayerState } from '../game/playerState'
+import {
+  createWallTileLookup,
+  isWallTileAt
+} from '../game/tiled/createWallTileLookup'
 import type {
   ParsedTiledMap,
   ParsedTiledTile,
   ParsedTiledTileset
 } from '../game/tiled/parseTiledMap'
+import {
+  getSpriteTransformForTile,
+  hasTileTransform
+} from './tiledSpriteTransform'
 
 type CreatePixiTiledMapViewInput = {
   mountElement: HTMLElement
@@ -45,6 +52,7 @@ export const createPixiTiledMapView = async ({
     autoDensity: true,
     backgroundColor: 0x171311,
     preference: 'webgl',
+    roundPixels: true,
     resizeTo: mountElement,
     resolution: window.devicePixelRatio || 1
   })
@@ -54,6 +62,7 @@ export const createPixiTiledMapView = async ({
 
   const world = new Container()
   const tilesetResources = new Map<string, TilesetRenderResources>()
+  const wallTiles = createWallTileLookup(map)
 
   app.stage.addChild(world)
 
@@ -66,10 +75,14 @@ export const createPixiTiledMapView = async ({
 
   for (const layer of map.layers) {
     const tilemap = new CompositeTilemap()
+    const transformedTileLayer = new Container()
 
     tilemap.label = `layer:${layer.name}`
     tilemap.alpha = layer.opacity
     tilemap.visible = layer.visible
+    transformedTileLayer.label = `layer:${layer.name}:transforms`
+    transformedTileLayer.alpha = layer.opacity
+    transformedTileLayer.visible = layer.visible
 
     for (const tile of layer.tiles) {
       const tileset = resolveTilesetForTile(tile, map.tilesets)
@@ -79,17 +92,27 @@ export const createPixiTiledMapView = async ({
         throw new Error(`Missing render resources for tileset ${tileset.source}`)
       }
 
+      if (hasTileTransform(tile)) {
+        transformedTileLayer.addChild(
+          createTransformedTileSprite(
+            renderResources.tileTextures[tile.localId],
+            tile,
+            map.tileWidth,
+            map.tileHeight
+          )
+        )
+        continue
+      }
+
       tilemap.tile(
         renderResources.tileTextures[tile.localId],
         tile.x * map.tileWidth,
-        tile.y * map.tileHeight,
-        {
-          rotate: toPixiTileRotation(tile)
-        }
+        tile.y * map.tileHeight
       )
     }
 
     world.addChild(tilemap)
+    world.addChild(transformedTileLayer)
   }
 
   const playerTileset = map.tilesets[0]
@@ -132,6 +155,10 @@ export const createPixiTiledMapView = async ({
       mapWidth: map.width,
       mapHeight: map.height
     })
+
+    if (isWallTileAt(wallTiles, nextPlayerState.position.x, nextPlayerState.position.y)) {
+      return
+    }
 
     playerState = nextPlayerState
     syncPlayerSpritePosition()
@@ -187,6 +214,9 @@ const loadTilesetRenderResources = async (
   }
 
   const imageTexture = await Assets.load<Texture>(imageUrl)
+
+  imageTexture.source.scaleMode = 'nearest'
+  imageTexture.source.wrapMode = 'clamp-to-edge'
   const tileTextures = Array.from(
     { length: tileset.tileCount },
     (_, localId) => createTileTexture(imageTexture, tileset, localId)
@@ -237,34 +267,23 @@ const resolveTilesetForTile = (
   throw new Error(`Could not resolve tileset for gid ${tile.gid}`)
 }
 
-const toPixiTileRotation = (tile: ParsedTiledTile): number => {
-  if (tile.flipDiagonally) {
-    if (tile.flipHorizontally && tile.flipVertically) {
-      return groupD8.REVERSE_DIAGONAL
-    }
+const createTransformedTileSprite = (
+  texture: Texture,
+  tile: ParsedTiledTile,
+  tileWidth: number,
+  tileHeight: number
+): Sprite => {
+  const sprite = new Sprite(texture)
+  const transform = getSpriteTransformForTile(tile)
 
-    if (tile.flipHorizontally) {
-      return groupD8.S
-    }
+  sprite.anchor.set(0.5)
+  sprite.position.set(
+    tile.x * tileWidth + tileWidth / 2,
+    tile.y * tileHeight + tileHeight / 2
+  )
+  sprite.rotation = transform.rotation
+  sprite.scale.set(transform.scaleX, transform.scaleY)
+  sprite.roundPixels = true
 
-    if (tile.flipVertically) {
-      return groupD8.N
-    }
-
-    return groupD8.MAIN_DIAGONAL
-  }
-
-  if (tile.flipHorizontally && tile.flipVertically) {
-    return groupD8.W
-  }
-
-  if (tile.flipHorizontally) {
-    return groupD8.MIRROR_HORIZONTAL
-  }
-
-  if (tile.flipVertically) {
-    return groupD8.MIRROR_VERTICAL
-  }
-
-  return groupD8.E
+  return sprite
 }

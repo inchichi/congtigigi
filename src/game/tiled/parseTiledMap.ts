@@ -30,6 +30,8 @@ export type ParsedTiledLayer = {
   tiles: ParsedTiledTile[]
 }
 
+export type ParsedTiledPropertyValue = boolean | number | string
+
 export type ParsedTiledTileset = {
   firstGid: number
   source: string
@@ -45,6 +47,7 @@ export type ParsedTiledTileset = {
     width: number
     height: number
   }
+  tileProperties: Record<number, Record<string, ParsedTiledPropertyValue>>
 }
 
 export type ParsedTiledMap = {
@@ -155,6 +158,28 @@ const parseTileset = ({
   }
 
   const imageElement = getRequiredDirectChildElement(tilesetElement, 'image')
+  const tileProperties = Object.fromEntries(
+    getDirectChildElements(tilesetElement, 'tile')
+      .map((tileElement) => {
+        const id = getRequiredNumberAttribute(tileElement, 'id')
+        const propertiesElement = getDirectChildElements(tileElement, 'properties')[0]
+
+        if (!propertiesElement) {
+          return undefined
+        }
+
+        const properties = parseProperties(propertiesElement)
+
+        if (Object.keys(properties).length === 0) {
+          return undefined
+        }
+
+        return [id, properties] as const
+      })
+      .filter((entry): entry is readonly [number, Record<string, ParsedTiledPropertyValue>] =>
+        entry !== undefined
+      )
+  )
 
   return {
     firstGid,
@@ -170,7 +195,8 @@ const parseTileset = ({
       source: getRequiredAttribute(imageElement, 'source'),
       width: getRequiredNumberAttribute(imageElement, 'width'),
       height: getRequiredNumberAttribute(imageElement, 'height')
-    }
+    },
+    tileProperties
   }
 }
 
@@ -259,6 +285,32 @@ const parseCsvData = (
   }
 
   return values
+}
+
+const parseProperties = (
+  propertiesElement: Element
+): Record<string, ParsedTiledPropertyValue> =>
+  Object.fromEntries(
+    getDirectChildElements(propertiesElement, 'property').map((propertyElement) => [
+      getRequiredAttribute(propertyElement, 'name'),
+      parsePropertyValue(propertyElement)
+    ])
+  )
+
+const parsePropertyValue = (propertyElement: Element): ParsedTiledPropertyValue => {
+  const type = propertyElement.getAttribute('type') ?? 'string'
+  const rawValue =
+    propertyElement.getAttribute('value') ?? getElementTextContent(propertyElement)
+
+  switch (type) {
+    case 'bool':
+      return rawValue === 'true'
+    case 'int':
+    case 'float':
+      return Number(rawValue)
+    default:
+      return rawValue
+  }
 }
 
 const resolveTileset = (
