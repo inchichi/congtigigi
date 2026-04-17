@@ -8,6 +8,9 @@ This document is a short guide for module boundaries and code placement.
 - `src/assets/`: runtime assets that are imported by the web client.
 - `src/game/`: pure game or engine logic that should stay easy to test with Vitest.
 - `src/rendering/`: PixiJS rendering code and asset-to-view adaptation.
+- `scripts/`: project automation scripts such as third-party fetch/build steps.
+- `third_party/`: vendored external source code kept in-repo for deterministic builds.
+- `public/vendor/`: generated static artifacts served as-is by Vite.
 
 ## Boundary Rules
 

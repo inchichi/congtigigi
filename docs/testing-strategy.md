@@ -36,4 +36,7 @@
 
 - Run related Vitest tests by default instead of the full suite.
 - Run the full suite only when the change has wide impact or the requester clearly asks for it.
+- Lua WebAssembly compatibility checks are opt-in.
+  Run `npm run lua:test` only when you explicitly want to validate the Lua runtime against the official Lua 5.3 basic tests.
+  Do not add `lua:test` to the normal `check` flow.
 - For docs-only changes, a manual review is enough unless the document changes an executable workflow.

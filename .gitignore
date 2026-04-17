@@ -17,6 +17,9 @@ dist/
 node_modules/
 *.log
 *.tsbuildinfo
+public/vendor/lua/*
+!public/vendor/lua/lua-5.3.6.mjs
+!public/vendor/lua/lua-5.3.6.wasm
 
 notes/*
 !notes/.gitkeep

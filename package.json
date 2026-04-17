@@ -9,7 +9,11 @@
     "preview": "vite preview",
     "test": "vitest",
     "test:run": "vitest run",
-    "check": "tsc --noEmit && vitest run"
+    "check": "tsc --noEmit && vitest run",
+    "lua:fetch": "node scripts/fetch-lua.mjs",
+    "lua:build": "node scripts/build-lua-wasm.mjs",
+    "lua:sync": "npm run lua:fetch && npm run lua:build",
+    "lua:test": "node scripts/fetch-lua-tests.mjs && node scripts/test-lua-wasm.mjs"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
