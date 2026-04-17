@@ -1,0 +1,22 @@
+# Git Rules
+
+- Write commit messages in simple English.
+- Do not use emojis in commit messages.
+- Do not mention AI agents in commit messages.
+- Use Conventional Commits for commit messages.
+  - For multi-line commit messages, use the standard format: one Conventional Commit title line, one blank line, then the body.
+  - Structure the body with `-` list items when needed. Write a body only when it adds value.
+- Do not use fast-forward merges. Use feature branches and merge them with a merge commit, for example `git merge --no-ff`.
+- Use a Git Flow-style branch model. It does not need to be strict Git Flow, but it should follow the same idea.
+  - `master`: keep it always releasable. Merge into it only from `release/...` branches and hotfix work.
+  - `develop`: use it as the main integration branch and the base branch for normal work.
+  - `feature/...`: branch from `develop`, merge back into `develop`, then delete the branch.
+  - `fix/...`: branch from `develop`, merge back into `develop`, then delete the branch.
+  - `release/...`: branch from `develop`, stabilize the release, then merge into both `master` and `develop`. Create release tags on `master`, for example `v0.1.0`.
+  - For production hotfixes, branch from `master` with `fix/<short-name>`, then merge back into both `master` and `develop`.
+  - Other common names such as `chore/...` are also allowed.
+  - These rules are guidelines. Apply them with judgment for the situation.
+- Store large binary assets with Git LFS.
+- Use lowercase letters and hyphens in branch names.
+  - Include an issue ID when possible, but do not use only the issue ID. Add a short description, for example `fix/ISSUE-42-the-ultimate-answer`.
+- If feature work needs a document update, include the document change in the same commit. Do not collect documentation-only commits separately for that work.
