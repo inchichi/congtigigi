@@ -1,0 +1,11 @@
+.DS_Store
+.serena/
+.vite/
+coverage/
+dist/
+node_modules/
+*.log
+*.tsbuildinfo
+
+notes/*
+!notes/.gitkeep
