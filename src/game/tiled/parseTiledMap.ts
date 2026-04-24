@@ -32,6 +32,27 @@ export type ParsedTiledLayer = {
 
 export type ParsedTiledPropertyValue = boolean | number | string
 
+export type ParsedTiledEvent = {
+  id: number
+  name: string
+  className: string
+  x: number
+  y: number
+  width: number
+  height: number
+  visible: boolean
+  properties: Record<string, ParsedTiledPropertyValue>
+  appearanceType?: string
+}
+
+export type ParsedTiledEventLayer = {
+  id: number
+  name: string
+  opacity: number
+  visible: boolean
+  events: ParsedTiledEvent[]
+}
+
 export type ParsedTiledTileset = {
   firstGid: number
   source: string
@@ -47,6 +68,7 @@ export type ParsedTiledTileset = {
     width: number
     height: number
   }
+  tileTypes: Record<number, string>
   tileProperties: Record<number, Record<string, ParsedTiledPropertyValue>>
 }
 
@@ -58,6 +80,7 @@ export type ParsedTiledMap = {
   pixelWidth: number
   pixelHeight: number
   layers: ParsedTiledLayer[]
+  eventLayers: ParsedTiledEventLayer[]
   tilesets: ParsedTiledTileset[]
 }
 
@@ -116,7 +139,7 @@ export const parseTiledMap = ({
         throw new Error(`Missing external TSX content for ${source}`)
       }
 
-      return parseTileset({ firstGid, source, tilesetXml })
+      return parseTiledTileset({ firstGid, source, tilesetXml })
     })
     .sort((left, right) => left.firstGid - right.firstGid)
 
@@ -128,6 +151,9 @@ export const parseTiledMap = ({
       tilesets
     })
   )
+  const eventLayers = getDirectChildElements(mapElement, 'objectgroup').map(
+    (objectGroupElement) => parseEventLayer(objectGroupElement)
+  )
 
   return {
     width,
@@ -137,11 +163,12 @@ export const parseTiledMap = ({
     pixelWidth: width * tileWidth,
     pixelHeight: height * tileHeight,
     layers,
+    eventLayers,
     tilesets
   }
 }
 
-const parseTileset = ({
+export const parseTiledTileset = ({
   firstGid,
   source,
   tilesetXml
@@ -158,6 +185,21 @@ const parseTileset = ({
   }
 
   const imageElement = getRequiredDirectChildElement(tilesetElement, 'image')
+  const tileTypes = Object.fromEntries(
+    getDirectChildElements(tilesetElement, 'tile')
+      .map((tileElement) => {
+        const type =
+          getStringAttribute(tileElement, 'class') ??
+          getStringAttribute(tileElement, 'type')
+
+        if (!type) {
+          return undefined
+        }
+
+        return [getRequiredNumberAttribute(tileElement, 'id'), type] as const
+      })
+      .filter((entry): entry is readonly [number, string] => entry !== undefined)
+  )
   const tileProperties = Object.fromEntries(
     getDirectChildElements(tilesetElement, 'tile')
       .map((tileElement) => {
@@ -196,6 +238,7 @@ const parseTileset = ({
       width: getRequiredNumberAttribute(imageElement, 'width'),
       height: getRequiredNumberAttribute(imageElement, 'height')
     },
+    tileTypes,
     tileProperties
   }
 }
@@ -262,6 +305,42 @@ const parseLayer = ({
     opacity: getNumberAttribute(layerElement, 'opacity', 1),
     visible: getNumberAttribute(layerElement, 'visible', 1) !== 0,
     tiles
+  }
+}
+
+const parseEventLayer = (objectGroupElement: Element): ParsedTiledEventLayer => ({
+  id: getRequiredNumberAttribute(objectGroupElement, 'id'),
+  name: getRequiredAttribute(objectGroupElement, 'name'),
+  opacity: getNumberAttribute(objectGroupElement, 'opacity', 1),
+  visible: getNumberAttribute(objectGroupElement, 'visible', 1) !== 0,
+  events: getDirectChildElements(objectGroupElement, 'object').map((objectElement) =>
+    parseEvent(objectElement)
+  )
+})
+
+const parseEvent = (objectElement: Element): ParsedTiledEvent => {
+  const propertiesElement = getDirectChildElements(objectElement, 'properties')[0]
+  const properties = propertiesElement ? parseProperties(propertiesElement) : {}
+  const className =
+    getStringAttribute(objectElement, 'class') ??
+    getStringAttribute(objectElement, 'type') ??
+    ''
+  const appearanceType =
+    className === 'character' && typeof properties.type === 'string'
+      ? properties.type
+      : undefined
+
+  return {
+    id: getRequiredNumberAttribute(objectElement, 'id'),
+    name: getStringAttribute(objectElement, 'name') ?? '',
+    className,
+    x: getNumberAttribute(objectElement, 'x', 0),
+    y: getNumberAttribute(objectElement, 'y', 0),
+    width: getNumberAttribute(objectElement, 'width', 0),
+    height: getNumberAttribute(objectElement, 'height', 0),
+    visible: getNumberAttribute(objectElement, 'visible', 1) !== 0,
+    properties,
+    appearanceType
   }
 }
 
@@ -339,6 +418,19 @@ const getRequiredAttribute = (element: Element, attributeName: string): string =
     throw new Error(
       `Missing required attribute "${attributeName}" on <${element.nodeName}>`
     )
+  }
+
+  return attributeValue
+}
+
+const getStringAttribute = (
+  element: Element,
+  attributeName: string
+): string | undefined => {
+  const attributeValue = element.getAttribute(attributeName)
+
+  if (attributeValue === null || attributeValue.length === 0) {
+    return undefined
   }
 
   return attributeValue

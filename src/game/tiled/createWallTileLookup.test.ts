@@ -77,9 +77,11 @@ describe('createWallTileLookup', () => {
             width: 32,
             height: 16
           },
+          tileTypes: {},
           tileProperties: {}
         }
-      ]
+      ],
+      eventLayers: []
     }
 
     const wallTiles = createWallTileLookup(map)
