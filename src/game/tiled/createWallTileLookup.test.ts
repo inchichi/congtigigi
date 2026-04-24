@@ -4,7 +4,7 @@ import { createWallTileLookup, isWallTileAt } from './createWallTileLookup'
 import type { ParsedTiledMap } from './parseTiledMap'
 
 describe('createWallTileLookup', () => {
-  it('marks coordinates that use wall tileset properties', () => {
+  it('marks coordinates occupied by the object layer', () => {
     const map: ParsedTiledMap = {
       width: 2,
       height: 2,
@@ -30,6 +30,25 @@ describe('createWallTileLookup', () => {
               flipVertically: false,
               flipDiagonally: false
             },
+            {
+              x: 0,
+              y: 0,
+              gid: 2,
+              localId: 1,
+              flipHorizontally: false,
+              flipVertically: false,
+              flipDiagonally: false
+            }
+          ]
+        },
+        {
+          id: 2,
+          name: 'object',
+          width: 2,
+          height: 2,
+          opacity: 1,
+          visible: true,
+          tiles: [
             {
               x: 1,
               y: 0,
@@ -58,11 +77,7 @@ describe('createWallTileLookup', () => {
             width: 32,
             height: 16
           },
-          tileProperties: {
-            1: {
-              wall: true
-            }
-          }
+          tileProperties: {}
         }
       ]
     }
