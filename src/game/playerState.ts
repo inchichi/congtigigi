@@ -1,4 +1,5 @@
 export const HERO_TILE_LOCAL_ID = 98
+export const PLAYER_MOVE_SPEED_TILES_PER_SECOND = 8
 
 export type PlayerMoveDirection = 'up' | 'down' | 'left' | 'right'
 
@@ -17,9 +18,14 @@ type CreateInitialPlayerStateInput = {
 
 type MovePlayerStateInput = {
   player: PlayerState
-  direction: PlayerMoveDirection
+  delta: {
+    x: number
+    y: number
+  }
   mapWidth: number
   mapHeight: number
+  playerWidth?: number
+  playerHeight?: number
 }
 
 export const createInitialPlayerState = ({
@@ -52,33 +58,15 @@ export const getPlayerMoveDirectionFromKey = (
 
 export const movePlayerState = ({
   player,
-  direction,
+  delta,
   mapWidth,
-  mapHeight
+  mapHeight,
+  playerWidth = 1,
+  playerHeight = 1
 }: MovePlayerStateInput): PlayerState => {
-  const nextPosition = {
-    x: player.position.x,
-    y: player.position.y
-  }
-
-  switch (direction) {
-    case 'up':
-      nextPosition.y -= 1
-      break
-    case 'down':
-      nextPosition.y += 1
-      break
-    case 'left':
-      nextPosition.x -= 1
-      break
-    case 'right':
-      nextPosition.x += 1
-      break
-  }
-
   const clampedPosition = {
-    x: clamp(nextPosition.x, 0, mapWidth - 1),
-    y: clamp(nextPosition.y, 0, mapHeight - 1)
+    x: clamp(player.position.x + delta.x, 0, mapWidth - playerWidth),
+    y: clamp(player.position.y + delta.y, 0, mapHeight - playerHeight)
   }
 
   if (

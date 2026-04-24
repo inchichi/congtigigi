@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import {
   HERO_TILE_LOCAL_ID,
+  PLAYER_MOVE_SPEED_TILES_PER_SECOND,
   createInitialPlayerState,
   getPlayerMoveDirectionFromKey,
   movePlayerState
@@ -38,7 +39,7 @@ describe('getPlayerMoveDirectionFromKey', () => {
 })
 
 describe('movePlayerState', () => {
-  it('moves the player one tile in the requested direction', () => {
+  it('moves the player by a continuous delta', () => {
     expect(
       movePlayerState({
         player: {
@@ -48,15 +49,18 @@ describe('movePlayerState', () => {
             y: 10
           }
         },
-        direction: 'left',
+        delta: {
+          x: -PLAYER_MOVE_SPEED_TILES_PER_SECOND / 4,
+          y: PLAYER_MOVE_SPEED_TILES_PER_SECOND / 8
+        },
         mapWidth: 32,
         mapHeight: 20
       })
     ).toEqual({
       tileLocalId: HERO_TILE_LOCAL_ID,
       position: {
-        x: 15,
-        y: 10
+        x: 14,
+        y: 11
       }
     })
   })
@@ -71,7 +75,10 @@ describe('movePlayerState', () => {
             y: 0
           }
         },
-        direction: 'up',
+        delta: {
+          x: -1,
+          y: -1
+        },
         mapWidth: 32,
         mapHeight: 20
       })
@@ -80,6 +87,34 @@ describe('movePlayerState', () => {
       position: {
         x: 0,
         y: 0
+      }
+    })
+  })
+
+  it('keeps the full player footprint inside the map bounds', () => {
+    expect(
+      movePlayerState({
+        player: {
+          tileLocalId: HERO_TILE_LOCAL_ID,
+          position: {
+            x: 31,
+            y: 19
+          }
+        },
+        delta: {
+          x: 1,
+          y: 1
+        },
+        mapWidth: 32,
+        mapHeight: 20,
+        playerWidth: 1,
+        playerHeight: 1
+      })
+    ).toEqual({
+      tileLocalId: HERO_TILE_LOCAL_ID,
+      position: {
+        x: 31,
+        y: 19
       }
     })
   })

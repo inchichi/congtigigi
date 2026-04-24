@@ -9,10 +9,11 @@ import {
 } from 'pixi.js'
 
 import {
+  PLAYER_MOVE_SPEED_TILES_PER_SECOND,
   getPlayerMoveDirectionFromKey,
   movePlayerState
 } from '../game/playerState'
-import type { PlayerState } from '../game/playerState'
+import type { PlayerMoveDirection, PlayerState } from '../game/playerState'
 import {
   createWallTileLookup,
   isWallTileAt
@@ -68,10 +69,11 @@ export const createPixiTiledMapView = async ({
     antialias: false,
     autoDensity: true,
     backgroundColor: 0x171311,
+    height: map.pixelHeight,
     preference: 'webgl',
     roundPixels: true,
-    resizeTo: mountElement,
-    resolution: window.devicePixelRatio || 1
+    resolution: window.devicePixelRatio || 1,
+    width: map.pixelWidth
   })
 
   mountElement.replaceChildren(app.canvas)
@@ -141,6 +143,11 @@ export const createPixiTiledMapView = async ({
     scaleMode: 'nearest'
   })
   const playerSprite = new Sprite(playerTexture)
+  const playerPixelWidth = playerSpriteSheet.tileWidth * playerSpriteSheet.scale
+  const playerPixelHeight = playerSpriteSheet.tileHeight * playerSpriteSheet.scale
+  const playerWidthInTiles = playerPixelWidth / map.tileWidth
+  const playerHeightInTiles = playerPixelHeight / map.tileHeight
+  const pressedDirections = new Set<PlayerMoveDirection>()
   let playerState = player
 
   playerSprite.label = 'player'
@@ -155,6 +162,164 @@ export const createPixiTiledMapView = async ({
     )
   }
 
+  const centerViewportOnPlayer = () => {
+    const playerCenterX =
+      playerState.position.x * map.tileWidth + playerPixelWidth / 2
+    const playerCenterY =
+      playerState.position.y * map.tileHeight + playerPixelHeight / 2
+    const nextScrollLeft = clampScrollOffset(
+      playerCenterX - mountElement.clientWidth / 2,
+      map.pixelWidth - mountElement.clientWidth
+    )
+    const nextScrollTop = clampScrollOffset(
+      playerCenterY - mountElement.clientHeight / 2,
+      map.pixelHeight - mountElement.clientHeight
+    )
+
+    mountElement.scrollTo({
+      left: nextScrollLeft,
+      top: nextScrollTop
+    })
+  }
+
+  const keepPlayerVisible = () => {
+    const playerLeft = playerState.position.x * map.tileWidth
+    const playerTop = playerState.position.y * map.tileHeight
+    const playerRight = playerLeft + playerPixelWidth
+    const playerBottom = playerTop + playerPixelHeight
+    const viewportLeft = mountElement.scrollLeft
+    const viewportTop = mountElement.scrollTop
+    const viewportWidth = mountElement.clientWidth
+    const viewportHeight = mountElement.clientHeight
+    const viewportRight = viewportLeft + viewportWidth
+    const viewportBottom = viewportTop + viewportHeight
+    const horizontalMargin = Math.floor(viewportWidth * 0.3)
+    const verticalMargin = Math.floor(viewportHeight * 0.3)
+    const deadZoneLeft = viewportLeft + horizontalMargin
+    const deadZoneRight = viewportRight - horizontalMargin
+    const deadZoneTop = viewportTop + verticalMargin
+    const deadZoneBottom = viewportBottom - verticalMargin
+    let nextScrollLeft = viewportLeft
+    let nextScrollTop = viewportTop
+
+    if (playerLeft < deadZoneLeft) {
+      nextScrollLeft = clampScrollOffset(
+        playerLeft - horizontalMargin,
+        map.pixelWidth - viewportWidth
+      )
+    } else if (playerRight > deadZoneRight) {
+      nextScrollLeft = clampScrollOffset(
+        playerRight + horizontalMargin - viewportWidth,
+        map.pixelWidth - viewportWidth
+      )
+    }
+
+    if (playerTop < deadZoneTop) {
+      nextScrollTop = clampScrollOffset(
+        playerTop - verticalMargin,
+        map.pixelHeight - viewportHeight
+      )
+    } else if (playerBottom > deadZoneBottom) {
+      nextScrollTop = clampScrollOffset(
+        playerBottom + verticalMargin - viewportHeight,
+        map.pixelHeight - viewportHeight
+      )
+    }
+
+    if (
+      nextScrollLeft !== viewportLeft ||
+      nextScrollTop !== viewportTop
+    ) {
+      mountElement.scrollTo({
+        left: nextScrollLeft,
+        top: nextScrollTop
+      })
+    }
+  }
+
+  const tryMovePlayer = (deltaX: number, deltaY: number) => {
+    let nextPlayerState = playerState
+
+    if (deltaX !== 0) {
+      const nextXState = movePlayerState({
+        player: nextPlayerState,
+        delta: {
+          x: deltaX,
+          y: 0
+        },
+        mapWidth: map.width,
+        mapHeight: map.height,
+        playerWidth: playerWidthInTiles,
+        playerHeight: playerHeightInTiles
+      })
+
+      if (
+        !isPlayerPositionBlocked(
+          wallTiles,
+          nextXState.position.x,
+          nextXState.position.y,
+          playerWidthInTiles,
+          playerHeightInTiles
+        )
+      ) {
+        nextPlayerState = nextXState
+      }
+    }
+
+    if (deltaY !== 0) {
+      const nextYState = movePlayerState({
+        player: nextPlayerState,
+        delta: {
+          x: 0,
+          y: deltaY
+        },
+        mapWidth: map.width,
+        mapHeight: map.height,
+        playerWidth: playerWidthInTiles,
+        playerHeight: playerHeightInTiles
+      })
+
+      if (
+        !isPlayerPositionBlocked(
+          wallTiles,
+          nextYState.position.x,
+          nextYState.position.y,
+          playerWidthInTiles,
+          playerHeightInTiles
+        )
+      ) {
+        nextPlayerState = nextYState
+      }
+    }
+
+    if (
+      nextPlayerState.position.x === playerState.position.x &&
+      nextPlayerState.position.y === playerState.position.y
+    ) {
+      return
+    }
+
+    playerState = nextPlayerState
+    syncPlayerSpritePosition()
+    keepPlayerVisible()
+  }
+
+  const updatePlayer = () => {
+    const movement = getNormalizedMovementVector(pressedDirections)
+
+    if (!movement) {
+      return
+    }
+
+    const distanceInTiles =
+      (PLAYER_MOVE_SPEED_TILES_PER_SECOND * app.ticker.deltaMS) / 1000
+
+    tryMovePlayer(
+      movement.x * distanceInTiles,
+      movement.y * distanceInTiles
+    )
+  }
+
   const handleKeyDown = (event: KeyboardEvent) => {
     const direction = getPlayerMoveDirectionFromKey(event.key)
 
@@ -163,53 +328,36 @@ export const createPixiTiledMapView = async ({
     }
 
     event.preventDefault()
-    const nextPlayerState = movePlayerState({
-      player: playerState,
-      direction,
-      mapWidth: map.width,
-      mapHeight: map.height
-    })
+    pressedDirections.add(direction)
+  }
 
-    if (isWallTileAt(wallTiles, nextPlayerState.position.x, nextPlayerState.position.y)) {
+  const handleKeyUp = (event: KeyboardEvent) => {
+    const direction = getPlayerMoveDirectionFromKey(event.key)
+
+    if (!direction) {
       return
     }
 
-    playerState = nextPlayerState
-    syncPlayerSpritePosition()
+    pressedDirections.delete(direction)
+  }
+
+  const handleWindowBlur = () => {
+    pressedDirections.clear()
   }
 
   window.addEventListener('keydown', handleKeyDown)
+  window.addEventListener('keyup', handleKeyUp)
+  window.addEventListener('blur', handleWindowBlur)
+  app.ticker.add(updatePlayer)
   syncPlayerSpritePosition()
-
-  const layoutWorld = () => {
-    const availableWidth = app.screen.width
-    const availableHeight = app.screen.height
-    const fittedScale = Math.min(
-      availableWidth / map.pixelWidth,
-      availableHeight / map.pixelHeight
-    )
-    const scale = fittedScale >= 1 ? Math.max(1, Math.floor(fittedScale)) : fittedScale
-    const scaledWidth = map.pixelWidth * scale
-    const scaledHeight = map.pixelHeight * scale
-
-    world.scale.set(scale)
-    world.position.set(
-      Math.round((availableWidth - scaledWidth) / 2),
-      Math.round((availableHeight - scaledHeight) / 2)
-    )
-  }
-
-  const resizeObserver = new ResizeObserver(() => {
-    layoutWorld()
-  })
-
-  resizeObserver.observe(mountElement)
-  layoutWorld()
+  centerViewportOnPlayer()
 
   if (import.meta.hot) {
     import.meta.hot.dispose(() => {
       window.removeEventListener('keydown', handleKeyDown)
-      resizeObserver.disconnect()
+      window.removeEventListener('keyup', handleKeyUp)
+      window.removeEventListener('blur', handleWindowBlur)
+      app.ticker.remove(updatePlayer)
       app.destroy({ removeView: true }, { children: true })
     })
   }
@@ -229,7 +377,6 @@ const loadTilesetRenderResources = async (
 
   const imageTexture = await Assets.load<Texture>(imageUrl)
 
-  imageTexture.source.scaleMode = 'nearest'
   imageTexture.source.wrapMode = 'clamp-to-edge'
   const tileTextures = Array.from(
     { length: tileset.tileCount },
@@ -281,6 +428,9 @@ const resolveTilesetForTile = (
   throw new Error(`Could not resolve tileset for gid ${tile.gid}`)
 }
 
+const clampScrollOffset = (value: number, max: number): number =>
+  Math.max(0, Math.min(Math.round(value), Math.max(0, max)))
+
 const loadStandaloneTileTexture = async ({
   imageUrl,
   tileWidth,
@@ -312,6 +462,64 @@ const loadStandaloneTileTexture = async ({
     },
     localId
   )
+}
+
+const getNormalizedMovementVector = (
+  pressedDirections: Set<PlayerMoveDirection>
+): { x: number; y: number } | undefined => {
+  let x = 0
+  let y = 0
+
+  if (pressedDirections.has('left')) {
+    x -= 1
+  }
+
+  if (pressedDirections.has('right')) {
+    x += 1
+  }
+
+  if (pressedDirections.has('up')) {
+    y -= 1
+  }
+
+  if (pressedDirections.has('down')) {
+    y += 1
+  }
+
+  if (x === 0 && y === 0) {
+    return undefined
+  }
+
+  const magnitude = Math.hypot(x, y)
+
+  return {
+    x: x / magnitude,
+    y: y / magnitude
+  }
+}
+
+const isPlayerPositionBlocked = (
+  wallTiles: Set<string>,
+  x: number,
+  y: number,
+  width: number,
+  height: number
+): boolean => {
+  const epsilon = 1e-6
+  const minTileX = Math.floor(x + epsilon)
+  const maxTileX = Math.floor(x + width - epsilon)
+  const minTileY = Math.floor(y + epsilon)
+  const maxTileY = Math.floor(y + height - epsilon)
+
+  for (let tileY = minTileY; tileY <= maxTileY; tileY += 1) {
+    for (let tileX = minTileX; tileX <= maxTileX; tileX += 1) {
+      if (isWallTileAt(wallTiles, tileX, tileY)) {
+        return true
+      }
+    }
+  }
+
+  return false
 }
 
 const createTransformedTileSprite = (
