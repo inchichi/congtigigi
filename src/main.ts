@@ -4,7 +4,11 @@ import townTilesetUrl from './assets/tilesets/town-32.png'
 import tinyDungeonTilesetXml from './assets/tilesets/tiny-dungeon-16.tsx?raw'
 import tinyDungeonTilesetUrl from './assets/tilesets/tiny-dungeon-16.png'
 
-import { createInitialPlayerState } from './game/playerState'
+import {
+  PLAYER_CHARACTER_ID,
+  createInitialPlayerCharacter
+} from './game/characterState'
+import { createNpcCharactersFromEventLayers } from './game/tiled/createNpcCharactersFromEventLayers'
 import { parseTiledMap, parseTiledTileset } from './game/tiled/parseTiledMap'
 import { createPixiTiledMapView } from './rendering/createPixiTiledMapView'
 import './styles.css'
@@ -21,15 +25,23 @@ const parsedTownMap = parseTiledMap({
     '../tilesets/town-32.tsx': townTilesetXml
   }
 })
-const initialPlayerState = createInitialPlayerState({
-  mapWidth: parsedTownMap.width,
-  mapHeight: parsedTownMap.height
-})
 const tinyDungeonTileset = parseTiledTileset({
   firstGid: 1,
   source: '../tilesets/tiny-dungeon-16.tsx',
   tilesetXml: tinyDungeonTilesetXml
 })
+const characterSpriteScale = 2
+const initialCharacters = [
+  createInitialPlayerCharacter({
+    mapWidth: parsedTownMap.width,
+    mapHeight: parsedTownMap.height
+  }),
+  ...createNpcCharactersFromEventLayers({
+    map: parsedTownMap,
+    defaultPixelWidth: tinyDungeonTileset.tileWidth * characterSpriteScale,
+    defaultPixelHeight: tinyDungeonTileset.tileHeight * characterSpriteScale
+  })
+]
 
 rootElement.className = 'game-root'
 
@@ -37,18 +49,11 @@ const bootstrap = async () => {
   await createPixiTiledMapView({
     mountElement: rootElement,
     map: parsedTownMap,
-    player: initialPlayerState,
-    playerSpriteSheet: {
-      imageUrl: tinyDungeonTilesetUrl,
-      tileWidth: 16,
-      tileHeight: 16,
-      columns: 12,
-      localId: initialPlayerState.tileLocalId,
-      scale: 2
-    },
-    eventSpriteSheet: {
+    characters: initialCharacters,
+    cameraTargetCharacterId: PLAYER_CHARACTER_ID,
+    characterSpriteSheet: {
       tileset: tinyDungeonTileset,
-      scale: 2
+      scale: characterSpriteScale
     },
     imageUrls: {
       'town-32.png': townTilesetUrl,

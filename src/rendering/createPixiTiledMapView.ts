@@ -9,11 +9,14 @@ import {
 } from 'pixi.js'
 
 import {
-  PLAYER_MOVE_SPEED_TILES_PER_SECOND,
-  getPlayerMoveDirectionFromKey,
-  movePlayerState
-} from '../game/playerState'
-import type { PlayerMoveDirection, PlayerState } from '../game/playerState'
+  getCharacterControllerDelta,
+  getCharacterMoveDirectionFromKey,
+  moveCharacterState
+} from '../game/characterState'
+import type {
+  CharacterMoveDirection,
+  CharacterState
+} from '../game/characterState'
 import {
   createWallTileLookup,
   isWallTileAt
@@ -31,16 +34,9 @@ import {
 type CreatePixiTiledMapViewInput = {
   mountElement: HTMLElement
   map: ParsedTiledMap
-  player: PlayerState
-  playerSpriteSheet: {
-    imageUrl: string
-    tileWidth: number
-    tileHeight: number
-    columns: number
-    localId: number
-    scale: number
-  }
-  eventSpriteSheet: {
+  characters: CharacterState[]
+  cameraTargetCharacterId: string
+  characterSpriteSheet: {
     tileset: ParsedTiledTileset
     scale: number
   }
@@ -72,9 +68,9 @@ const DEPTH_SORTED_LAYER_NAME = 'object'
 export const createPixiTiledMapView = async ({
   mountElement,
   map,
-  player,
-  playerSpriteSheet,
-  eventSpriteSheet,
+  characters,
+  cameraTargetCharacterId,
+  characterSpriteSheet,
   imageUrls
 }: CreatePixiTiledMapViewInput): Promise<Application> => {
   const app = new Application()
@@ -96,6 +92,18 @@ export const createPixiTiledMapView = async ({
   const world = new Container()
   const tilesetResources = new Map<string, TilesetRenderResources>()
   const wallTiles = createWallTileLookup(map)
+  const pressedDirections = new Set<CharacterMoveDirection>()
+  const renderedCharacters = new Map<string, Sprite>()
+  const characterPixelWidth =
+    characterSpriteSheet.tileset.tileWidth * characterSpriteSheet.scale
+  const characterPixelHeight =
+    characterSpriteSheet.tileset.tileHeight * characterSpriteSheet.scale
+  let depthSortedLayer: Container | undefined
+  let characterStates = characters.map((character) => ({
+    ...character,
+    position: { ...character.position },
+    collisionSize: { ...character.collisionSize }
+  }))
 
   app.stage.addChild(world)
 
@@ -105,33 +113,11 @@ export const createPixiTiledMapView = async ({
       await loadTilesetRenderResources(tileset, imageUrls)
     )
   }
-  const eventTilesetResources = await loadTilesetRenderResources(
-    eventSpriteSheet.tileset,
-    imageUrls
+  const characterTilesetResources = await loadTilesetRenderResources(
+    characterSpriteSheet.tileset,
+    imageUrls,
+    'nearest'
   )
-
-  const playerTexture = await loadStandaloneTileTexture({
-    imageUrl: playerSpriteSheet.imageUrl,
-    tileWidth: playerSpriteSheet.tileWidth,
-    tileHeight: playerSpriteSheet.tileHeight,
-    columns: playerSpriteSheet.columns,
-    localId: playerSpriteSheet.localId,
-    scaleMode: 'nearest'
-  })
-  const playerSprite = new Sprite(playerTexture)
-  const playerPixelWidth = playerSpriteSheet.tileWidth * playerSpriteSheet.scale
-  const playerPixelHeight = playerSpriteSheet.tileHeight * playerSpriteSheet.scale
-  const playerWidthInTiles = playerPixelWidth / map.tileWidth
-  const playerHeightInTiles = playerPixelHeight / map.tileHeight
-  const eventPixelWidth = eventSpriteSheet.tileset.tileWidth * eventSpriteSheet.scale
-  const eventPixelHeight = eventSpriteSheet.tileset.tileHeight * eventSpriteSheet.scale
-  const pressedDirections = new Set<PlayerMoveDirection>()
-  let depthSortedLayer: Container | undefined
-  let playerState = player
-
-  playerSprite.label = 'player'
-  playerSprite.scale.set(playerSpriteSheet.scale)
-  playerSprite.roundPixels = true
 
   for (const layer of map.layers) {
     if (layer.name.toLowerCase() === DEPTH_SORTED_LAYER_NAME) {
@@ -207,87 +193,77 @@ export const createPixiTiledMapView = async ({
     world.addChild(transformedTileLayer)
   }
 
-  const eventCharacters = map.eventLayers.flatMap((eventLayer) =>
-    eventLayer.events.flatMap((event) => {
-      if (!event.visible || event.className !== 'character' || !event.appearanceType) {
-        return []
-      }
-
-      const localId = resolveTilesetLocalIdByType(
-        eventSpriteSheet.tileset,
-        event.appearanceType
-      )
-      const texture = eventTilesetResources.tileTextures[localId]
-      const sprite = new Sprite(texture)
-      const collisionRect = createCollisionRectFromBottomCenter(
-        event.x,
-        event.y,
-        event.width || eventPixelWidth,
-        event.height || eventPixelHeight,
-        map.tileWidth,
-        map.tileHeight
-      )
-
-      sprite.label = `event:${event.name}`
-      sprite.anchor.set(0.5, 1)
-      sprite.position.set(event.x, event.y)
-      sprite.scale.set(eventSpriteSheet.scale)
-      sprite.roundPixels = true
-      sprite.zIndex = event.y
-
-      return [
-        {
-          collisionRect,
-          sprite
-        }
-      ]
-    })
-  )
-  const eventCollisionRects = eventCharacters.map(
-    (eventCharacter) => eventCharacter.collisionRect
-  )
-
-  if (!depthSortedLayer && eventCharacters.length > 0) {
+  if (!depthSortedLayer) {
     depthSortedLayer = new Container()
-    depthSortedLayer.label = 'layer:events:depth'
+    depthSortedLayer.label = 'layer:characters:depth'
     depthSortedLayer.sortableChildren = true
     world.addChild(depthSortedLayer)
   }
 
-  if (depthSortedLayer) {
-    depthSortedLayer.addChild(playerSprite)
+  for (const character of characterStates) {
+    const sprite = new Sprite(
+      resolveCharacterTexture(
+        characterTilesetResources.tileTextures,
+        characterSpriteSheet.tileset,
+        character.appearanceType
+      )
+    )
 
-    for (const eventCharacter of eventCharacters) {
-      depthSortedLayer.addChild(eventCharacter.sprite)
-    }
-  } else {
-    world.addChild(playerSprite)
+    sprite.label = `character:${character.id}`
+    sprite.scale.set(characterSpriteSheet.scale)
+    sprite.roundPixels = true
+    renderedCharacters.set(character.id, sprite)
+    depthSortedLayer.addChild(sprite)
   }
 
-  const syncPlayerSpritePosition = () => {
-    playerSprite.position.set(
-      playerState.position.x * map.tileWidth,
-      playerState.position.y * map.tileHeight
+  const getCharacterStateById = (characterId: string): CharacterState => {
+    const character = characterStates.find(
+      (candidateCharacter) => candidateCharacter.id === characterId
     )
-    playerSprite.zIndex = getPlayerDepthSortValue(
-      playerState.position.y,
-      playerPixelHeight,
+
+    if (!character) {
+      throw new Error(`Missing character ${characterId}`)
+    }
+
+    return character
+  }
+
+  const syncCharacterSprite = (character: CharacterState) => {
+    const sprite = renderedCharacters.get(character.id)
+
+    if (!sprite) {
+      throw new Error(`Missing rendered sprite for character ${character.id}`)
+    }
+
+    sprite.position.set(
+      character.position.x * map.tileWidth,
+      character.position.y * map.tileHeight
+    )
+    sprite.zIndex = getCharacterDepthSortValue(
+      character.position.y,
+      characterPixelHeight,
       map.tileHeight
     )
     depthSortedLayer?.sortChildren()
   }
 
-  const centerViewportOnPlayer = () => {
-    const playerCenterX =
-      playerState.position.x * map.tileWidth + playerPixelWidth / 2
-    const playerCenterY =
-      playerState.position.y * map.tileHeight + playerPixelHeight / 2
+  const syncAllCharacterSprites = () => {
+    for (const character of characterStates) {
+      syncCharacterSprite(character)
+    }
+  }
+
+  const centerViewportOnCharacter = (character: CharacterState) => {
+    const characterCenterX =
+      character.position.x * map.tileWidth + characterPixelWidth / 2
+    const characterCenterY =
+      character.position.y * map.tileHeight + characterPixelHeight / 2
     const nextScrollLeft = clampScrollOffset(
-      playerCenterX - mountElement.clientWidth / 2,
+      characterCenterX - mountElement.clientWidth / 2,
       map.pixelWidth - mountElement.clientWidth
     )
     const nextScrollTop = clampScrollOffset(
-      playerCenterY - mountElement.clientHeight / 2,
+      characterCenterY - mountElement.clientHeight / 2,
       map.pixelHeight - mountElement.clientHeight
     )
 
@@ -297,11 +273,11 @@ export const createPixiTiledMapView = async ({
     })
   }
 
-  const keepPlayerVisible = () => {
-    const playerLeft = playerState.position.x * map.tileWidth
-    const playerTop = playerState.position.y * map.tileHeight
-    const playerRight = playerLeft + playerPixelWidth
-    const playerBottom = playerTop + playerPixelHeight
+  const keepCharacterVisible = (character: CharacterState) => {
+    const characterLeft = character.position.x * map.tileWidth
+    const characterTop = character.position.y * map.tileHeight
+    const characterRight = characterLeft + characterPixelWidth
+    const characterBottom = characterTop + characterPixelHeight
     const viewportLeft = mountElement.scrollLeft
     const viewportTop = mountElement.scrollTop
     const viewportWidth = mountElement.clientWidth
@@ -317,34 +293,31 @@ export const createPixiTiledMapView = async ({
     let nextScrollLeft = viewportLeft
     let nextScrollTop = viewportTop
 
-    if (playerLeft < deadZoneLeft) {
+    if (characterLeft < deadZoneLeft) {
       nextScrollLeft = clampScrollOffset(
-        playerLeft - horizontalMargin,
+        characterLeft - horizontalMargin,
         map.pixelWidth - viewportWidth
       )
-    } else if (playerRight > deadZoneRight) {
+    } else if (characterRight > deadZoneRight) {
       nextScrollLeft = clampScrollOffset(
-        playerRight + horizontalMargin - viewportWidth,
+        characterRight + horizontalMargin - viewportWidth,
         map.pixelWidth - viewportWidth
       )
     }
 
-    if (playerTop < deadZoneTop) {
+    if (characterTop < deadZoneTop) {
       nextScrollTop = clampScrollOffset(
-        playerTop - verticalMargin,
+        characterTop - verticalMargin,
         map.pixelHeight - viewportHeight
       )
-    } else if (playerBottom > deadZoneBottom) {
+    } else if (characterBottom > deadZoneBottom) {
       nextScrollTop = clampScrollOffset(
-        playerBottom + verticalMargin - viewportHeight,
+        characterBottom + verticalMargin - viewportHeight,
         map.pixelHeight - viewportHeight
       )
     }
 
-    if (
-      nextScrollLeft !== viewportLeft ||
-      nextScrollTop !== viewportTop
-    ) {
+    if (nextScrollLeft !== viewportLeft || nextScrollTop !== viewportTop) {
       mountElement.scrollTo({
         left: nextScrollLeft,
         top: nextScrollTop
@@ -352,93 +325,110 @@ export const createPixiTiledMapView = async ({
     }
   }
 
-  const tryMovePlayer = (deltaX: number, deltaY: number) => {
-    let nextPlayerState = playerState
+  const getBlockingCollisionRects = (
+    excludedCharacterId: string
+  ): CollisionRect[] =>
+    characterStates
+      .filter(
+        (character) =>
+          character.blocksMovement && character.id !== excludedCharacterId
+      )
+      .map((character) => createCollisionRectFromCharacter(character))
+
+  const tryMoveCharacter = (
+    characterId: string,
+    deltaX: number,
+    deltaY: number
+  ) => {
+    const currentCharacter = getCharacterStateById(characterId)
+    const blockingRects = getBlockingCollisionRects(characterId)
+    let nextCharacter = currentCharacter
 
     if (deltaX !== 0) {
-      const nextXState = movePlayerState({
-        player: nextPlayerState,
+      const nextXCharacter = moveCharacterState({
+        character: nextCharacter,
         delta: {
           x: deltaX,
           y: 0
         },
         mapWidth: map.width,
-        mapHeight: map.height,
-        playerWidth: playerWidthInTiles,
-        playerHeight: playerHeightInTiles
+        mapHeight: map.height
       })
 
       if (
-        !isPlayerPositionBlocked(
+        !isCharacterPositionBlocked(
           wallTiles,
-          eventCollisionRects,
-          nextXState.position.x,
-          nextXState.position.y,
-          playerWidthInTiles,
-          playerHeightInTiles
+          blockingRects,
+          nextXCharacter.position.x,
+          nextXCharacter.position.y,
+          nextXCharacter.collisionSize.width,
+          nextXCharacter.collisionSize.height
         )
       ) {
-        nextPlayerState = nextXState
+        nextCharacter = nextXCharacter
       }
     }
 
     if (deltaY !== 0) {
-      const nextYState = movePlayerState({
-        player: nextPlayerState,
+      const nextYCharacter = moveCharacterState({
+        character: nextCharacter,
         delta: {
           x: 0,
           y: deltaY
         },
         mapWidth: map.width,
-        mapHeight: map.height,
-        playerWidth: playerWidthInTiles,
-        playerHeight: playerHeightInTiles
+        mapHeight: map.height
       })
 
       if (
-        !isPlayerPositionBlocked(
+        !isCharacterPositionBlocked(
           wallTiles,
-          eventCollisionRects,
-          nextYState.position.x,
-          nextYState.position.y,
-          playerWidthInTiles,
-          playerHeightInTiles
+          blockingRects,
+          nextYCharacter.position.x,
+          nextYCharacter.position.y,
+          nextYCharacter.collisionSize.width,
+          nextYCharacter.collisionSize.height
         )
       ) {
-        nextPlayerState = nextYState
+        nextCharacter = nextYCharacter
       }
     }
 
     if (
-      nextPlayerState.position.x === playerState.position.x &&
-      nextPlayerState.position.y === playerState.position.y
+      nextCharacter.position.x === currentCharacter.position.x &&
+      nextCharacter.position.y === currentCharacter.position.y
     ) {
       return
     }
 
-    playerState = nextPlayerState
-    syncPlayerSpritePosition()
-    keepPlayerVisible()
+    characterStates = characterStates.map((character) =>
+      character.id === nextCharacter.id ? nextCharacter : character
+    )
+    syncCharacterSprite(nextCharacter)
+
+    if (nextCharacter.id === cameraTargetCharacterId) {
+      keepCharacterVisible(nextCharacter)
+    }
   }
 
-  const updatePlayer = () => {
-    const movement = getNormalizedMovementVector(pressedDirections)
+  const updateCharacters = () => {
+    for (const character of [...characterStates]) {
+      const delta = getCharacterControllerDelta({
+        character,
+        deltaMilliseconds: app.ticker.deltaMS,
+        pressedDirections
+      })
 
-    if (!movement) {
-      return
+      if (!delta) {
+        continue
+      }
+
+      tryMoveCharacter(character.id, delta.x, delta.y)
     }
-
-    const distanceInTiles =
-      (PLAYER_MOVE_SPEED_TILES_PER_SECOND * app.ticker.deltaMS) / 1000
-
-    tryMovePlayer(
-      movement.x * distanceInTiles,
-      movement.y * distanceInTiles
-    )
   }
 
   const handleKeyDown = (event: KeyboardEvent) => {
-    const direction = getPlayerMoveDirectionFromKey(event.key)
+    const direction = getCharacterMoveDirectionFromKey(event.key)
 
     if (!direction) {
       return
@@ -449,7 +439,7 @@ export const createPixiTiledMapView = async ({
   }
 
   const handleKeyUp = (event: KeyboardEvent) => {
-    const direction = getPlayerMoveDirectionFromKey(event.key)
+    const direction = getCharacterMoveDirectionFromKey(event.key)
 
     if (!direction) {
       return
@@ -465,16 +455,16 @@ export const createPixiTiledMapView = async ({
   window.addEventListener('keydown', handleKeyDown)
   window.addEventListener('keyup', handleKeyUp)
   window.addEventListener('blur', handleWindowBlur)
-  app.ticker.add(updatePlayer)
-  syncPlayerSpritePosition()
-  centerViewportOnPlayer()
+  app.ticker.add(updateCharacters)
+  syncAllCharacterSprites()
+  centerViewportOnCharacter(getCharacterStateById(cameraTargetCharacterId))
 
   if (import.meta.hot) {
     import.meta.hot.dispose(() => {
       window.removeEventListener('keydown', handleKeyDown)
       window.removeEventListener('keyup', handleKeyUp)
       window.removeEventListener('blur', handleWindowBlur)
-      app.ticker.remove(updatePlayer)
+      app.ticker.remove(updateCharacters)
       app.destroy({ removeView: true }, { children: true })
     })
   }
@@ -484,7 +474,8 @@ export const createPixiTiledMapView = async ({
 
 const loadTilesetRenderResources = async (
   tileset: ParsedTiledTileset,
-  imageUrls: Record<string, string>
+  imageUrls: Record<string, string>,
+  scaleMode?: 'nearest' | 'linear'
 ): Promise<TilesetRenderResources> => {
   const imageUrl = imageUrls[tileset.image.source]
 
@@ -494,6 +485,9 @@ const loadTilesetRenderResources = async (
 
   const imageTexture = await Assets.load<Texture>(imageUrl)
 
+  if (scaleMode) {
+    imageTexture.source.scaleMode = scaleMode
+  }
   imageTexture.source.wrapMode = 'clamp-to-edge'
   const tileTextures = Array.from(
     { length: tileset.tileCount },
@@ -548,74 +542,7 @@ const resolveTilesetForTile = (
 const clampScrollOffset = (value: number, max: number): number =>
   Math.max(0, Math.min(Math.round(value), Math.max(0, max)))
 
-const loadStandaloneTileTexture = async ({
-  imageUrl,
-  tileWidth,
-  tileHeight,
-  columns,
-  localId,
-  scaleMode
-}: {
-  imageUrl: string
-  tileWidth: number
-  tileHeight: number
-  columns: number
-  localId: number
-  scaleMode: 'nearest' | 'linear'
-}): Promise<Texture> => {
-  const imageTexture = await Assets.load<Texture>(imageUrl)
-
-  imageTexture.source.scaleMode = scaleMode
-  imageTexture.source.wrapMode = 'clamp-to-edge'
-
-  return createTileTexture(
-    imageTexture,
-    {
-      columns,
-      margin: 0,
-      spacing: 0,
-      tileWidth,
-      tileHeight
-    },
-    localId
-  )
-}
-
-const getNormalizedMovementVector = (
-  pressedDirections: Set<PlayerMoveDirection>
-): { x: number; y: number } | undefined => {
-  let x = 0
-  let y = 0
-
-  if (pressedDirections.has('left')) {
-    x -= 1
-  }
-
-  if (pressedDirections.has('right')) {
-    x += 1
-  }
-
-  if (pressedDirections.has('up')) {
-    y -= 1
-  }
-
-  if (pressedDirections.has('down')) {
-    y += 1
-  }
-
-  if (x === 0 && y === 0) {
-    return undefined
-  }
-
-  const magnitude = Math.hypot(x, y)
-
-  return {
-    x: x / magnitude,
-    y: y / magnitude
-  }
-}
-
-const isPlayerPositionBlocked = (
+const isCharacterPositionBlocked = (
   wallTiles: Set<string>,
   blockingRects: CollisionRect[],
   x: number,
@@ -650,28 +577,23 @@ const isPlayerPositionBlocked = (
   )
 }
 
+const createCollisionRectFromCharacter = (
+  character: CharacterState
+): CollisionRect => ({
+  x: character.position.x,
+  y: character.position.y,
+  width: character.collisionSize.width,
+  height: character.collisionSize.height
+})
+
 const getTileDepthSortValue = (tileY: number, tileHeight: number): number =>
   (tileY + 1) * tileHeight
 
-const getPlayerDepthSortValue = (
-  playerY: number,
-  playerPixelHeight: number,
+const getCharacterDepthSortValue = (
+  characterY: number,
+  characterPixelHeight: number,
   tileHeight: number
-): number => playerY * tileHeight + playerPixelHeight
-
-const createCollisionRectFromBottomCenter = (
-  x: number,
-  y: number,
-  width: number,
-  height: number,
-  tileWidth: number,
-  tileHeight: number
-): CollisionRect => ({
-  x: (x - width / 2) / tileWidth,
-  y: (y - height) / tileHeight,
-  width: width / tileWidth,
-  height: height / tileHeight
-})
+): number => characterY * tileHeight + characterPixelHeight
 
 const doCollisionRectsIntersect = (
   left: CollisionRect,
@@ -681,6 +603,12 @@ const doCollisionRectsIntersect = (
   left.x + left.width > right.x &&
   left.y < right.y + right.height &&
   left.y + left.height > right.y
+
+const resolveCharacterTexture = (
+  tileTextures: Texture[],
+  tileset: ParsedTiledTileset,
+  appearanceType: string
+): Texture => tileTextures[resolveTilesetLocalIdByType(tileset, appearanceType)]
 
 const resolveTilesetLocalIdByType = (
   tileset: ParsedTiledTileset,
