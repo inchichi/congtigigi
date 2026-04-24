@@ -31,6 +31,14 @@ type CreatePixiTiledMapViewInput = {
   mountElement: HTMLElement
   map: ParsedTiledMap
   player: PlayerState
+  playerSpriteSheet: {
+    imageUrl: string
+    tileWidth: number
+    tileHeight: number
+    columns: number
+    localId: number
+    scale: number
+  }
   imageUrls: Record<string, string>
 }
 
@@ -39,10 +47,19 @@ type TilesetRenderResources = {
   tileTextures: Texture[]
 }
 
+type TileTextureFrameSource = {
+  columns: number
+  margin: number
+  spacing: number
+  tileWidth: number
+  tileHeight: number
+}
+
 export const createPixiTiledMapView = async ({
   mountElement,
   map,
   player,
+  playerSpriteSheet,
   imageUrls
 }: CreatePixiTiledMapViewInput): Promise<Application> => {
   const app = new Application()
@@ -115,23 +132,20 @@ export const createPixiTiledMapView = async ({
     world.addChild(transformedTileLayer)
   }
 
-  const playerTileset = map.tilesets[0]
-  const playerRenderResources = tilesetResources.get(playerTileset.source)
-
-  if (!playerRenderResources) {
-    throw new Error(`Missing render resources for tileset ${playerTileset.source}`)
-  }
-
-  const playerTexture = playerRenderResources.tileTextures[player.tileLocalId]
-
-  if (!playerTexture) {
-    throw new Error(`Missing player texture for tile ${player.tileLocalId}`)
-  }
-
+  const playerTexture = await loadStandaloneTileTexture({
+    imageUrl: playerSpriteSheet.imageUrl,
+    tileWidth: playerSpriteSheet.tileWidth,
+    tileHeight: playerSpriteSheet.tileHeight,
+    columns: playerSpriteSheet.columns,
+    localId: playerSpriteSheet.localId,
+    scaleMode: 'nearest'
+  })
   const playerSprite = new Sprite(playerTexture)
   let playerState = player
 
   playerSprite.label = 'player'
+  playerSprite.scale.set(playerSpriteSheet.scale)
+  playerSprite.roundPixels = true
   world.addChild(playerSprite)
 
   const syncPlayerSpritePosition = () => {
@@ -230,7 +244,7 @@ const loadTilesetRenderResources = async (
 
 const createTileTexture = (
   imageTexture: Texture,
-  tileset: ParsedTiledTileset,
+  tileset: TileTextureFrameSource,
   localId: number
 ): Texture => {
   const columnIndex = localId % tileset.columns
@@ -265,6 +279,39 @@ const resolveTilesetForTile = (
   }
 
   throw new Error(`Could not resolve tileset for gid ${tile.gid}`)
+}
+
+const loadStandaloneTileTexture = async ({
+  imageUrl,
+  tileWidth,
+  tileHeight,
+  columns,
+  localId,
+  scaleMode
+}: {
+  imageUrl: string
+  tileWidth: number
+  tileHeight: number
+  columns: number
+  localId: number
+  scaleMode: 'nearest' | 'linear'
+}): Promise<Texture> => {
+  const imageTexture = await Assets.load<Texture>(imageUrl)
+
+  imageTexture.source.scaleMode = scaleMode
+  imageTexture.source.wrapMode = 'clamp-to-edge'
+
+  return createTileTexture(
+    imageTexture,
+    {
+      columns,
+      margin: 0,
+      spacing: 0,
+      tileWidth,
+      tileHeight
+    },
+    localId
+  )
 }
 
 const createTransformedTileSprite = (

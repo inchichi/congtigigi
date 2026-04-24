@@ -1,5 +1,6 @@
-import sampleMapXml from './assets/maps/sample-map.tmx?raw'
-import tinyDungeonTilesetXml from './assets/tilesets/tiny-dungeon-16.tsx?raw'
+import townMapXml from './assets/maps/town.tmx?raw'
+import townTilesetXml from './assets/tilesets/town-32.tsx?raw'
+import townTilesetUrl from './assets/tilesets/town-32.png'
 import tinyDungeonTilesetUrl from './assets/tilesets/tiny-dungeon-16.png'
 
 import { createInitialPlayerState } from './game/playerState'
@@ -13,15 +14,15 @@ if (!rootElement) {
   throw new Error('Missing #app root element')
 }
 
-const parsedSampleMap = parseTiledMap({
-  mapXml: sampleMapXml,
+const parsedTownMap = parseTiledMap({
+  mapXml: townMapXml,
   externalTilesets: {
-    '../tilesets/tiny-dungeon-16.tsx': tinyDungeonTilesetXml
+    '../tilesets/town-32.tsx': townTilesetXml
   }
 })
 const initialPlayerState = createInitialPlayerState({
-  mapWidth: parsedSampleMap.width,
-  mapHeight: parsedSampleMap.height
+  mapWidth: parsedTownMap.width,
+  mapHeight: parsedTownMap.height
 })
 
 rootElement.className = 'game-root'
@@ -29,10 +30,18 @@ rootElement.className = 'game-root'
 const bootstrap = async () => {
   await createPixiTiledMapView({
     mountElement: rootElement,
-    map: parsedSampleMap,
+    map: parsedTownMap,
     player: initialPlayerState,
+    playerSpriteSheet: {
+      imageUrl: tinyDungeonTilesetUrl,
+      tileWidth: 16,
+      tileHeight: 16,
+      columns: 12,
+      localId: initialPlayerState.tileLocalId,
+      scale: 2
+    },
     imageUrls: {
-      'tiny-dungeon-16.png': tinyDungeonTilesetUrl
+      'town-32.png': townTilesetUrl
     }
   })
 }
