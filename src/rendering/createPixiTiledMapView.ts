@@ -40,6 +40,10 @@ type CreatePixiTiledMapViewInput = {
     localId: number
     scale: number
   }
+  eventSpriteSheet: {
+    tileset: ParsedTiledTileset
+    scale: number
+  }
   imageUrls: Record<string, string>
 }
 
@@ -56,11 +60,21 @@ type TileTextureFrameSource = {
   tileHeight: number
 }
 
+type CollisionRect = {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+const DEPTH_SORTED_LAYER_NAME = 'object'
+
 export const createPixiTiledMapView = async ({
   mountElement,
   map,
   player,
   playerSpriteSheet,
+  eventSpriteSheet,
   imageUrls
 }: CreatePixiTiledMapViewInput): Promise<Application> => {
   const app = new Application()
@@ -91,8 +105,67 @@ export const createPixiTiledMapView = async ({
       await loadTilesetRenderResources(tileset, imageUrls)
     )
   }
+  const eventTilesetResources = await loadTilesetRenderResources(
+    eventSpriteSheet.tileset,
+    imageUrls
+  )
+
+  const playerTexture = await loadStandaloneTileTexture({
+    imageUrl: playerSpriteSheet.imageUrl,
+    tileWidth: playerSpriteSheet.tileWidth,
+    tileHeight: playerSpriteSheet.tileHeight,
+    columns: playerSpriteSheet.columns,
+    localId: playerSpriteSheet.localId,
+    scaleMode: 'nearest'
+  })
+  const playerSprite = new Sprite(playerTexture)
+  const playerPixelWidth = playerSpriteSheet.tileWidth * playerSpriteSheet.scale
+  const playerPixelHeight = playerSpriteSheet.tileHeight * playerSpriteSheet.scale
+  const playerWidthInTiles = playerPixelWidth / map.tileWidth
+  const playerHeightInTiles = playerPixelHeight / map.tileHeight
+  const eventPixelWidth = eventSpriteSheet.tileset.tileWidth * eventSpriteSheet.scale
+  const eventPixelHeight = eventSpriteSheet.tileset.tileHeight * eventSpriteSheet.scale
+  const pressedDirections = new Set<PlayerMoveDirection>()
+  let depthSortedLayer: Container | undefined
+  let playerState = player
+
+  playerSprite.label = 'player'
+  playerSprite.scale.set(playerSpriteSheet.scale)
+  playerSprite.roundPixels = true
 
   for (const layer of map.layers) {
+    if (layer.name.toLowerCase() === DEPTH_SORTED_LAYER_NAME) {
+      const nextDepthSortedLayer = new Container()
+
+      nextDepthSortedLayer.label = `layer:${layer.name}:depth`
+      nextDepthSortedLayer.sortableChildren = true
+
+      for (const tile of layer.tiles) {
+        const tileset = resolveTilesetForTile(tile, map.tilesets)
+        const renderResources = tilesetResources.get(tileset.source)
+
+        if (!renderResources) {
+          throw new Error(`Missing render resources for tileset ${tileset.source}`)
+        }
+
+        const sprite = createDepthSortedTileSprite(
+          renderResources.tileTextures[tile.localId],
+          tile,
+          map.tileWidth,
+          map.tileHeight
+        )
+
+        sprite.alpha = layer.opacity
+        sprite.visible = layer.visible
+        sprite.zIndex = getTileDepthSortValue(tile.y, map.tileHeight)
+        nextDepthSortedLayer.addChild(sprite)
+      }
+
+      depthSortedLayer = nextDepthSortedLayer
+      world.addChild(nextDepthSortedLayer)
+      continue
+    }
+
     const tilemap = new CompositeTilemap()
     const transformedTileLayer = new Container()
 
@@ -134,32 +207,74 @@ export const createPixiTiledMapView = async ({
     world.addChild(transformedTileLayer)
   }
 
-  const playerTexture = await loadStandaloneTileTexture({
-    imageUrl: playerSpriteSheet.imageUrl,
-    tileWidth: playerSpriteSheet.tileWidth,
-    tileHeight: playerSpriteSheet.tileHeight,
-    columns: playerSpriteSheet.columns,
-    localId: playerSpriteSheet.localId,
-    scaleMode: 'nearest'
-  })
-  const playerSprite = new Sprite(playerTexture)
-  const playerPixelWidth = playerSpriteSheet.tileWidth * playerSpriteSheet.scale
-  const playerPixelHeight = playerSpriteSheet.tileHeight * playerSpriteSheet.scale
-  const playerWidthInTiles = playerPixelWidth / map.tileWidth
-  const playerHeightInTiles = playerPixelHeight / map.tileHeight
-  const pressedDirections = new Set<PlayerMoveDirection>()
-  let playerState = player
+  const eventCharacters = map.eventLayers.flatMap((eventLayer) =>
+    eventLayer.events.flatMap((event) => {
+      if (!event.visible || event.className !== 'character' || !event.appearanceType) {
+        return []
+      }
 
-  playerSprite.label = 'player'
-  playerSprite.scale.set(playerSpriteSheet.scale)
-  playerSprite.roundPixels = true
-  world.addChild(playerSprite)
+      const localId = resolveTilesetLocalIdByType(
+        eventSpriteSheet.tileset,
+        event.appearanceType
+      )
+      const texture = eventTilesetResources.tileTextures[localId]
+      const sprite = new Sprite(texture)
+      const collisionRect = createCollisionRectFromBottomCenter(
+        event.x,
+        event.y,
+        event.width || eventPixelWidth,
+        event.height || eventPixelHeight,
+        map.tileWidth,
+        map.tileHeight
+      )
+
+      sprite.label = `event:${event.name}`
+      sprite.anchor.set(0.5, 1)
+      sprite.position.set(event.x, event.y)
+      sprite.scale.set(eventSpriteSheet.scale)
+      sprite.roundPixels = true
+      sprite.zIndex = event.y
+
+      return [
+        {
+          collisionRect,
+          sprite
+        }
+      ]
+    })
+  )
+  const eventCollisionRects = eventCharacters.map(
+    (eventCharacter) => eventCharacter.collisionRect
+  )
+
+  if (!depthSortedLayer && eventCharacters.length > 0) {
+    depthSortedLayer = new Container()
+    depthSortedLayer.label = 'layer:events:depth'
+    depthSortedLayer.sortableChildren = true
+    world.addChild(depthSortedLayer)
+  }
+
+  if (depthSortedLayer) {
+    depthSortedLayer.addChild(playerSprite)
+
+    for (const eventCharacter of eventCharacters) {
+      depthSortedLayer.addChild(eventCharacter.sprite)
+    }
+  } else {
+    world.addChild(playerSprite)
+  }
 
   const syncPlayerSpritePosition = () => {
     playerSprite.position.set(
       playerState.position.x * map.tileWidth,
       playerState.position.y * map.tileHeight
     )
+    playerSprite.zIndex = getPlayerDepthSortValue(
+      playerState.position.y,
+      playerPixelHeight,
+      map.tileHeight
+    )
+    depthSortedLayer?.sortChildren()
   }
 
   const centerViewportOnPlayer = () => {
@@ -256,6 +371,7 @@ export const createPixiTiledMapView = async ({
       if (
         !isPlayerPositionBlocked(
           wallTiles,
+          eventCollisionRects,
           nextXState.position.x,
           nextXState.position.y,
           playerWidthInTiles,
@@ -282,6 +398,7 @@ export const createPixiTiledMapView = async ({
       if (
         !isPlayerPositionBlocked(
           wallTiles,
+          eventCollisionRects,
           nextYState.position.x,
           nextYState.position.y,
           playerWidthInTiles,
@@ -500,6 +617,7 @@ const getNormalizedMovementVector = (
 
 const isPlayerPositionBlocked = (
   wallTiles: Set<string>,
+  blockingRects: CollisionRect[],
   x: number,
   y: number,
   width: number,
@@ -519,7 +637,82 @@ const isPlayerPositionBlocked = (
     }
   }
 
-  return false
+  return blockingRects.some((blockingRect) =>
+    doCollisionRectsIntersect(
+      blockingRect,
+      {
+        x,
+        y,
+        width,
+        height
+      }
+    )
+  )
+}
+
+const getTileDepthSortValue = (tileY: number, tileHeight: number): number =>
+  (tileY + 1) * tileHeight
+
+const getPlayerDepthSortValue = (
+  playerY: number,
+  playerPixelHeight: number,
+  tileHeight: number
+): number => playerY * tileHeight + playerPixelHeight
+
+const createCollisionRectFromBottomCenter = (
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  tileWidth: number,
+  tileHeight: number
+): CollisionRect => ({
+  x: (x - width / 2) / tileWidth,
+  y: (y - height) / tileHeight,
+  width: width / tileWidth,
+  height: height / tileHeight
+})
+
+const doCollisionRectsIntersect = (
+  left: CollisionRect,
+  right: CollisionRect
+): boolean =>
+  left.x < right.x + right.width &&
+  left.x + left.width > right.x &&
+  left.y < right.y + right.height &&
+  left.y + left.height > right.y
+
+const resolveTilesetLocalIdByType = (
+  tileset: ParsedTiledTileset,
+  tileType: string
+): number => {
+  const entry = Object.entries(tileset.tileTypes).find(
+    ([, candidateType]) => candidateType === tileType
+  )
+
+  if (!entry) {
+    throw new Error(`Could not resolve tileset tile type ${tileType}`)
+  }
+
+  return Number(entry[0])
+}
+
+const createDepthSortedTileSprite = (
+  texture: Texture,
+  tile: ParsedTiledTile,
+  tileWidth: number,
+  tileHeight: number
+): Sprite => {
+  if (hasTileTransform(tile)) {
+    return createTransformedTileSprite(texture, tile, tileWidth, tileHeight)
+  }
+
+  const sprite = new Sprite(texture)
+
+  sprite.position.set(tile.x * tileWidth, tile.y * tileHeight)
+  sprite.roundPixels = true
+
+  return sprite
 }
 
 const createTransformedTileSprite = (

@@ -1,10 +1,11 @@
 import townMapXml from './assets/maps/town.tmx?raw'
 import townTilesetXml from './assets/tilesets/town-32.tsx?raw'
 import townTilesetUrl from './assets/tilesets/town-32.png'
+import tinyDungeonTilesetXml from './assets/tilesets/tiny-dungeon-16.tsx?raw'
 import tinyDungeonTilesetUrl from './assets/tilesets/tiny-dungeon-16.png'
 
 import { createInitialPlayerState } from './game/playerState'
-import { parseTiledMap } from './game/tiled/parseTiledMap'
+import { parseTiledMap, parseTiledTileset } from './game/tiled/parseTiledMap'
 import { createPixiTiledMapView } from './rendering/createPixiTiledMapView'
 import './styles.css'
 
@@ -24,6 +25,11 @@ const initialPlayerState = createInitialPlayerState({
   mapWidth: parsedTownMap.width,
   mapHeight: parsedTownMap.height
 })
+const tinyDungeonTileset = parseTiledTileset({
+  firstGid: 1,
+  source: '../tilesets/tiny-dungeon-16.tsx',
+  tilesetXml: tinyDungeonTilesetXml
+})
 
 rootElement.className = 'game-root'
 
@@ -40,8 +46,13 @@ const bootstrap = async () => {
       localId: initialPlayerState.tileLocalId,
       scale: 2
     },
+    eventSpriteSheet: {
+      tileset: tinyDungeonTileset,
+      scale: 2
+    },
     imageUrls: {
-      'town-32.png': townTilesetUrl
+      'town-32.png': townTilesetUrl,
+      'tiny-dungeon-16.png': tinyDungeonTilesetUrl
     }
   })
 }
