@@ -36,6 +36,9 @@
 
 - Run related Vitest tests by default instead of the full suite.
 - Run the full suite only when the change has wide impact or the requester clearly asks for it.
+- Lua bridge integration checks are also opt-in.
+  Run `npm run lua:bridge:test` when you change `src/game/lua/createLuaCharacterControllerRuntime.ts`, the public `engine.*` Lua API, or the Lua return-value contract.
+  Do not add `lua:bridge:test` to the normal `check` flow.
 - Lua WebAssembly compatibility checks are opt-in.
   Run `npm run lua:test` only when you explicitly want to validate the Lua runtime against the official Lua 5.3 basic tests.
   Do not add `lua:test` to the normal `check` flow.
