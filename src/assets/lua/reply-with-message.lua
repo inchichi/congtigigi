@@ -43,11 +43,9 @@ function step_reply_controller(id, dt, x, y)
   return 0, 0
 end
 
----플레이어가 상호작용했을 때 보여줄 메시지와 시간을 결정한다.
+---플레이어가 상호작용했을 때 공통 UI API로 말풍선을 요청한다.
 ---@param id string 캐릭터 식별자
 ---@param source_id string 상호작용을 건 캐릭터 식별자
----@return string|nil message 말풍선으로 보여줄 메시지
----@return number|nil duration_seconds 말풍선을 유지할 시간(초)
 function interact_reply_controller(id, source_id)
   local controller = controllers[id]
 
@@ -55,5 +53,7 @@ function interact_reply_controller(id, source_id)
     return nil, nil
   end
 
-  return controller.message, controller.duration_seconds
+  engine.ui.show_message(controller.message, controller.duration_seconds)
+
+  return nil, nil
 end

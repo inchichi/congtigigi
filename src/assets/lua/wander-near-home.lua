@@ -11,6 +11,8 @@
 
 ---@type table<string, WanderControllerState>
 local controllers = {}
+local MIN_TARGET_DISTANCE = 0.6
+local ARRIVAL_DISTANCE = 0.2
 
 ---값을 최소/최대 범위 안으로 제한한다.
 ---@param value number 제한할 값
@@ -33,7 +35,12 @@ end
 ---@param controller WanderControllerState
 local function choose_target(controller)
   local angle = math.random() * math.pi * 2
-  local distance = math.random() * controller.radius
+  local minimum_distance = math.min(MIN_TARGET_DISTANCE, controller.radius)
+  local distance = minimum_distance
+
+  if controller.radius > minimum_distance then
+    distance = minimum_distance + math.random() * (controller.radius - minimum_distance)
+  end
 
   controller.target_x = controller.home_x + math.cos(angle) * distance
   controller.target_y = controller.home_y + math.sin(angle) * distance
@@ -86,7 +93,7 @@ function step_wander_controller(id, dt, x, y)
   local dy = controller.target_y - y
   local distance = math.sqrt(dx * dx + dy * dy)
 
-  if distance < 0.1 then
+  if distance < ARRIVAL_DISTANCE then
     choose_target(controller)
     controller.pause_remaining = 0.5 + math.random() * 1.0
     return 0, 0

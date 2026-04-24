@@ -3,6 +3,9 @@ import type {
   LuaCharacterController
 } from '../characterState'
 import {
+  DEFAULT_LUA_CONTROLLER_MESSAGE_DURATION_MILLISECONDS,
+  LUA_CONTROLLER_PUBLIC_API_NAME,
+  MIN_LUA_CONTROLLER_MESSAGE_DURATION_MILLISECONDS,
   createLuaControllerInteractInput,
   createLuaControllerInteractionResponse,
   createLuaControllerMoveIntent,
@@ -120,7 +123,147 @@ type AttachedLuaController = {
   controller: LuaCharacterController
 }
 
+type LuaControllerCallContext = {
+  characterId: string
+  sourceCharacterId?: string
+}
+
 const LUA_MODULE_PATH = '/vendor/lua/lua-5.3.6.mjs'
+const LUA_CONTROLLER_CALL_HELPER_FUNCTION_NAME = '__engine_call_controller'
+const LUA_CONTROLLER_DRAIN_EVENTS_FUNCTION_NAME = '__engine_drain_events_json'
+const LUA_CONTROLLER_RUNTIME_HOST_API_SOURCE = `
+local runtime = {
+  current_character_id = nil,
+  current_source_character_id = nil,
+  queued_events = {}
+}
+
+local function escape_json_string(value)
+  local replacements = {
+    ['\\\\'] = '\\\\\\\\',
+    ['"'] = '\\\\\\"',
+    ['\\b'] = '\\\\b',
+    ['\\f'] = '\\\\f',
+    ['\\n'] = '\\\\n',
+    ['\\r'] = '\\\\r',
+    ['\\t'] = '\\\\t'
+  }
+
+  return '"' .. string.gsub(value, '[%z\\1-\\31\\\\"]', function(character)
+    local replacement = replacements[character]
+
+    if replacement ~= nil then
+      return replacement
+    end
+
+    return string.format('\\\\u%04x', string.byte(character))
+  end) .. '"'
+end
+
+local function encode_runtime_event(event)
+  if event.kind == 'show-character-message' then
+    return '{"kind":"show-character-message","characterId":'
+      .. escape_json_string(event.character_id)
+      .. ',"message":'
+      .. escape_json_string(event.message)
+      .. ',"durationMilliseconds":'
+      .. tostring(event.duration_milliseconds)
+      .. '}'
+  end
+
+  error('Unsupported engine runtime event kind: ' .. tostring(event.kind))
+end
+
+local function get_duration_milliseconds(duration_seconds)
+  if
+    type(duration_seconds) ~= 'number'
+    or duration_seconds ~= duration_seconds
+    or duration_seconds == math.huge
+    or duration_seconds == -math.huge
+  then
+    return ${DEFAULT_LUA_CONTROLLER_MESSAGE_DURATION_MILLISECONDS}
+  end
+
+  local rounded = math.floor(duration_seconds * 1000 + 0.5)
+
+  if rounded < ${MIN_LUA_CONTROLLER_MESSAGE_DURATION_MILLISECONDS} then
+    return ${MIN_LUA_CONTROLLER_MESSAGE_DURATION_MILLISECONDS}
+  end
+
+  return rounded
+end
+
+local function require_current_character_id()
+  if
+    type(runtime.current_character_id) ~= 'string'
+    or runtime.current_character_id == ''
+  then
+    error('${LUA_CONTROLLER_PUBLIC_API_NAME} API called outside controller context')
+  end
+
+  return runtime.current_character_id
+end
+
+function ${LUA_CONTROLLER_CALL_HELPER_FUNCTION_NAME}(function_name, character_id, source_character_id, ...)
+  local controller_fn = _G[function_name]
+
+  if type(controller_fn) ~= 'function' then
+    error('Missing Lua function ' .. tostring(function_name))
+  end
+
+  runtime.current_character_id = character_id
+  runtime.current_source_character_id = source_character_id
+
+  local results = table.pack(pcall(controller_fn, ...))
+
+  runtime.current_character_id = nil
+  runtime.current_source_character_id = nil
+
+  if not results[1] then
+    error(results[2])
+  end
+
+  return table.unpack(results, 2, results.n)
+end
+
+function ${LUA_CONTROLLER_DRAIN_EVENTS_FUNCTION_NAME}()
+  if #runtime.queued_events == 0 then
+    return '[]'
+  end
+
+  local encoded_events = {}
+
+  for index, event in ipairs(runtime.queued_events) do
+    encoded_events[index] = encode_runtime_event(event)
+  end
+
+  runtime.queued_events = {}
+
+  return '[' .. table.concat(encoded_events, ',') .. ']'
+end
+
+${LUA_CONTROLLER_PUBLIC_API_NAME} = ${LUA_CONTROLLER_PUBLIC_API_NAME} or {}
+${LUA_CONTROLLER_PUBLIC_API_NAME}.ui = ${LUA_CONTROLLER_PUBLIC_API_NAME}.ui or {}
+
+function ${LUA_CONTROLLER_PUBLIC_API_NAME}.ui.show_message(message, duration_seconds)
+  if message == nil then
+    return
+  end
+
+  local normalized_message = tostring(message)
+
+  if normalized_message == '' then
+    return
+  end
+
+  runtime.queued_events[#runtime.queued_events + 1] = {
+    kind = 'show-character-message',
+    character_id = require_current_character_id(),
+    message = normalized_message,
+    duration_milliseconds = get_duration_milliseconds(duration_seconds)
+  }
+end
+`
 
 export const createLuaCharacterControllerRuntime = async ({
   scriptsById,
@@ -213,10 +356,13 @@ export const createLuaCharacterControllerRuntime = async ({
         }
 
         const script = getRequiredScript(scriptSources, controller.scriptId)
-        const [x, y] = callLuaFunction(
+        const [x, y] = callLuaControllerFunction(
           lua,
           luaState,
           script.stepFunctionName,
+          {
+            characterId: character.id
+          },
           getLuaControllerStepFunctionArguments(
             createLuaControllerStepInput(character, deltaMilliseconds)
           ),
@@ -266,10 +412,15 @@ export const createLuaCharacterControllerRuntime = async ({
           return undefined
         }
 
-        const [message, durationSeconds] = callLuaFunctionForStringAndNumber(
+        const [message, durationSeconds] =
+          callLuaControllerFunctionForStringAndNumber(
           lua,
           luaState,
           script.interactFunctionName,
+          {
+            characterId: character.id,
+            sourceCharacterId: sourceCharacter.id
+          },
           getLuaControllerInteractFunctionArguments(
             createLuaControllerInteractInput(character, sourceCharacter)
           )
@@ -291,7 +442,18 @@ export const createLuaCharacterControllerRuntime = async ({
       }
     },
     drainEvents: () => {
-      return []
+      try {
+        clearLoggedError(lastLoggedErrorByKey, 'runtime:drain-events')
+
+        return drainLuaControllerRuntimeEvents(lua, luaState)
+      } catch (error) {
+        reportLuaRuntimeError(
+          lastLoggedErrorByKey,
+          'runtime:drain-events',
+          error
+        )
+        return []
+      }
     },
     updateScript: (scriptId, script) => {
       try {
@@ -347,6 +509,13 @@ const createLuaState = (
   lua._luaL_openlibs(luaState)
 
   try {
+    runLuaChunk(
+      lua,
+      luaState,
+      LUA_CONTROLLER_RUNTIME_HOST_API_SOURCE,
+      '@engine-runtime.lua'
+    )
+
     for (const [scriptId, script] of scriptSources) {
       runLuaChunk(lua, luaState, script.source, `@${scriptId}.lua`)
     }
@@ -369,10 +538,13 @@ const attachCharacterToState = (
     attachedController.controller.scriptId
   )
 
-  callLuaFunction(
+  callLuaControllerFunction(
     lua,
     luaState,
     script.registerFunctionName,
+    {
+      characterId: attachedController.character.id
+    },
     getLuaControllerRegisterFunctionArguments(
       createLuaControllerRegisterInput(
         attachedController.character,
@@ -394,10 +566,13 @@ const detachCharacterFromState = (
     return
   }
 
-  callLuaFunction(
+  callLuaControllerFunction(
     lua,
     luaState,
     script.unregisterFunctionName,
+    {
+      characterId: attachedController.character.id
+    },
     getLuaControllerUnregisterFunctionArguments(
       createLuaControllerUnregisterInput(attachedController.character)
     )
@@ -519,6 +694,62 @@ const callLuaFunction = (
   return results
 }
 
+const callLuaControllerFunction = (
+  lua: LuaModule,
+  luaState: number,
+  functionName: string,
+  context: LuaControllerCallContext,
+  arguments_: LuaFunctionArgument[],
+  resultCount = 0
+): number[] =>
+  callLuaFunction(
+    lua,
+    luaState,
+    LUA_CONTROLLER_CALL_HELPER_FUNCTION_NAME,
+    [
+      functionName,
+      context.characterId,
+      context.sourceCharacterId ?? '',
+      ...arguments_
+    ],
+    resultCount
+  )
+
+const callLuaFunctionForString = (
+  lua: LuaModule,
+  luaState: number,
+  functionName: string,
+  arguments_: LuaFunctionArgument[]
+): string | undefined => {
+  const baseTop = lua._lua_gettop(luaState)
+
+  pushGlobalFunction(lua, luaState, functionName)
+
+  for (const argument of arguments_) {
+    if (typeof argument === 'number') {
+      lua._lua_pushnumber(luaState, argument)
+      continue
+    }
+
+    pushLuaString(lua, luaState, argument)
+  }
+
+  const callStatus = lua._lua_pcallk(luaState, arguments_.length, 1, 0, 0, 0)
+
+  if (callStatus !== 0) {
+    const errorMessage = readLuaError(lua, luaState)
+
+    lua._lua_settop(luaState, baseTop)
+    throw new Error(`Lua function ${functionName} failed: ${errorMessage}`)
+  }
+
+  const result = readLuaString(lua, luaState, baseTop + 1)
+
+  lua._lua_settop(luaState, baseTop)
+
+  return result
+}
+
 const callLuaFunctionForStringAndNumber = (
   lua: LuaModule,
   luaState: number,
@@ -553,6 +784,43 @@ const callLuaFunctionForStringAndNumber = (
   lua._lua_settop(luaState, baseTop)
 
   return [message, durationSeconds]
+}
+
+const callLuaControllerFunctionForStringAndNumber = (
+  lua: LuaModule,
+  luaState: number,
+  functionName: string,
+  context: LuaControllerCallContext,
+  arguments_: LuaFunctionArgument[]
+): [string | undefined, number | undefined] =>
+  callLuaFunctionForStringAndNumber(
+    lua,
+    luaState,
+    LUA_CONTROLLER_CALL_HELPER_FUNCTION_NAME,
+    [
+      functionName,
+      context.characterId,
+      context.sourceCharacterId ?? '',
+      ...arguments_
+    ]
+  )
+
+const drainLuaControllerRuntimeEvents = (
+  lua: LuaModule,
+  luaState: number
+): LuaControllerRuntimeEvent[] => {
+  const serializedEvents = callLuaFunctionForString(
+    lua,
+    luaState,
+    LUA_CONTROLLER_DRAIN_EVENTS_FUNCTION_NAME,
+    []
+  )
+
+  if (!serializedEvents || serializedEvents === '[]') {
+    return []
+  }
+
+  return parseLuaControllerRuntimeEvents(serializedEvents)
 }
 
 const pushGlobalFunction = (
@@ -617,6 +885,39 @@ const readLuaNumber = (
   }
 
   return lua._lua_tonumberx(luaState, index, 0)
+}
+
+const parseLuaControllerRuntimeEvents = (
+  serializedEvents: string
+): LuaControllerRuntimeEvent[] => {
+  const parsedEvents = JSON.parse(serializedEvents) as unknown
+
+  if (!Array.isArray(parsedEvents)) {
+    throw new Error('Lua runtime event drain did not return an array.')
+  }
+
+  return parsedEvents.flatMap((parsedEvent) => {
+    if (
+      typeof parsedEvent !== 'object' ||
+      parsedEvent === null ||
+      parsedEvent.kind !== 'show-character-message' ||
+      typeof parsedEvent.characterId !== 'string' ||
+      typeof parsedEvent.message !== 'string' ||
+      typeof parsedEvent.durationMilliseconds !== 'number' ||
+      !Number.isFinite(parsedEvent.durationMilliseconds)
+    ) {
+      throw new Error('Lua runtime event drain returned an invalid event.')
+    }
+
+    return [
+      {
+        kind: 'show-character-message',
+        characterId: parsedEvent.characterId,
+        message: parsedEvent.message,
+        durationMilliseconds: parsedEvent.durationMilliseconds
+      }
+    ]
+  })
 }
 
 const reportLuaRuntimeError = (
