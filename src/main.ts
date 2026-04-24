@@ -1,4 +1,5 @@
 import townMapXml from './assets/maps/town.tmx?raw'
+import wanderNearHomeControllerLua from './assets/lua/wander-near-home.lua?raw'
 import townTilesetXml from './assets/tilesets/town-32.tsx?raw'
 import townTilesetUrl from './assets/tilesets/town-32.png'
 import tinyDungeonTilesetXml from './assets/tilesets/tiny-dungeon-16.tsx?raw'
@@ -6,8 +7,10 @@ import tinyDungeonTilesetUrl from './assets/tilesets/tiny-dungeon-16.png'
 
 import {
   PLAYER_CHARACTER_ID,
+  createLuaCharacterController,
   createInitialPlayerCharacter
 } from './game/characterState'
+import { createLuaCharacterControllerRuntime } from './game/lua/createLuaCharacterControllerRuntime'
 import { createNpcCharactersFromEventLayers } from './game/tiled/createNpcCharactersFromEventLayers'
 import { parseTiledMap, parseTiledTileset } from './game/tiled/parseTiledMap'
 import { createPixiTiledMapView } from './rendering/createPixiTiledMapView'
@@ -41,11 +44,37 @@ const initialCharacters = [
     defaultPixelWidth: tinyDungeonTileset.tileWidth * characterSpriteScale,
     defaultPixelHeight: tinyDungeonTileset.tileHeight * characterSpriteScale
   })
-]
+].map((character) =>
+  character.id !== 'villager_1'
+    ? character
+    : {
+        ...character,
+        controller: createLuaCharacterController({
+          scriptId: 'wander-near-home',
+          radiusInTiles: 2,
+          moveSpeedTilesPerSecond: 1.5
+        })
+      }
+)
 
 rootElement.className = 'game-root'
 
 const bootstrap = async () => {
+  const hasLuaControlledCharacter = initialCharacters.some(
+    (character) => character.controller.kind === 'lua'
+  )
+  const luaControllerRuntime = hasLuaControlledCharacter
+    ? await createLuaCharacterControllerRuntime({
+        scriptsById: {
+          'wander-near-home': {
+            registerFunctionName: 'register_wander_controller',
+            stepFunctionName: 'step_wander_controller',
+            source: wanderNearHomeControllerLua
+          }
+        }
+      })
+    : undefined
+
   await createPixiTiledMapView({
     mountElement: rootElement,
     map: parsedTownMap,
@@ -58,7 +87,8 @@ const bootstrap = async () => {
     imageUrls: {
       'town-32.png': townTilesetUrl,
       'tiny-dungeon-16.png': tinyDungeonTilesetUrl
-    }
+    },
+    luaControllerRuntime
   })
 }
 

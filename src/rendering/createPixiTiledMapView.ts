@@ -17,6 +17,7 @@ import type {
   CharacterMoveDirection,
   CharacterState
 } from '../game/characterState'
+import type { LuaCharacterControllerRuntime } from '../game/lua/createLuaCharacterControllerRuntime'
 import {
   createWallTileLookup,
   isWallTileAt
@@ -41,6 +42,7 @@ type CreatePixiTiledMapViewInput = {
     scale: number
   }
   imageUrls: Record<string, string>
+  luaControllerRuntime?: LuaCharacterControllerRuntime
 }
 
 type TilesetRenderResources = {
@@ -71,7 +73,8 @@ export const createPixiTiledMapView = async ({
   characters,
   cameraTargetCharacterId,
   characterSpriteSheet,
-  imageUrls
+  imageUrls,
+  luaControllerRuntime
 }: CreatePixiTiledMapViewInput): Promise<Application> => {
   const app = new Application()
 
@@ -416,7 +419,9 @@ export const createPixiTiledMapView = async ({
       const delta = getCharacterControllerDelta({
         character,
         deltaMilliseconds: app.ticker.deltaMS,
-        pressedDirections
+        pressedDirections,
+        resolveLuaControllerDirection:
+          luaControllerRuntime?.getControllerDirection
       })
 
       if (!delta) {
@@ -465,6 +470,7 @@ export const createPixiTiledMapView = async ({
       window.removeEventListener('keyup', handleKeyUp)
       window.removeEventListener('blur', handleWindowBlur)
       app.ticker.remove(updateCharacters)
+      luaControllerRuntime?.destroy()
       app.destroy({ removeView: true }, { children: true })
     })
   }

@@ -22,6 +22,7 @@ export type CharacterState = {
 
 export type CharacterController =
   | KeyboardCharacterController
+  | LuaCharacterController
   | NpcCharacterController
 
 export type KeyboardCharacterController = {
@@ -32,6 +33,13 @@ export type KeyboardCharacterController = {
 export type NpcCharacterController = {
   kind: 'npc'
   behavior: 'idle'
+  moveSpeedTilesPerSecond: number
+}
+
+export type LuaCharacterController = {
+  kind: 'lua'
+  scriptId: string
+  radiusInTiles: number
   moveSpeedTilesPerSecond: number
 }
 
@@ -69,6 +77,11 @@ type GetCharacterControllerDeltaInput = {
   character: CharacterState
   deltaMilliseconds: number
   pressedDirections?: ReadonlySet<CharacterMoveDirection>
+  resolveLuaControllerDirection?: (
+    character: CharacterState,
+    controller: LuaCharacterController,
+    deltaMilliseconds: number
+  ) => { x: number; y: number } | undefined
 }
 
 export const createKeyboardCharacterController = ({
@@ -87,6 +100,21 @@ export const createIdleNpcCharacterController = ({
 } = {}): NpcCharacterController => ({
   kind: 'npc',
   behavior: 'idle',
+  moveSpeedTilesPerSecond
+})
+
+export const createLuaCharacterController = ({
+  scriptId,
+  radiusInTiles,
+  moveSpeedTilesPerSecond = DEFAULT_CHARACTER_MOVE_SPEED_TILES_PER_SECOND
+}: {
+  scriptId: string
+  radiusInTiles: number
+  moveSpeedTilesPerSecond?: number
+}): LuaCharacterController => ({
+  kind: 'lua',
+  scriptId,
+  radiusInTiles,
   moveSpeedTilesPerSecond
 })
 
@@ -144,12 +172,23 @@ export const getCharacterMoveDirectionFromKey = (
 export const getCharacterControllerDelta = ({
   character,
   deltaMilliseconds,
-  pressedDirections = new Set<CharacterMoveDirection>()
+  pressedDirections = new Set<CharacterMoveDirection>(),
+  resolveLuaControllerDirection
 }: GetCharacterControllerDeltaInput): { x: number; y: number } | undefined => {
   switch (character.controller.kind) {
     case 'keyboard':
       return getMovementDeltaFromDirection({
         direction: getNormalizedMovementVector(pressedDirections),
+        moveSpeedTilesPerSecond: character.controller.moveSpeedTilesPerSecond,
+        deltaMilliseconds
+      })
+    case 'lua':
+      return getMovementDeltaFromDirection({
+        direction: resolveLuaControllerDirection?.(
+          character,
+          character.controller,
+          deltaMilliseconds
+        ),
         moveSpeedTilesPerSecond: character.controller.moveSpeedTilesPerSecond,
         deltaMilliseconds
       })

@@ -7,6 +7,7 @@ import {
   createIdleNpcCharacterController,
   createInitialPlayerCharacter,
   createKeyboardCharacterController,
+  createLuaCharacterController,
   createNpcCharacter,
   getCharacterControllerDelta,
   getCharacterMoveDirectionFromKey,
@@ -89,6 +90,40 @@ describe('getCharacterControllerDelta', () => {
         deltaMilliseconds: 250
       })
     ).toBeUndefined()
+  })
+
+  it('delegates lua-controlled characters to an external controller runtime', () => {
+    expect(
+      getCharacterControllerDelta({
+        character: {
+          ...createNpcCharacter({
+            id: 'villager_1',
+            appearanceType: 'character_commoner_tan_tunic',
+            position: {
+              x: 10,
+              y: 12
+            },
+            collisionSize: {
+              width: 1,
+              height: 1
+            }
+          }),
+          controller: createLuaCharacterController({
+            scriptId: 'wander-near-home',
+            radiusInTiles: 2,
+            moveSpeedTilesPerSecond: 4
+          })
+        },
+        deltaMilliseconds: 250,
+        resolveLuaControllerDirection: () => ({
+          x: 0,
+          y: 1
+        })
+      })
+    ).toEqual({
+      x: 0,
+      y: 1
+    })
   })
 })
 
