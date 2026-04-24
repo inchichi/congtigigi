@@ -6,12 +6,12 @@
 
 ## Design Principles
 
-- 의도가 명확하게 보이도록 `let` 보다 `const` 를 우선 사용한다. 반복문 내부나 재할당이 실제로 필요한 경우에는 `let` 을 사용한다.
-- 타입 오류를 피하려고 `| null` 또는 `| undefined` 를 임의로 추가하지 않는다.
-  - 논리적으로 `null` 또는 `undefined` 가 될 수 없는 값이라면 타입에서 허용하지 않는다.
-  - 실제 런타임 동작상 해당 값이 가능할 때만 nullable 타입으로 만든다. `any` 는 원칙적으로 사용하지 않는다.
-  - 따라서 불필요한 `null` 또는 `undefined` 검사는 지양한다.
-  - nullable 값을 피하려고 `null` 체크 후 생성하는 패턴을 습관적으로 넣지 않는다. 값이 항상 필요하다면 가능한 한 생성 시점에 초기화한다.
+- Prefer `const` over `let` when it makes the intent clearer. Use `let` only when reassignment is actually needed, such as inside a loop or when the value really changes.
+- Do not add `| null` or `| undefined` just to avoid type errors.
+  - If a value cannot logically be `null` or `undefined`, do not allow it in the type.
+  - Use nullable types only when the runtime behavior can really produce that value. Do not use `any` by default.
+  - Avoid unnecessary `null` or `undefined` checks.
+  - Do not rely on a habit of "check for null and create later" just to avoid nullable values. If a value is always required, initialize it as early as possible.
 - Keep variable scope as small as possible.
   - Do not reuse local variables or fields in ways that change their meaning.
   - Split values into new variables when each step has a different meaning, such as an intermediate result, a normalized value, or a final value.

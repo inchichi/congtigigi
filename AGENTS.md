@@ -11,6 +11,7 @@
 - `docs/coding-standards.md`: Read this before writing or changing code. Check this first when you add a new source file or need to make style decisions.
 - `docs/testing-strategy.md`: Read this when you plan validation work or add or change tests.
 - `docs/git-rules.md`: Read this for branch, commit, merge, and release work.
+- `docs/lua-controller-api.md`: Read this when you write or change Lua character controllers or the Lua controller bridge. Treat it and `src/game/lua/luaControllerApi.ts` as the Lua-facing contract.
 
 # AI Agent Rules
 
