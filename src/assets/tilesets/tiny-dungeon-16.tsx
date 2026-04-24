@@ -144,4 +144,24 @@
       <property name="wall" type="bool" value="true"/>
     </properties>
   </tile>
+  <tile id="84" type="character_wizard_purple"/>
+  <tile id="85" type="character_villager_brown_tunic"/>
+  <tile id="86" type="character_bearded_apron_man"/>
+  <tile id="87" type="character_knight_gray_helmet"/>
+  <tile id="88" type="character_commoner_tan_tunic"/>
+  <tile id="96" type="character_knight_closed_helmet"/>
+  <tile id="97" type="character_knight_open_helmet"/>
+  <tile id="98" type="character_adventurer_brown_hair"/>
+  <tile id="99" type="character_villager_flower_dress"/>
+  <tile id="100" type="character_elder_gray_hair"/>
+  <tile id="108" type="monster_slime_green"/>
+  <tile id="109" type="monster_cyclops"/>
+  <tile id="110" type="monster_crab_red"/>
+  <tile id="111" type="monster_minotaur"/>
+  <tile id="112" type="character_ranger_green"/>
+  <tile id="120" type="monster_bat_brown"/>
+  <tile id="121" type="monster_ghost_gray"/>
+  <tile id="122" type="monster_spider_brown"/>
+  <tile id="123" type="monster_scorpion_brown"/>
+  <tile id="124" type="monster_scorpion_gray"/>
 </tileset>
