@@ -1,4 +1,5 @@
 import townMapXml from './assets/maps/town.tmx?raw'
+import replyWithMessageControllerLua from './assets/lua/reply-with-message.lua?raw'
 import wanderNearHomeControllerLua from './assets/lua/wander-near-home.lua?raw'
 import townTilesetXml from './assets/tilesets/town-32.tsx?raw'
 import townTilesetUrl from './assets/tilesets/town-32.png'
@@ -38,6 +39,7 @@ const tinyDungeonTileset = parseTiledTileset({
   tilesetXml: tinyDungeonTilesetXml
 })
 const characterSpriteScale = 2
+const replyWithMessageScriptId = 'reply-with-message'
 const wanderNearHomeScriptId = 'wander-near-home'
 const initialCharacters = [
   createInitialPlayerCharacter({
@@ -50,9 +52,8 @@ const initialCharacters = [
     defaultPixelHeight: tinyDungeonTileset.tileHeight * characterSpriteScale
   })
 ].map((character) =>
-  character.id !== 'villager_1'
-    ? character
-    : {
+  character.id === 'villager_1'
+    ? {
         ...character,
         controller: createLuaCharacterController({
           scriptId: wanderNearHomeScriptId,
@@ -60,6 +61,16 @@ const initialCharacters = [
           moveSpeedTilesPerSecond: 1.5
         })
       }
+    : character.id === 'blacksmith'
+      ? {
+          ...character,
+          controller: createLuaCharacterController({
+            scriptId: replyWithMessageScriptId,
+            radiusInTiles: 0,
+            moveSpeedTilesPerSecond: 0
+          })
+        }
+      : character
 )
 let activeControllerRuntime: CharacterControllerRuntime | undefined
 
@@ -72,6 +83,13 @@ const bootstrap = async () => {
   const luaControllerRuntime = hasLuaControlledCharacter
     ? await createLuaCharacterControllerRuntime({
         scriptsById: {
+          [replyWithMessageScriptId]: {
+            registerFunctionName: 'register_reply_controller',
+            unregisterFunctionName: 'unregister_reply_controller',
+            stepFunctionName: 'step_reply_controller',
+            interactFunctionName: 'interact_reply_controller',
+            source: replyWithMessageControllerLua
+          },
           [wanderNearHomeScriptId]: {
             registerFunctionName: 'register_wander_controller',
             unregisterFunctionName: 'unregister_wander_controller',
@@ -105,6 +123,20 @@ const bootstrap = async () => {
 }
 
 if (import.meta.hot) {
+  import.meta.hot.accept('./assets/lua/reply-with-message.lua?raw', (nextModule) => {
+    if (!nextModule || !activeControllerRuntime) {
+      return
+    }
+
+    activeControllerRuntime.updateLuaControllerScript(replyWithMessageScriptId, {
+      registerFunctionName: 'register_reply_controller',
+      unregisterFunctionName: 'unregister_reply_controller',
+      stepFunctionName: 'step_reply_controller',
+      interactFunctionName: 'interact_reply_controller',
+      source: nextModule.default
+    })
+  })
+
   import.meta.hot.accept('./assets/lua/wander-near-home.lua?raw', (nextModule) => {
     if (!nextModule || !activeControllerRuntime) {
       return

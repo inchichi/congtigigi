@@ -8,7 +8,8 @@ import {
   createInitialPlayerCharacter,
   createKeyboardCharacterController,
   createNpcCharacter,
-  getCharacterControllerDelta,
+  getCharacterActionFromKey,
+  getCharacterControllerIntent,
   getCharacterMoveDirectionFromKey,
   moveCharacterState
 } from './characterState'
@@ -27,6 +28,7 @@ describe('createInitialPlayerCharacter', () => {
         x: 16,
         y: 10
       },
+      facing: 'down',
       collisionSize: {
         width: 1,
         height: 1
@@ -50,10 +52,21 @@ describe('getCharacterMoveDirectionFromKey', () => {
   })
 })
 
-describe('getCharacterControllerDelta', () => {
+describe('getCharacterActionFromKey', () => {
+  it('maps keyboard confirm keys to interact', () => {
+    expect(getCharacterActionFromKey('Enter')).toBe('interact')
+    expect(getCharacterActionFromKey(' ')).toBe('interact')
+  })
+
+  it('ignores unrelated action keys', () => {
+    expect(getCharacterActionFromKey('Escape')).toBeUndefined()
+  })
+})
+
+describe('getCharacterControllerIntent', () => {
   it('moves keyboard-controlled characters with a continuous delta', () => {
     expect(
-      getCharacterControllerDelta({
+      getCharacterControllerIntent({
         character: createInitialPlayerCharacter({
           mapWidth: 32,
           mapHeight: 20
@@ -62,18 +75,35 @@ describe('getCharacterControllerDelta', () => {
         pressedDirections: new Set(['left', 'down'])
       })
     ).toEqual({
-      x:
-        (-DEFAULT_CHARACTER_MOVE_SPEED_TILES_PER_SECOND / 4) /
-        Math.SQRT2,
-      y:
-        (DEFAULT_CHARACTER_MOVE_SPEED_TILES_PER_SECOND / 4) /
-        Math.SQRT2
+      movement: {
+        x:
+          (-DEFAULT_CHARACTER_MOVE_SPEED_TILES_PER_SECOND / 4) /
+          Math.SQRT2,
+        y:
+          (DEFAULT_CHARACTER_MOVE_SPEED_TILES_PER_SECOND / 4) /
+          Math.SQRT2
+      }
+    })
+  })
+
+  it('emits a single interact action from keyboard controllers', () => {
+    expect(
+      getCharacterControllerIntent({
+        character: createInitialPlayerCharacter({
+          mapWidth: 32,
+          mapHeight: 20
+        }),
+        deltaMilliseconds: 250,
+        triggeredActions: new Set(['interact'])
+      })
+    ).toEqual({
+      actions: ['interact']
     })
   })
 
   it('keeps idle npc controllers still', () => {
     expect(
-      getCharacterControllerDelta({
+      getCharacterControllerIntent({
         character: createNpcCharacter({
           id: 'blacksmith',
           appearanceType: 'character_bearded_apron_man',
@@ -93,7 +123,7 @@ describe('getCharacterControllerDelta', () => {
 
   it('leaves lua-controlled characters to the shared controller runtime', () => {
     expect(
-      getCharacterControllerDelta({
+      getCharacterControllerIntent({
         character: {
           ...createNpcCharacter({
             id: 'villager_1',
@@ -131,6 +161,7 @@ describe('moveCharacterState', () => {
             x: 16,
             y: 10
           },
+          facing: 'up',
           collisionSize: {
             width: 1,
             height: 1
@@ -148,11 +179,12 @@ describe('moveCharacterState', () => {
       position: {
         x: 14,
         y: 11
-      }
+      },
+      facing: 'left'
     })
   })
 
-  it('clamps the full character footprint to the map bounds', () => {
+  it('clamps the full character footprint to the map bounds but still updates facing', () => {
     expect(
       moveCharacterState({
         character: createNpcCharacter({
@@ -162,6 +194,7 @@ describe('moveCharacterState', () => {
             x: 31,
             y: 19
           },
+          facing: 'down',
           collisionSize: {
             width: 1.5,
             height: 2
@@ -178,7 +211,8 @@ describe('moveCharacterState', () => {
       position: {
         x: 30.5,
         y: 18
-      }
+      },
+      facing: 'right'
     })
   })
 })

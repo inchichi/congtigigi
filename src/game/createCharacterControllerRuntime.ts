@@ -1,5 +1,7 @@
 import {
-  getCharacterControllerDelta,
+  getCharacterControllerIntent,
+  type CharacterAction,
+  type CharacterControllerIntent,
   type CharacterMoveDirection,
   type CharacterState
 } from './characterState'
@@ -7,15 +9,22 @@ import type {
   LuaCharacterControllerRuntime,
   LuaControllerScriptSource
 } from './lua/createLuaCharacterControllerRuntime'
+import type { LuaControllerRuntimeEvent } from './lua/luaControllerApi'
 
 type CharacterControllerAttachment = {
   attachCharacter: (character: CharacterState) => void
   detachCharacter: (character: CharacterState) => void
-  getMovementDelta: (input: {
+  getIntent: (input: {
     character: CharacterState
     deltaMilliseconds: number
     pressedDirections?: ReadonlySet<CharacterMoveDirection>
-  }) => { x: number; y: number } | undefined
+    triggeredActions?: ReadonlySet<CharacterAction>
+  }) => CharacterControllerIntent | undefined
+  canReceiveInteraction: (character: CharacterState) => boolean
+  handleInteraction: (input: {
+    targetCharacter: CharacterState
+    sourceCharacter: CharacterState
+  }) => CharacterInteractionResponse | undefined
   destroy?: () => void
 }
 
@@ -25,16 +34,29 @@ type CreateCharacterControllerRuntimeInput = {
 
 export type CharacterControllerRuntime = {
   syncCharacters: (characters: CharacterState[]) => void
-  getMovementDelta: (input: {
+  getIntent: (input: {
     character: CharacterState
     deltaMilliseconds: number
     pressedDirections?: ReadonlySet<CharacterMoveDirection>
-  }) => { x: number; y: number } | undefined
+    triggeredActions?: ReadonlySet<CharacterAction>
+  }) => CharacterControllerIntent | undefined
+  canReceiveInteraction: (character: CharacterState) => boolean
+  handleInteraction: (input: {
+    targetCharacter: CharacterState
+    sourceCharacter: CharacterState
+  }) => CharacterInteractionResponse | undefined
+  drainEvents: () => LuaControllerRuntimeEvent[]
   updateLuaControllerScript: (
     scriptId: string,
     script: LuaControllerScriptSource
   ) => void
   destroy: () => void
+}
+
+export type CharacterInteractionResponse = {
+  kind: 'message'
+  message: string
+  durationMilliseconds: number
 }
 
 export const createCharacterControllerRuntime = ({
@@ -98,12 +120,26 @@ export const createCharacterControllerRuntime = ({
 
   return {
     syncCharacters,
-    getMovementDelta: ({ character, deltaMilliseconds, pressedDirections }) =>
-      resolveAttachment(character).getMovementDelta({
+    getIntent: ({
+      character,
+      deltaMilliseconds,
+      pressedDirections,
+      triggeredActions
+    }) =>
+      resolveAttachment(character).getIntent({
         character,
         deltaMilliseconds,
-        pressedDirections
+        pressedDirections,
+        triggeredActions
       }),
+    canReceiveInteraction: (character) =>
+      resolveAttachment(character).canReceiveInteraction(character),
+    handleInteraction: ({ targetCharacter, sourceCharacter }) =>
+      resolveAttachment(targetCharacter).handleInteraction({
+        targetCharacter,
+        sourceCharacter
+      }),
+    drainEvents: () => luaControllerRuntime?.drainEvents() ?? [],
     updateLuaControllerScript: (scriptId, script) => {
       luaControllerRuntime?.updateScript(scriptId, script)
     },
@@ -128,22 +164,32 @@ export const createCharacterControllerRuntime = ({
 const createKeyboardControllerAttachment = (): CharacterControllerAttachment => ({
   attachCharacter: () => {},
   detachCharacter: () => {},
-  getMovementDelta: ({ character, deltaMilliseconds, pressedDirections }) =>
-    getCharacterControllerDelta({
+  getIntent: ({
+    character,
+    deltaMilliseconds,
+    pressedDirections,
+    triggeredActions
+  }) =>
+    getCharacterControllerIntent({
       character,
       deltaMilliseconds,
-      pressedDirections
-    })
+      pressedDirections,
+      triggeredActions
+    }),
+  canReceiveInteraction: () => false,
+  handleInteraction: () => undefined
 })
 
 const createNpcControllerAttachment = (): CharacterControllerAttachment => ({
   attachCharacter: () => {},
   detachCharacter: () => {},
-  getMovementDelta: ({ character, deltaMilliseconds }) =>
-    getCharacterControllerDelta({
+  getIntent: ({ character, deltaMilliseconds }) =>
+    getCharacterControllerIntent({
       character,
       deltaMilliseconds
-    })
+    }),
+  canReceiveInteraction: () => false,
+  handleInteraction: () => undefined
 })
 
 const createLuaControllerAttachment = (
@@ -167,7 +213,7 @@ const createLuaControllerAttachment = (
 
     luaControllerRuntime.detachCharacter(character, character.controller)
   },
-  getMovementDelta: ({ character, deltaMilliseconds }) => {
+  getIntent: ({ character, deltaMilliseconds }) => {
     if (character.controller.kind !== 'lua') {
       return undefined
     }
@@ -176,11 +222,54 @@ const createLuaControllerAttachment = (
       throw new Error('Lua controller runtime is required for lua characters')
     }
 
-    return luaControllerRuntime.getMovementDelta(
+    const movement = luaControllerRuntime.getMovementDelta(
       character,
       character.controller,
       deltaMilliseconds
     )
+
+    if (!movement) {
+      return undefined
+    }
+
+    return {
+      movement: scaleLuaMovementIntent(
+        movement,
+        character.controller.moveSpeedTilesPerSecond,
+        deltaMilliseconds
+      )
+    }
+  },
+  canReceiveInteraction: (character) => {
+    if (character.controller.kind !== 'lua' || !luaControllerRuntime) {
+      return false
+    }
+
+    return luaControllerRuntime.canReceiveInteraction(
+      character,
+      character.controller
+    )
+  },
+  handleInteraction: ({ targetCharacter, sourceCharacter }) => {
+    if (targetCharacter.controller.kind !== 'lua' || !luaControllerRuntime) {
+      return undefined
+    }
+
+    const response = luaControllerRuntime.handleInteraction(
+      targetCharacter,
+      targetCharacter.controller,
+      sourceCharacter
+    )
+
+    if (!response) {
+      return undefined
+    }
+
+    return {
+      kind: 'message',
+      message: response.message,
+      durationMilliseconds: response.durationMilliseconds
+    }
   },
   destroy: () => {
     luaControllerRuntime?.destroy()
@@ -195,5 +284,32 @@ const getControllerAttachmentKey = (character: CharacterState): string => {
       return `npc:${character.controller.behavior}:${character.controller.moveSpeedTilesPerSecond}`
     case 'lua':
       return `lua:${character.controller.scriptId}:${character.controller.radiusInTiles}:${character.controller.moveSpeedTilesPerSecond}`
+  }
+}
+
+const scaleLuaMovementIntent = (
+  movement: { x: number; y: number },
+  moveSpeedTilesPerSecond: number,
+  deltaMilliseconds: number
+): { x: number; y: number } => {
+  const magnitude = Math.hypot(movement.x, movement.y)
+
+  if (magnitude === 0) {
+    return movement
+  }
+
+  const distanceInTiles =
+    (moveSpeedTilesPerSecond * deltaMilliseconds) / 1000
+  const normalizedMovement =
+    magnitude > 1
+      ? {
+          x: movement.x / magnitude,
+          y: movement.y / magnitude
+        }
+      : movement
+
+  return {
+    x: normalizedMovement.x * distanceInTiles,
+    y: normalizedMovement.y * distanceInTiles
   }
 }

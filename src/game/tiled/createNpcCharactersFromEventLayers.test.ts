@@ -56,6 +56,7 @@ describe('createNpcCharactersFromEventLayers', () => {
           x: 2,
           y: 2
         },
+        facing: 'down',
         collisionSize: {
           width: 1,
           height: 1
@@ -74,6 +75,7 @@ describe('createNpcCharactersFromEventLayers', () => {
           x: 3.25,
           y: 3
         },
+        facing: 'down',
         collisionSize: {
           width: 0.5,
           height: 1

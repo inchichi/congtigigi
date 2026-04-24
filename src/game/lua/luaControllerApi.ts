@@ -7,6 +7,7 @@ export type LuaControllerFunctionContract = {
   registerFunctionName: string
   unregisterFunctionName?: string
   stepFunctionName: string
+  interactFunctionName?: string
 }
 
 export type LuaControllerPosition = {
@@ -33,10 +34,41 @@ export type LuaControllerStepInput = {
   deltaSeconds: number
 }
 
+export type LuaControllerInteractInput = {
+  character: LuaControllerCharacterSnapshot
+  sourceCharacterId: string
+}
+
 export type LuaControllerMoveIntent = {
   moveX: number
   moveY: number
 }
+
+export type LuaControllerUiApi = {
+  showMessage: (message: string, durationSeconds?: number) => void
+}
+
+export type LuaControllerPublicApi = {
+  ui: LuaControllerUiApi
+}
+
+export type LuaControllerShowCharacterMessageEvent = {
+  kind: 'show-character-message'
+  characterId: string
+  message: string
+  durationMilliseconds: number
+}
+
+export type LuaControllerRuntimeEvent = LuaControllerShowCharacterMessageEvent
+
+export type LuaControllerInteractionResponse = {
+  message: string
+  durationMilliseconds: number
+}
+
+export const LUA_CONTROLLER_PUBLIC_API_NAME = 'engine'
+export const DEFAULT_LUA_CONTROLLER_MESSAGE_DURATION_MILLISECONDS = 2000
+export const MIN_LUA_CONTROLLER_MESSAGE_DURATION_MILLISECONDS = 250
 
 export const createLuaControllerRegisterInput = (
   character: CharacterState,
@@ -58,6 +90,14 @@ export const createLuaControllerStepInput = (
 ): LuaControllerStepInput => ({
   character: createLuaControllerCharacterSnapshot(character),
   deltaSeconds: deltaMilliseconds / 1000
+})
+
+export const createLuaControllerInteractInput = (
+  character: CharacterState,
+  sourceCharacter: CharacterState
+): LuaControllerInteractInput => ({
+  character: createLuaControllerCharacterSnapshot(character),
+  sourceCharacterId: sourceCharacter.id
 })
 
 export const getLuaControllerRegisterFunctionArguments = (
@@ -82,6 +122,13 @@ export const getLuaControllerStepFunctionArguments = (
   input.character.position.y
 ]
 
+export const getLuaControllerInteractFunctionArguments = (
+  input: LuaControllerInteractInput
+): [string, string] => [
+  input.character.id,
+  input.sourceCharacterId
+]
+
 export const createLuaControllerMoveIntent = (
   moveX: number,
   moveY: number
@@ -95,6 +142,31 @@ export const createLuaControllerMoveIntent = (
     moveY
   }
 }
+
+export const createLuaControllerInteractionResponse = (
+  message: string | undefined,
+  durationSeconds: number | undefined
+): LuaControllerInteractionResponse | undefined => {
+  if (!message || message.trim().length === 0) {
+    return undefined
+  }
+
+  return {
+    message,
+    durationMilliseconds:
+      getLuaControllerMessageDurationMilliseconds(durationSeconds)
+  }
+}
+
+export const getLuaControllerMessageDurationMilliseconds = (
+  durationSeconds: number | undefined
+): number =>
+  typeof durationSeconds === 'number' && Number.isFinite(durationSeconds)
+    ? Math.max(
+        MIN_LUA_CONTROLLER_MESSAGE_DURATION_MILLISECONDS,
+        Math.round(durationSeconds * 1000)
+      )
+    : DEFAULT_LUA_CONTROLLER_MESSAGE_DURATION_MILLISECONDS
 
 const createLuaControllerCharacterSnapshot = (
   character: CharacterState

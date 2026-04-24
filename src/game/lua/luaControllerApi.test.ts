@@ -5,10 +5,17 @@ import {
   createNpcCharacter
 } from '../characterState'
 import {
+  DEFAULT_LUA_CONTROLLER_MESSAGE_DURATION_MILLISECONDS,
+  LUA_CONTROLLER_PUBLIC_API_NAME,
+  MIN_LUA_CONTROLLER_MESSAGE_DURATION_MILLISECONDS,
+  createLuaControllerInteractInput,
+  createLuaControllerInteractionResponse,
   createLuaControllerMoveIntent,
   createLuaControllerRegisterInput,
   createLuaControllerStepInput,
   createLuaControllerUnregisterInput,
+  getLuaControllerMessageDurationMilliseconds,
+  getLuaControllerInteractFunctionArguments,
   getLuaControllerRegisterFunctionArguments,
   getLuaControllerStepFunctionArguments,
   getLuaControllerUnregisterFunctionArguments
@@ -92,6 +99,25 @@ describe('luaControllerApi', () => {
       })
     ).toEqual(['villager_1', 0.125, 9.5, 13])
     expect(
+      getLuaControllerInteractFunctionArguments(
+        createLuaControllerInteractInput(
+          luaCharacter,
+          createNpcCharacter({
+            id: 'player',
+            appearanceType: 'character_adventurer_brown_hair',
+            position: {
+              x: 8,
+              y: 12
+            },
+            collisionSize: {
+              width: 1,
+              height: 1
+            }
+          })
+        )
+      )
+    ).toEqual(['villager_1', 'player'])
+    expect(
       getLuaControllerUnregisterFunctionArguments(
         createLuaControllerUnregisterInput(luaCharacter)
       )
@@ -104,5 +130,29 @@ describe('luaControllerApi', () => {
       moveX: 1,
       moveY: -0.5
     })
+  })
+
+  it('creates a message interaction response with a safe default duration', () => {
+    expect(
+      createLuaControllerInteractionResponse('Hello there.', undefined)
+    ).toEqual({
+      message: 'Hello there.',
+      durationMilliseconds:
+        DEFAULT_LUA_CONTROLLER_MESSAGE_DURATION_MILLISECONDS
+    })
+    expect(
+      createLuaControllerInteractionResponse('Hello there.', 1.75)
+    ).toEqual({
+      message: 'Hello there.',
+      durationMilliseconds: 1750
+    })
+    expect(getLuaControllerMessageDurationMilliseconds(0.1)).toBe(
+      MIN_LUA_CONTROLLER_MESSAGE_DURATION_MILLISECONDS
+    )
+    expect(createLuaControllerInteractionResponse('', 1)).toBeUndefined()
+  })
+
+  it('keeps the public Lua api under the engine namespace', () => {
+    expect(LUA_CONTROLLER_PUBLIC_API_NAME).toBe('engine')
   })
 })

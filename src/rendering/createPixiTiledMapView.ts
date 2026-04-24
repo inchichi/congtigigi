@@ -9,14 +9,18 @@ import {
 } from 'pixi.js'
 
 import {
+  getCharacterActionFromKey,
   getCharacterMoveDirectionFromKey,
   moveCharacterState
 } from '../game/characterState'
 import type {
+  CharacterAction,
   CharacterMoveDirection,
   CharacterState
 } from '../game/characterState'
 import type { CharacterControllerRuntime } from '../game/createCharacterControllerRuntime'
+import { createGameEventQueue } from '../game/events/createGameEventQueue'
+import { processInteractionEvents } from '../game/interaction/processInteractionEvents'
 import {
   createWallTileLookup,
   isWallTileAt
@@ -64,6 +68,11 @@ type CollisionRect = {
   height: number
 }
 
+type ActiveCharacterMessage = {
+  element: HTMLDivElement
+  expiresAt: number
+}
+
 const DEPTH_SORTED_LAYER_NAME = 'object'
 
 export const createPixiTiledMapView = async ({
@@ -88,18 +97,32 @@ export const createPixiTiledMapView = async ({
     width: map.pixelWidth
   })
 
-  mountElement.replaceChildren(app.canvas)
+  const sceneElement = document.createElement('div')
+  const messageLayerElement = document.createElement('div')
+
+  sceneElement.className = 'game-scene'
+  sceneElement.style.width = `${map.pixelWidth}px`
+  sceneElement.style.height = `${map.pixelHeight}px`
+  messageLayerElement.className = 'message-layer'
+  sceneElement.append(app.canvas, messageLayerElement)
+  mountElement.replaceChildren(sceneElement)
   app.canvas.classList.add('game-canvas')
 
   const world = new Container()
   const tilesetResources = new Map<string, TilesetRenderResources>()
   const wallTiles = createWallTileLookup(map)
   const pressedDirections = new Set<CharacterMoveDirection>()
+  const pressedActions = new Set<CharacterAction>()
+  const triggeredActions = new Set<CharacterAction>()
+  const gameEventQueue = createGameEventQueue()
+  const interactionLockUntilBySourceCharacterId = new Map<string, number>()
+  const activeCharacterMessages = new Map<string, ActiveCharacterMessage>()
   const renderedCharacters = new Map<string, Sprite>()
   const characterPixelWidth =
     characterSpriteSheet.tileset.tileWidth * characterSpriteSheet.scale
   const characterPixelHeight =
     characterSpriteSheet.tileset.tileHeight * characterSpriteSheet.scale
+  let lastRuntimeErrorMessage: string | undefined
   let depthSortedLayer: Container | undefined
   let characterStates = characters.map((character) => ({
     ...character,
@@ -257,6 +280,68 @@ export const createPixiTiledMapView = async ({
     }
   }
 
+  const syncCharacterMessageElement = (characterId: string) => {
+    const activeMessage = activeCharacterMessages.get(characterId)
+
+    if (!activeMessage) {
+      return
+    }
+
+    const character = characterStates.find(
+      (candidateCharacter) => candidateCharacter.id === characterId
+    )
+
+    if (!character) {
+      activeMessage.element.remove()
+      activeCharacterMessages.delete(characterId)
+      return
+    }
+
+    activeMessage.element.style.left = `${character.position.x * map.tileWidth + characterPixelWidth / 2}px`
+    activeMessage.element.style.top = `${character.position.y * map.tileHeight - 8}px`
+  }
+
+  const syncActiveCharacterMessages = () => {
+    for (const characterId of activeCharacterMessages.keys()) {
+      syncCharacterMessageElement(characterId)
+    }
+  }
+
+  const showCharacterMessage = (
+    characterId: string,
+    message: string,
+    durationMilliseconds: number
+  ) => {
+    let activeMessage = activeCharacterMessages.get(characterId)
+
+    if (!activeMessage) {
+      const element = document.createElement('div')
+
+      element.className = 'character-message'
+      messageLayerElement.append(element)
+      activeMessage = {
+        element,
+        expiresAt: 0
+      }
+      activeCharacterMessages.set(characterId, activeMessage)
+    }
+
+    activeMessage.element.textContent = message
+    activeMessage.expiresAt = performance.now() + durationMilliseconds
+    syncCharacterMessageElement(characterId)
+  }
+
+  const pruneExpiredCharacterMessages = (now: number) => {
+    for (const [characterId, activeMessage] of activeCharacterMessages) {
+      if (activeMessage.expiresAt > now) {
+        continue
+      }
+
+      activeMessage.element.remove()
+      activeCharacterMessages.delete(characterId)
+    }
+  }
+
   const centerViewportOnCharacter = (character: CharacterState) => {
     const characterCenterX =
       character.position.x * map.tileWidth + characterPixelWidth / 2
@@ -345,8 +430,23 @@ export const createPixiTiledMapView = async ({
     deltaY: number
   ) => {
     const currentCharacter = getCharacterStateById(characterId)
+    const desiredFacing = moveCharacterState({
+      character: currentCharacter,
+      delta: {
+        x: deltaX,
+        y: deltaY
+      },
+      mapWidth: map.width,
+      mapHeight: map.height
+    }).facing
     const blockingRects = getBlockingCollisionRects(characterId)
-    let nextCharacter = currentCharacter
+    let nextCharacter =
+      desiredFacing === currentCharacter.facing
+        ? currentCharacter
+        : {
+            ...currentCharacter,
+            facing: desiredFacing
+          }
 
     if (deltaX !== 0) {
       const nextXCharacter = moveCharacterState({
@@ -398,9 +498,17 @@ export const createPixiTiledMapView = async ({
       }
     }
 
+    if (nextCharacter.facing !== desiredFacing) {
+      nextCharacter = {
+        ...nextCharacter,
+        facing: desiredFacing
+      }
+    }
+
     if (
       nextCharacter.position.x === currentCharacter.position.x &&
-      nextCharacter.position.y === currentCharacter.position.y
+      nextCharacter.position.y === currentCharacter.position.y &&
+      nextCharacter.facing === currentCharacter.facing
     ) {
       return
     }
@@ -408,32 +516,112 @@ export const createPixiTiledMapView = async ({
     characterStates = characterStates.map((character) =>
       character.id === nextCharacter.id ? nextCharacter : character
     )
-    syncCharacterSprite(nextCharacter)
 
-    if (nextCharacter.id === cameraTargetCharacterId) {
+    if (
+      nextCharacter.position.x !== currentCharacter.position.x ||
+      nextCharacter.position.y !== currentCharacter.position.y
+    ) {
+      syncCharacterSprite(nextCharacter)
+    }
+
+    if (
+      nextCharacter.id === cameraTargetCharacterId &&
+      (nextCharacter.position.x !== currentCharacter.position.x ||
+        nextCharacter.position.y !== currentCharacter.position.y)
+    ) {
       keepCharacterVisible(nextCharacter)
     }
   }
 
+  const drainControllerRuntimeEventsIntoQueue = () => {
+    for (const event of controllerRuntime.drainEvents()) {
+      gameEventQueue.enqueue(event)
+    }
+  }
+
   const updateCharacters = () => {
-    controllerRuntime.syncCharacters(characterStates)
+    try {
+      controllerRuntime.syncCharacters(characterStates)
+      drainControllerRuntimeEventsIntoQueue()
+      const now = performance.now()
 
-    for (const character of [...characterStates]) {
-      const delta = controllerRuntime.getMovementDelta({
-        character,
-        deltaMilliseconds: app.ticker.deltaMS,
-        pressedDirections
-      })
+      for (const character of [...characterStates]) {
+        const intent = controllerRuntime.getIntent({
+          character,
+          deltaMilliseconds: app.ticker.deltaMS,
+          pressedDirections,
+          triggeredActions
+        })
 
-      if (!delta) {
-        continue
+        if (!intent) {
+          continue
+        }
+
+        if (intent.movement) {
+          tryMoveCharacter(character.id, intent.movement.x, intent.movement.y)
+        }
+
+        drainControllerRuntimeEventsIntoQueue()
+
+        if (intent.actions?.includes('interact')) {
+          gameEventQueue.enqueue({
+            kind: 'interaction-requested',
+            sourceCharacterId: character.id
+          })
+        }
       }
 
-      tryMoveCharacter(character.id, delta.x, delta.y)
+      const emittedEvents = processInteractionEvents({
+        events: gameEventQueue.drain(),
+        characters: characterStates,
+        controllerRuntime,
+        now,
+        interactionLockUntilBySourceCharacterId
+      })
+
+      for (const event of emittedEvents) {
+        if (event.kind !== 'show-character-message') {
+          continue
+        }
+
+        showCharacterMessage(
+          event.characterId,
+          event.message,
+          event.durationMilliseconds
+        )
+      }
+
+      pruneExpiredCharacterMessages(now)
+      syncActiveCharacterMessages()
+      triggeredActions.clear()
+      lastRuntimeErrorMessage = undefined
+    } catch (error) {
+      gameEventQueue.clear()
+      triggeredActions.clear()
+
+      const message = error instanceof Error ? error.message : String(error)
+
+      if (message !== lastRuntimeErrorMessage) {
+        console.error('Runtime update failed.', error)
+        lastRuntimeErrorMessage = message
+      }
     }
   }
 
   const handleKeyDown = (event: KeyboardEvent) => {
+    const action = getCharacterActionFromKey(event.key)
+
+    if (action) {
+      event.preventDefault()
+
+      if (!pressedActions.has(action)) {
+        triggeredActions.add(action)
+      }
+
+      pressedActions.add(action)
+      return
+    }
+
     const direction = getCharacterMoveDirectionFromKey(event.key)
 
     if (!direction) {
@@ -445,6 +633,13 @@ export const createPixiTiledMapView = async ({
   }
 
   const handleKeyUp = (event: KeyboardEvent) => {
+    const action = getCharacterActionFromKey(event.key)
+
+    if (action) {
+      pressedActions.delete(action)
+      return
+    }
+
     const direction = getCharacterMoveDirectionFromKey(event.key)
 
     if (!direction) {
@@ -456,6 +651,8 @@ export const createPixiTiledMapView = async ({
 
   const handleWindowBlur = () => {
     pressedDirections.clear()
+    pressedActions.clear()
+    triggeredActions.clear()
   }
 
   window.addEventListener('keydown', handleKeyDown)
@@ -471,6 +668,11 @@ export const createPixiTiledMapView = async ({
       window.removeEventListener('keyup', handleKeyUp)
       window.removeEventListener('blur', handleWindowBlur)
       app.ticker.remove(updateCharacters)
+      gameEventQueue.clear()
+      for (const activeMessage of activeCharacterMessages.values()) {
+        activeMessage.element.remove()
+      }
+      activeCharacterMessages.clear()
       controllerRuntime.destroy()
       app.destroy({ removeView: true }, { children: true })
     })

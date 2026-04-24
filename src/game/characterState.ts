@@ -4,6 +4,14 @@ export const PLAYER_CHARACTER_APPEARANCE_TYPE =
 export const DEFAULT_CHARACTER_MOVE_SPEED_TILES_PER_SECOND = 8
 
 export type CharacterMoveDirection = 'up' | 'down' | 'left' | 'right'
+export type CharacterAction = 'interact'
+export type CharacterControllerIntent = {
+  movement?: {
+    x: number
+    y: number
+  }
+  actions?: CharacterAction[]
+}
 
 export type CharacterState = {
   id: string
@@ -12,6 +20,7 @@ export type CharacterState = {
     x: number
     y: number
   }
+  facing: CharacterMoveDirection
   collisionSize: {
     width: number
     height: number
@@ -55,6 +64,7 @@ type CreateNpcCharacterInput = {
     x: number
     y: number
   }
+  facing?: CharacterMoveDirection
   collisionSize: {
     width: number
     height: number
@@ -73,10 +83,11 @@ type MoveCharacterStateInput = {
   mapHeight: number
 }
 
-type GetCharacterControllerDeltaInput = {
+type GetCharacterControllerIntentInput = {
   character: CharacterState
   deltaMilliseconds: number
   pressedDirections?: ReadonlySet<CharacterMoveDirection>
+  triggeredActions?: ReadonlySet<CharacterAction>
 }
 
 export const createKeyboardCharacterController = ({
@@ -123,6 +134,7 @@ export const createInitialPlayerCharacter = ({
     x: Math.floor(mapWidth / 2),
     y: Math.floor(mapHeight / 2)
   },
+  facing: 'down',
   collisionSize: {
     width: 1,
     height: 1
@@ -135,6 +147,7 @@ export const createNpcCharacter = ({
   id,
   appearanceType,
   position,
+  facing = 'down',
   collisionSize,
   blocksMovement = true,
   controller = createIdleNpcCharacterController()
@@ -142,6 +155,7 @@ export const createNpcCharacter = ({
   id,
   appearanceType,
   position,
+  facing,
   collisionSize,
   blocksMovement,
   controller
@@ -164,20 +178,40 @@ export const getCharacterMoveDirectionFromKey = (
   }
 }
 
-export const getCharacterControllerDelta = ({
+export const getCharacterActionFromKey = (
+  key: string
+): CharacterAction | undefined => {
+  switch (key) {
+    case 'Enter':
+    case ' ':
+    case 'Space':
+    case 'Spacebar':
+      return 'interact'
+    default:
+      return undefined
+  }
+}
+
+export const getCharacterControllerIntent = ({
   character,
   deltaMilliseconds,
-  pressedDirections = new Set<CharacterMoveDirection>()
-}: GetCharacterControllerDeltaInput): { x: number; y: number } | undefined => {
+  pressedDirections = new Set<CharacterMoveDirection>(),
+  triggeredActions = new Set<CharacterAction>()
+}: GetCharacterControllerIntentInput): CharacterControllerIntent | undefined => {
   switch (character.controller.kind) {
     case 'keyboard':
-      return getMovementDeltaFromDirection({
-        direction: getNormalizedMovementVector(pressedDirections),
-        moveSpeedTilesPerSecond: character.controller.moveSpeedTilesPerSecond,
-        deltaMilliseconds
+      return createCharacterControllerIntent({
+        movement: getMovementDeltaFromDirection({
+          direction: getNormalizedMovementVector(pressedDirections),
+          moveSpeedTilesPerSecond: character.controller.moveSpeedTilesPerSecond,
+          deltaMilliseconds
+        }),
+        actions: triggeredActions.has('interact') ? ['interact'] : undefined
       })
     case 'npc':
-      return getNpcControllerDelta(character.controller)
+      return createCharacterControllerIntent({
+        movement: getNpcControllerDelta(character.controller)
+      })
     case 'lua':
       return undefined
   }
@@ -189,6 +223,7 @@ export const moveCharacterState = ({
   mapWidth,
   mapHeight
 }: MoveCharacterStateInput): CharacterState => {
+  const nextFacing = getFacingFromDelta(character.facing, delta)
   const clampedPosition = {
     x: clamp(
       character.position.x + delta.x,
@@ -204,14 +239,16 @@ export const moveCharacterState = ({
 
   if (
     clampedPosition.x === character.position.x &&
-    clampedPosition.y === character.position.y
+    clampedPosition.y === character.position.y &&
+    nextFacing === character.facing
   ) {
     return character
   }
 
   return {
     ...character,
-    position: clampedPosition
+    position: clampedPosition,
+    facing: nextFacing
   }
 }
 
@@ -244,6 +281,39 @@ const getNpcControllerDelta = (
     case 'idle':
       return undefined
   }
+}
+
+const createCharacterControllerIntent = ({
+  movement,
+  actions
+}: CharacterControllerIntent): CharacterControllerIntent | undefined => {
+  if (!movement && (!actions || actions.length === 0)) {
+    return undefined
+  }
+
+  return {
+    movement,
+    actions
+  }
+}
+
+const getFacingFromDelta = (
+  currentFacing: CharacterMoveDirection,
+  delta: { x: number; y: number }
+): CharacterMoveDirection => {
+  if (delta.x === 0 && delta.y === 0) {
+    return currentFacing
+  }
+
+  if (Math.abs(delta.x) >= Math.abs(delta.y) && delta.x !== 0) {
+    return delta.x > 0 ? 'right' : 'left'
+  }
+
+  if (delta.y !== 0) {
+    return delta.y > 0 ? 'down' : 'up'
+  }
+
+  return currentFacing
 }
 
 const getNormalizedMovementVector = (

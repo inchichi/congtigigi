@@ -14,7 +14,7 @@ describe('createCharacterControllerRuntime', () => {
     const runtime = createCharacterControllerRuntime()
 
     expect(
-      runtime.getMovementDelta({
+      runtime.getIntent({
         character: createInitialPlayerCharacter({
           mapWidth: 32,
           mapHeight: 20
@@ -23,8 +23,10 @@ describe('createCharacterControllerRuntime', () => {
         pressedDirections: new Set(['right'])
       })
     ).toEqual({
-      x: 2,
-      y: 0
+      movement: {
+        x: 2,
+        y: 0
+      }
     })
   })
 
@@ -70,12 +72,24 @@ describe('createCharacterControllerRuntime', () => {
     )
   })
 
-  it('forwards lua movement and script updates to the lua runtime', () => {
+  it('forwards lua movement, interactions, and script updates to the lua runtime', () => {
     const luaRuntime = createLuaRuntimeStub({
       movementDelta: {
         x: -0.5,
         y: 0.25
-      }
+      },
+      interactionResponse: {
+        message: 'Hello there.',
+        durationMilliseconds: 1800
+      },
+      emittedEvents: [
+        {
+          kind: 'show-character-message',
+          characterId: 'villager_1',
+          message: 'Queued event',
+          durationMilliseconds: 900
+        }
+      ]
     })
     const runtime = createCharacterControllerRuntime({
       luaControllerRuntime: luaRuntime
@@ -103,14 +117,38 @@ describe('createCharacterControllerRuntime', () => {
     runtime.syncCharacters([luaCharacter])
 
     expect(
-      runtime.getMovementDelta({
+      runtime.getIntent({
         character: luaCharacter,
         deltaMilliseconds: 250
       })
     ).toEqual({
-      x: -0.5,
-      y: 0.25
+      movement: {
+        x: -0.1875,
+        y: 0.09375
+      }
     })
+    expect(runtime.canReceiveInteraction(luaCharacter)).toBe(true)
+    expect(
+      runtime.handleInteraction({
+        targetCharacter: luaCharacter,
+        sourceCharacter: createInitialPlayerCharacter({
+          mapWidth: 32,
+          mapHeight: 20
+        })
+      })
+    ).toEqual({
+      kind: 'message',
+      message: 'Hello there.',
+      durationMilliseconds: 1800
+    })
+    expect(runtime.drainEvents()).toEqual([
+      {
+        kind: 'show-character-message',
+        characterId: 'villager_1',
+        message: 'Queued event',
+        durationMilliseconds: 900
+      }
+    ])
 
     runtime.updateLuaControllerScript('wander-near-home', {
       registerFunctionName: 'register_wander_controller',
@@ -129,13 +167,27 @@ describe('createCharacterControllerRuntime', () => {
 })
 
 const createLuaRuntimeStub = ({
-  movementDelta = undefined
+  movementDelta = undefined,
+  interactionResponse = undefined,
+  emittedEvents = []
 }: {
   movementDelta?: { x: number; y: number } | undefined
+  interactionResponse?:
+    | { message: string; durationMilliseconds: number }
+    | undefined
+  emittedEvents?: Array<{
+    kind: 'show-character-message'
+    characterId: string
+    message: string
+    durationMilliseconds: number
+  }>
 } = {}): LuaCharacterControllerRuntime => ({
   attachCharacter: vi.fn(),
   detachCharacter: vi.fn(),
   getMovementDelta: vi.fn(() => movementDelta),
+  canReceiveInteraction: vi.fn(() => interactionResponse !== undefined),
+  handleInteraction: vi.fn(() => interactionResponse),
+  drainEvents: vi.fn(() => emittedEvents),
   updateScript: vi.fn(),
   destroy: vi.fn()
 })
