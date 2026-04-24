@@ -11,7 +11,8 @@ import {
   createInitialPlayerCharacter
 } from './game/characterState'
 import {
-  createCharacterControllerRuntime
+  createCharacterControllerRuntime,
+  type CharacterControllerRuntime
 } from './game/createCharacterControllerRuntime'
 import { createLuaCharacterControllerRuntime } from './game/lua/createLuaCharacterControllerRuntime'
 import { createNpcCharactersFromEventLayers } from './game/tiled/createNpcCharactersFromEventLayers'
@@ -60,6 +61,7 @@ const initialCharacters = [
         })
       }
 )
+let activeControllerRuntime: CharacterControllerRuntime | undefined
 
 rootElement.className = 'game-root'
 
@@ -72,6 +74,7 @@ const bootstrap = async () => {
         scriptsById: {
           [wanderNearHomeScriptId]: {
             registerFunctionName: 'register_wander_controller',
+            unregisterFunctionName: 'unregister_wander_controller',
             stepFunctionName: 'step_wander_controller',
             source: wanderNearHomeControllerLua
           }
@@ -81,6 +84,9 @@ const bootstrap = async () => {
   const controllerRuntime = createCharacterControllerRuntime({
     luaControllerRuntime
   })
+
+  activeControllerRuntime = controllerRuntime
+
   await createPixiTiledMapView({
     mountElement: rootElement,
     map: parsedTownMap,
@@ -95,6 +101,21 @@ const bootstrap = async () => {
       'tiny-dungeon-16.png': tinyDungeonTilesetUrl
     },
     controllerRuntime
+  })
+}
+
+if (import.meta.hot) {
+  import.meta.hot.accept('./assets/lua/wander-near-home.lua?raw', (nextModule) => {
+    if (!nextModule || !activeControllerRuntime) {
+      return
+    }
+
+    activeControllerRuntime.updateLuaControllerScript(wanderNearHomeScriptId, {
+      registerFunctionName: 'register_wander_controller',
+      unregisterFunctionName: 'unregister_wander_controller',
+      stepFunctionName: 'step_wander_controller',
+      source: nextModule.default
+    })
   })
 }
 void bootstrap().catch((error: unknown) => {

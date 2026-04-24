@@ -6,6 +6,9 @@
 ---@field target_x number 현재 이동하려는 목표 위치 X
 ---@field target_y number 현재 이동하려는 목표 위치 Y
 
+---이 스크립트는 `docs/lua-controller-api.md` 와
+---`src/game/lua/luaControllerApi.ts` 계약만 사용한다고 가정한다.
+
 ---@type table<string, WanderControllerState>
 local controllers = {}
 
@@ -51,6 +54,12 @@ function register_wander_controller(id, home_x, home_y, radius)
     target_x = home_x,
     target_y = home_y
   }
+end
+
+---컨트롤러가 제거될 때 캐릭터별 내부 상태를 정리한다.
+---@param id string 캐릭터 식별자
+function unregister_wander_controller(id)
+  controllers[id] = nil
 end
 
 ---한 프레임 동안 이동할 방향 벡터를 계산한다.
