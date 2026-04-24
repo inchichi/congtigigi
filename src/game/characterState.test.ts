@@ -7,7 +7,6 @@ import {
   createIdleNpcCharacterController,
   createInitialPlayerCharacter,
   createKeyboardCharacterController,
-  createLuaCharacterController,
   createNpcCharacter,
   getCharacterControllerDelta,
   getCharacterMoveDirectionFromKey,
@@ -92,7 +91,7 @@ describe('getCharacterControllerDelta', () => {
     ).toBeUndefined()
   })
 
-  it('delegates lua-controlled characters to an external controller runtime', () => {
+  it('leaves lua-controlled characters to the shared controller runtime', () => {
     expect(
       getCharacterControllerDelta({
         character: {
@@ -108,22 +107,16 @@ describe('getCharacterControllerDelta', () => {
               height: 1
             }
           }),
-          controller: createLuaCharacterController({
+          controller: {
+            kind: 'lua',
             scriptId: 'wander-near-home',
             radiusInTiles: 2,
             moveSpeedTilesPerSecond: 4
-          })
+          }
         },
-        deltaMilliseconds: 250,
-        resolveLuaControllerDirection: () => ({
-          x: 0,
-          y: 1
-        })
+        deltaMilliseconds: 250
       })
-    ).toEqual({
-      x: 0,
-      y: 1
-    })
+    ).toBeUndefined()
   })
 })
 

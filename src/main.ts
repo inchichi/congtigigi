@@ -10,6 +10,9 @@ import {
   createLuaCharacterController,
   createInitialPlayerCharacter
 } from './game/characterState'
+import {
+  createCharacterControllerRuntime
+} from './game/createCharacterControllerRuntime'
 import { createLuaCharacterControllerRuntime } from './game/lua/createLuaCharacterControllerRuntime'
 import { createNpcCharactersFromEventLayers } from './game/tiled/createNpcCharactersFromEventLayers'
 import { parseTiledMap, parseTiledTileset } from './game/tiled/parseTiledMap'
@@ -34,6 +37,7 @@ const tinyDungeonTileset = parseTiledTileset({
   tilesetXml: tinyDungeonTilesetXml
 })
 const characterSpriteScale = 2
+const wanderNearHomeScriptId = 'wander-near-home'
 const initialCharacters = [
   createInitialPlayerCharacter({
     mapWidth: parsedTownMap.width,
@@ -50,7 +54,7 @@ const initialCharacters = [
     : {
         ...character,
         controller: createLuaCharacterController({
-          scriptId: 'wander-near-home',
+          scriptId: wanderNearHomeScriptId,
           radiusInTiles: 2,
           moveSpeedTilesPerSecond: 1.5
         })
@@ -66,7 +70,7 @@ const bootstrap = async () => {
   const luaControllerRuntime = hasLuaControlledCharacter
     ? await createLuaCharacterControllerRuntime({
         scriptsById: {
-          'wander-near-home': {
+          [wanderNearHomeScriptId]: {
             registerFunctionName: 'register_wander_controller',
             stepFunctionName: 'step_wander_controller',
             source: wanderNearHomeControllerLua
@@ -74,7 +78,9 @@ const bootstrap = async () => {
         }
       })
     : undefined
-
+  const controllerRuntime = createCharacterControllerRuntime({
+    luaControllerRuntime
+  })
   await createPixiTiledMapView({
     mountElement: rootElement,
     map: parsedTownMap,
@@ -88,10 +94,9 @@ const bootstrap = async () => {
       'town-32.png': townTilesetUrl,
       'tiny-dungeon-16.png': tinyDungeonTilesetUrl
     },
-    luaControllerRuntime
+    controllerRuntime
   })
 }
-
 void bootstrap().catch((error: unknown) => {
   const message = error instanceof Error ? error.message : String(error)
 

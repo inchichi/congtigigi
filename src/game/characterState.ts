@@ -77,11 +77,6 @@ type GetCharacterControllerDeltaInput = {
   character: CharacterState
   deltaMilliseconds: number
   pressedDirections?: ReadonlySet<CharacterMoveDirection>
-  resolveLuaControllerDirection?: (
-    character: CharacterState,
-    controller: LuaCharacterController,
-    deltaMilliseconds: number
-  ) => { x: number; y: number } | undefined
 }
 
 export const createKeyboardCharacterController = ({
@@ -172,8 +167,7 @@ export const getCharacterMoveDirectionFromKey = (
 export const getCharacterControllerDelta = ({
   character,
   deltaMilliseconds,
-  pressedDirections = new Set<CharacterMoveDirection>(),
-  resolveLuaControllerDirection
+  pressedDirections = new Set<CharacterMoveDirection>()
 }: GetCharacterControllerDeltaInput): { x: number; y: number } | undefined => {
   switch (character.controller.kind) {
     case 'keyboard':
@@ -182,18 +176,10 @@ export const getCharacterControllerDelta = ({
         moveSpeedTilesPerSecond: character.controller.moveSpeedTilesPerSecond,
         deltaMilliseconds
       })
-    case 'lua':
-      return getMovementDeltaFromDirection({
-        direction: resolveLuaControllerDirection?.(
-          character,
-          character.controller,
-          deltaMilliseconds
-        ),
-        moveSpeedTilesPerSecond: character.controller.moveSpeedTilesPerSecond,
-        deltaMilliseconds
-      })
     case 'npc':
       return getNpcControllerDelta(character.controller)
+    case 'lua':
+      return undefined
   }
 }
 

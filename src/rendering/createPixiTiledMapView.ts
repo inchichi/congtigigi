@@ -9,7 +9,6 @@ import {
 } from 'pixi.js'
 
 import {
-  getCharacterControllerDelta,
   getCharacterMoveDirectionFromKey,
   moveCharacterState
 } from '../game/characterState'
@@ -17,7 +16,7 @@ import type {
   CharacterMoveDirection,
   CharacterState
 } from '../game/characterState'
-import type { LuaCharacterControllerRuntime } from '../game/lua/createLuaCharacterControllerRuntime'
+import type { CharacterControllerRuntime } from '../game/createCharacterControllerRuntime'
 import {
   createWallTileLookup,
   isWallTileAt
@@ -42,7 +41,7 @@ type CreatePixiTiledMapViewInput = {
     scale: number
   }
   imageUrls: Record<string, string>
-  luaControllerRuntime?: LuaCharacterControllerRuntime
+  controllerRuntime: CharacterControllerRuntime
 }
 
 type TilesetRenderResources = {
@@ -74,7 +73,7 @@ export const createPixiTiledMapView = async ({
   cameraTargetCharacterId,
   characterSpriteSheet,
   imageUrls,
-  luaControllerRuntime
+  controllerRuntime
 }: CreatePixiTiledMapViewInput): Promise<Application> => {
   const app = new Application()
 
@@ -107,6 +106,8 @@ export const createPixiTiledMapView = async ({
     position: { ...character.position },
     collisionSize: { ...character.collisionSize }
   }))
+
+  controllerRuntime.syncCharacters(characterStates)
 
   app.stage.addChild(world)
 
@@ -415,13 +416,13 @@ export const createPixiTiledMapView = async ({
   }
 
   const updateCharacters = () => {
+    controllerRuntime.syncCharacters(characterStates)
+
     for (const character of [...characterStates]) {
-      const delta = getCharacterControllerDelta({
+      const delta = controllerRuntime.getMovementDelta({
         character,
         deltaMilliseconds: app.ticker.deltaMS,
-        pressedDirections,
-        resolveLuaControllerDirection:
-          luaControllerRuntime?.getControllerDirection
+        pressedDirections
       })
 
       if (!delta) {
@@ -470,7 +471,7 @@ export const createPixiTiledMapView = async ({
       window.removeEventListener('keyup', handleKeyUp)
       window.removeEventListener('blur', handleWindowBlur)
       app.ticker.remove(updateCharacters)
-      luaControllerRuntime?.destroy()
+      controllerRuntime.destroy()
       app.destroy({ removeView: true }, { children: true })
     })
   }

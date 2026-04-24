@@ -2,10 +2,18 @@ import type {
   CharacterState,
   LuaCharacterController
 } from '../characterState'
+import {
+  createLuaControllerMoveIntent,
+  createLuaControllerRegisterInput,
+  createLuaControllerStepInput,
+  createLuaControllerUnregisterInput,
+  getLuaControllerRegisterFunctionArguments,
+  getLuaControllerStepFunctionArguments,
+  getLuaControllerUnregisterFunctionArguments,
+  type LuaControllerFunctionContract
+} from './luaControllerApi'
 
-type LuaControllerScriptSource = {
-  registerFunctionName: string
-  stepFunctionName: string
+export type LuaControllerScriptSource = LuaControllerFunctionContract & {
   source: string
 }
 
@@ -61,17 +69,31 @@ type LuaModule = {
 }
 
 export type LuaCharacterControllerRuntime = {
-  getControllerDirection: (
+  attachCharacter: (
+    character: CharacterState,
+    controller: LuaCharacterController
+  ) => void
+  detachCharacter: (
+    character: CharacterState,
+    controller: LuaCharacterController
+  ) => void
+  getMovementDelta: (
     character: CharacterState,
     controller: LuaCharacterController,
     deltaMilliseconds: number
   ) => { x: number; y: number } | undefined
+  updateScript: (scriptId: string, script: LuaControllerScriptSource) => void
   destroy: () => void
 }
 
 type LuaModuleFactory = (moduleArg?: {
   locateFile?: (path: string) => string
 }) => Promise<LuaModule>
+
+type AttachedLuaController = {
+  character: CharacterState
+  controller: LuaCharacterController
+}
 
 const LUA_MODULE_PATH = '/vendor/lua/lua-5.3.6.mjs'
 
@@ -83,8 +105,105 @@ export const createLuaCharacterControllerRuntime = async ({
   const lua = await createLuaModule({
     locateFile: (path: string) => new URL(path, luaAssetBaseUrl).href
   })
+  const scriptSources = new Map(Object.entries(scriptsById))
+  const attachedControllers = new Map<string, AttachedLuaController>()
+  let luaState = createLuaState(lua, scriptSources)
+  let isDestroyed = false
+
+  const rebuildLuaState = (nextScriptSources: Map<string, LuaControllerScriptSource>) => {
+    const nextLuaState = createLuaState(lua, nextScriptSources)
+
+    try {
+      for (const attachedController of attachedControllers.values()) {
+        attachCharacterToState(lua, nextLuaState, nextScriptSources, attachedController)
+      }
+    } catch (error) {
+      lua._lua_close(nextLuaState)
+      throw error
+    }
+
+    lua._lua_close(luaState)
+    luaState = nextLuaState
+  }
+
+  return {
+    attachCharacter: (character, controller) => {
+      const attachedController = {
+        character,
+        controller
+      }
+
+      attachCharacterToState(lua, luaState, scriptSources, attachedController)
+      attachedControllers.set(character.id, attachedController)
+    },
+    detachCharacter: (character, controller) => {
+      detachCharacterFromState(lua, luaState, scriptSources, {
+        character,
+        controller
+      })
+      attachedControllers.delete(character.id)
+    },
+    getMovementDelta: (character, controller, deltaMilliseconds) => {
+      if (attachedControllers.has(character.id)) {
+        attachedControllers.set(character.id, {
+          character,
+          controller
+        })
+      }
+
+      const script = getRequiredScript(scriptSources, controller.scriptId)
+      const [x, y] = callLuaFunction(
+        lua,
+        luaState,
+        script.stepFunctionName,
+        getLuaControllerStepFunctionArguments(
+          createLuaControllerStepInput(character, deltaMilliseconds)
+        ),
+        2
+      )
+      const moveIntent = createLuaControllerMoveIntent(x, y)
+
+      if (!moveIntent) {
+        return undefined
+      }
+
+      return {
+        x: moveIntent.moveX,
+        y: moveIntent.moveY
+      }
+    },
+    updateScript: (scriptId, script) => {
+      const nextScriptSources = new Map(scriptSources)
+
+      nextScriptSources.set(scriptId, script)
+      rebuildLuaState(nextScriptSources)
+      scriptSources.clear()
+
+      for (const [nextScriptId, nextScript] of nextScriptSources) {
+        scriptSources.set(nextScriptId, nextScript)
+      }
+    },
+    destroy: () => {
+      if (isDestroyed) {
+        return
+      }
+
+      for (const attachedController of attachedControllers.values()) {
+        detachCharacterFromState(lua, luaState, scriptSources, attachedController)
+      }
+
+      attachedControllers.clear()
+      lua._lua_close(luaState)
+      isDestroyed = true
+    }
+  }
+}
+
+const createLuaState = (
+  lua: LuaModule,
+  scriptSources: Map<string, LuaControllerScriptSource>
+): number => {
   const luaState = lua._luaL_newstate()
-  const registeredControllerKeys = new Set<string>()
 
   if (!luaState) {
     throw new Error('Failed to create a Lua state.')
@@ -92,56 +211,75 @@ export const createLuaCharacterControllerRuntime = async ({
 
   lua._luaL_openlibs(luaState)
 
-  for (const [scriptId, script] of Object.entries(scriptsById)) {
-    runLuaChunk(lua, luaState, script.source, `@${scriptId}.lua`)
-  }
-
-  return {
-    getControllerDirection: (character, controller, deltaMilliseconds) => {
-      const script = scriptsById[controller.scriptId]
-
-      if (!script) {
-        throw new Error(`Missing Lua controller script ${controller.scriptId}`)
-      }
-
-      const controllerKey = `${controller.scriptId}:${character.id}`
-
-      if (!registeredControllerKeys.has(controllerKey)) {
-        callLuaFunction(lua, luaState, script.registerFunctionName, [
-          character.id,
-          character.position.x,
-          character.position.y,
-          controller.radiusInTiles
-        ])
-        registeredControllerKeys.add(controllerKey)
-      }
-
-      const [x, y] = callLuaFunction(
-        lua,
-        luaState,
-        script.stepFunctionName,
-        [
-          character.id,
-          deltaMilliseconds / 1000,
-          character.position.x,
-          character.position.y
-        ],
-        2
-      )
-
-      if (x === 0 && y === 0) {
-        return undefined
-      }
-
-      return {
-        x,
-        y
-      }
-    },
-    destroy: () => {
-      lua._lua_close(luaState)
+  try {
+    for (const [scriptId, script] of scriptSources) {
+      runLuaChunk(lua, luaState, script.source, `@${scriptId}.lua`)
     }
+  } catch (error) {
+    lua._lua_close(luaState)
+    throw error
   }
+
+  return luaState
+}
+
+const attachCharacterToState = (
+  lua: LuaModule,
+  luaState: number,
+  scriptSources: Map<string, LuaControllerScriptSource>,
+  attachedController: AttachedLuaController
+) => {
+  const script = getRequiredScript(
+    scriptSources,
+    attachedController.controller.scriptId
+  )
+
+  callLuaFunction(
+    lua,
+    luaState,
+    script.registerFunctionName,
+    getLuaControllerRegisterFunctionArguments(
+      createLuaControllerRegisterInput(
+        attachedController.character,
+        attachedController.controller
+      )
+    )
+  )
+}
+
+const detachCharacterFromState = (
+  lua: LuaModule,
+  luaState: number,
+  scriptSources: Map<string, LuaControllerScriptSource>,
+  attachedController: AttachedLuaController
+) => {
+  const script = scriptSources.get(attachedController.controller.scriptId)
+
+  if (!script?.unregisterFunctionName) {
+    return
+  }
+
+  callLuaFunction(
+    lua,
+    luaState,
+    script.unregisterFunctionName,
+    getLuaControllerUnregisterFunctionArguments(
+      createLuaControllerUnregisterInput(attachedController.character)
+    )
+  )
+}
+
+const getRequiredScript = (
+  scriptSources: Map<string, LuaControllerScriptSource>,
+  scriptId: string
+): LuaControllerScriptSource => {
+  const script = scriptSources.get(scriptId)
+
+  if (!script) {
+    throw new Error(`Missing Lua controller script ${scriptId}`)
+  }
+
+  return script
 }
 
 const loadLuaModuleFactory = async (): Promise<LuaModuleFactory> => {
