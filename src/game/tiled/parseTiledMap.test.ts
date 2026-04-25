@@ -108,7 +108,13 @@ describe('parseTiledMap', () => {
       height: 0,
       visible: true,
       properties: {
-        type: 'character_bearded_apron_man'
+        type: 'character_bearded_apron_man',
+        'controller.scriptId': 'reply-with-message',
+        'controller.messageDurationSeconds': 2.8,
+        'controller.dialogueLines': [
+          '힘세고 강한 아침, 만일 내게 물어보면 I AM 대장장이.',
+          '나중에는 YOU 에게 무기도 팔게 될 거야.'
+        ]
       },
       appearanceType: 'character_bearded_apron_man'
     })
@@ -171,4 +177,51 @@ describe('parseTiledMap', () => {
       appearanceType: 'character_bearded_apron_man'
     })
   })
+
+  it('parses list properties as typed primitive arrays', () => {
+    const map = parseTiledMap({
+      mapXml: `<?xml version="1.0" encoding="UTF-8"?>
+<map version="1.10" tiledversion="1.12.1" orientation="orthogonal" renderorder="right-down" width="1" height="1" tilewidth="32" tileheight="32" infinite="0">
+  <tileset firstgid="1" source="../tilesets/town-32.tsx"/>
+  <layer id="1" name="ground" width="1" height="1">
+    <data encoding="csv">0</data>
+  </layer>
+  <objectgroup id="2" name="characters">
+    <object id="7" name="blacksmith" type="character" x="32" y="32">
+      <properties>
+        <property name="type" value="character_bearded_apron_man"/>
+        <property name="controller.dialogueLines" type="list">
+          <item value="Need any tools?"/>
+          <item value="Best steel in town."/>
+        </property>
+        <property name="controller.patrolDelaysSeconds" type="list" propertytype="float">
+          <item value="0.5"/>
+          <item value="1.25"/>
+        </property>
+        <property name="controller.patrolFlags" type="list" propertytype="bool">
+          <item value="true"/>
+          <item value="false"/>
+        </property>
+      </properties>
+    </object>
+  </objectgroup>
+</map>`,
+      externalTilesets: {
+        '../tilesets/town-32.tsx': townTilesetXml
+      }
+    })
+
+    expect(map.eventLayers[0].events[0].properties['controller.dialogueLines']).toEqual([
+      'Need any tools?',
+      'Best steel in town.'
+    ])
+    expect(
+      map.eventLayers[0].events[0].properties['controller.patrolDelaysSeconds']
+    ).toEqual([0.5, 1.25])
+    expect(map.eventLayers[0].events[0].properties['controller.patrolFlags']).toEqual([
+      true,
+      false
+    ])
+  })
+
 })

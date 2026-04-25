@@ -285,7 +285,7 @@ const getControllerAttachmentKey = (character: CharacterState): string => {
     case 'npc':
       return `npc:${character.controller.behavior}:${character.controller.moveSpeedTilesPerSecond}`
     case 'lua':
-      return `lua:${character.controller.scriptId}:${character.controller.radiusInTiles}:${character.controller.moveSpeedTilesPerSecond}`
+      return `lua:${character.controller.scriptId}:${character.controller.radiusInTiles}:${character.controller.moveSpeedTilesPerSecond}:${JSON.stringify(character.controller.config)}`
   }
 }
 

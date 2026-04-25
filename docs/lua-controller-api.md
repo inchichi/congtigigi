@@ -31,6 +31,20 @@ Do not invent extra globals or side channels inside Lua.
 Lua-visible helper functions live under the `engine` global namespace.
 New APIs should follow the same pattern, such as `engine.ui.*` or `engine.map.*`.
 
+### `engine.self.get_controller_config`
+
+```lua
+local config = engine.self.get_controller_config()
+```
+
+Rules:
+
+- this returns the current character's TMX-authored controller config
+- only properties with the `controller.` prefix are exposed here
+- reserved setup keys such as `controller.kind` and `controller.scriptId` are not included
+- `type="list"` properties become Lua string, number, or boolean lists
+- treat the returned table as read-only input
+
 ### `engine.ui.show_message`
 
 ```lua
@@ -78,6 +92,36 @@ Lifecycle rules:
 - keep module top-level code simple and side-effect free
 - the runtime validates Lua scripts on first load and hot reload before they replace the active controller
 - validation errors should include the Lua line number and line text when that information is available
+
+## TMX Controller Schema
+
+For `character` object-layer events:
+
+- `type`: appearance key from `tiny-dungeon-16`
+- `blocksMovement`: optional bool
+- `controller.kind`: optional, `idle` or `lua`
+  - you can usually omit this because `controller.scriptId` already implies `lua`
+- `controller.scriptId`: required when the controller kind is `lua`
+- `controller.radiusInTiles`: optional number for Lua movement radius
+- `controller.moveSpeedTilesPerSecond`: optional number
+- any other `controller.*` property becomes one entry in `engine.self.get_controller_config()`
+- use `type="list"` when a controller setting should become a Lua array
+
+Example:
+
+```xml
+<object name="blacksmith" type="character" x="400" y="516">
+  <properties>
+    <property name="type" value="character_bearded_apron_man"/>
+    <property name="controller.scriptId" value="reply-with-message"/>
+    <property name="controller.dialogueLines" type="list">
+      <item value="Need any tools?"/>
+      <item value="Best steel in town."/>
+    </property>
+    <property name="controller.messageDurationSeconds" type="float" value="2.8"/>
+  </properties>
+</object>
+```
 
 ## Public Data Model
 

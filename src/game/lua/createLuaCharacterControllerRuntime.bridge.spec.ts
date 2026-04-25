@@ -227,6 +227,84 @@ end
     }
   })
 
+  it('exposes TMX-backed controller config through engine.self', async () => {
+    const runtime = await createBridgeRuntime({
+      source: createControllerModuleSource(`
+local controllers = {}
+
+function controller.register(id, home_x, home_y, radius)
+  local config = engine.self.get_controller_config()
+
+  controllers[id] = {
+    first_line = config.dialogueLines[1],
+    second_line = config.dialogueLines[2],
+    first_delay = config.patrolDelaysSeconds[1],
+    second_delay = config.patrolDelaysSeconds[2],
+    first_flag = config.patrolFlags[1],
+    second_flag = config.patrolFlags[2],
+    duration = config.messageDurationSeconds,
+    role = config.role
+  }
+end
+
+function controller.step(id, dt, x, y)
+  return 0, 0
+end
+
+function controller.interact(id, source_id)
+  local controller_state = controllers[id]
+
+  return controller_state.first_line
+    .. " / "
+    .. controller_state.second_line
+    .. " / "
+    .. tostring(controller_state.first_delay)
+    .. " / "
+    .. tostring(controller_state.second_delay)
+    .. " / "
+    .. tostring(controller_state.first_flag)
+    .. " / "
+    .. tostring(controller_state.second_flag)
+    .. " / "
+    .. controller_state.role,
+    controller_state.duration
+end
+`)
+    })
+    const character = createBridgeCharacter({
+      controller: createLuaCharacterController({
+        scriptId: BRIDGE_SCRIPT_ID,
+        radiusInTiles: 2,
+        moveSpeedTilesPerSecond: 1.5,
+        config: {
+          dialogueLines: ['Need any tools?', 'Best steel in town.'],
+          patrolDelaysSeconds: [0.5, 1.25],
+          patrolFlags: [true, false],
+          messageDurationSeconds: 2.5,
+          role: 'blacksmith'
+        }
+      })
+    })
+    const player = createInitialPlayerCharacter({
+      mapWidth: 20,
+      mapHeight: 20
+    })
+
+    try {
+      runtime.attachCharacter(character, character.controller)
+
+      expect(
+        runtime.handleInteraction(character, character.controller, player)
+      ).toEqual({
+        message:
+          'Need any tools? / Best steel in town. / 0.5 / 1.25 / true / false / blacksmith',
+        durationMilliseconds: 2500
+      })
+    } finally {
+      runtime.destroy()
+    }
+  })
+
   it('contains register, step, and interact Lua errors inside the bridge', async () => {
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
     const runtime = await createBridgeRuntime({
@@ -326,8 +404,8 @@ end
 
       runtime.updateScript(BRIDGE_SCRIPT_ID, {
         source: createControllerModuleSource(`
-function controller.step(id, dt, x, y)
-  return
+function controller.register(id, home_x, home_y, radius)
+end
 `)
       })
 
@@ -344,7 +422,9 @@ function controller.step(id, dt, x, y)
       expect(errorSpy).toHaveBeenCalledWith(
         expect.stringContaining(`Lua controller error [${BRIDGE_SCRIPT_ID}:reload]`),
         expect.objectContaining({
-          message: expect.stringContaining('Lua source bridge-test.lua:')
+          message: expect.stringContaining(
+            `Lua controller validation failed for "${BRIDGE_SCRIPT_ID}"`
+          )
         })
       )
 
@@ -382,7 +462,11 @@ const createBridgeRuntime = async ({ source }: { source: string }) => {
   })
 }
 
-const createBridgeCharacter = () => ({
+const createBridgeCharacter = (
+  overrides: Partial<ReturnType<typeof createNpcCharacter>> & {
+    controller?: ReturnType<typeof createLuaCharacterController>
+  } = {}
+) => ({
   ...createNpcCharacter({
     id: 'bridge-npc',
     appearanceType: 'character_villager_brown_tunic',
@@ -395,9 +479,12 @@ const createBridgeCharacter = () => ({
       height: 1
     }
   }),
-  controller: createLuaCharacterController({
-    scriptId: BRIDGE_SCRIPT_ID,
-    radiusInTiles: 2,
-    moveSpeedTilesPerSecond: 1.5
-  })
+  ...overrides,
+  controller:
+    overrides.controller ??
+    createLuaCharacterController({
+      scriptId: BRIDGE_SCRIPT_ID,
+      radiusInTiles: 2,
+      moveSpeedTilesPerSecond: 1.5
+    })
 })

@@ -15,6 +15,7 @@ This document is a short guide for module boundaries and code placement.
 - `src/game/lua/`: Lua wasm bridge code that loads controller modules, exposes the public `engine.*` Lua API, and evaluates scripts for runtime characters.
 - `src/game/lua/luaControllerApi.ts`: source of truth for the Lua-visible controller contract.
 - `src/game/tiled/`: TMX/TSX parsing, tile metadata, and event-layer data extraction.
+- `src/game/tiled/createNpcCharactersFromEventLayers.ts`: translate `character` object-layer events plus `controller.*` TMX properties into shared NPC character state.
 - `src/rendering/`: PixiJS rendering code and asset-to-view adaptation.
 - `src/rendering/`: map tile rendering, depth sorting, and event character presentation.
 - `scripts/`: project automation scripts such as third-party fetch/build steps.
@@ -30,12 +31,16 @@ This document is a short guide for module boundaries and code placement.
   - `step`: required movement-intent update
   - `interact`: optional response when another character interacts with this character
 - `src/main.ts`: map only `scriptId -> source`. Do not repeat Lua method names in the app entry point.
+- TMX owns which NPC uses which controller.
+  Use `controller.kind`, `controller.scriptId`, `controller.radiusInTiles`, and `controller.moveSpeedTilesPerSecond` on `character` events.
+  Treat other `controller.*` properties as controller config values.
 - `src/game/lua/createLuaCharacterControllerRuntime.ts`: own Lua module loading, method dispatch, script reload, and wasm bridge details.
 - `src/game/lua/luaControllerApi.ts`: own the public Lua-visible contract and reserved method names.
 - `docs/lua-controller-api.md`: explain the same contract in human-readable form for AI and script authors.
 - Validate Lua controller scripts before first load and hot reload. Use compile checking plus isolated contract validation so a broken script does not replace the active runtime.
 - Keep the public Lua surface narrow. Expose new data or actions through `engine.*` only after updating both the TypeScript contract and the Lua API document.
 - Let Lua return movement intent and request explicit `engine.*` actions only. Keep collision, target resolution, cooldown, event ordering, and final rendering effects outside Lua.
+- Use `engine.self.get_controller_config()` when Lua needs TMX-authored per-character settings such as dialogue lists or small behavior flags.
 
 ## Boundary Rules
 

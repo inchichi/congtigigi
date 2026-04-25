@@ -45,11 +45,25 @@ export type NpcCharacterController = {
   moveSpeedTilesPerSecond: number
 }
 
+export type LuaCharacterControllerConfigValue =
+  | boolean
+  | number
+  | string
+  | boolean[]
+  | number[]
+  | string[]
+
+export type LuaCharacterControllerConfig = Record<
+  string,
+  LuaCharacterControllerConfigValue
+>
+
 export type LuaCharacterController = {
   kind: 'lua'
   scriptId: string
   radiusInTiles: number
   moveSpeedTilesPerSecond: number
+  config: LuaCharacterControllerConfig
 }
 
 type CreateInitialPlayerCharacterInput = {
@@ -70,7 +84,7 @@ type CreateNpcCharacterInput = {
     height: number
   }
   blocksMovement?: boolean
-  controller?: NpcCharacterController
+  controller?: CharacterController
 }
 
 type MoveCharacterStateInput = {
@@ -112,16 +126,19 @@ export const createIdleNpcCharacterController = ({
 export const createLuaCharacterController = ({
   scriptId,
   radiusInTiles,
+  config = {},
   moveSpeedTilesPerSecond = DEFAULT_CHARACTER_MOVE_SPEED_TILES_PER_SECOND
 }: {
   scriptId: string
   radiusInTiles: number
+  config?: LuaCharacterControllerConfig
   moveSpeedTilesPerSecond?: number
 }): LuaCharacterController => ({
   kind: 'lua',
   scriptId,
   radiusInTiles,
-  moveSpeedTilesPerSecond
+  moveSpeedTilesPerSecond,
+  config
 })
 
 export const createInitialPlayerCharacter = ({

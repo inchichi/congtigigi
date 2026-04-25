@@ -42,6 +42,9 @@ describe('luaControllerApi', () => {
     controller: createLuaCharacterController({
       scriptId: 'wander-near-home',
       radiusInTiles: 2,
+      config: {
+        dialogueLines: ['Hello there.']
+      },
       moveSpeedTilesPerSecond: 1.5
     })
   }
@@ -61,6 +64,9 @@ describe('luaControllerApi', () => {
         }
       },
       radiusInTiles: 2
+    })
+    expect(luaCharacter.controller.config).toEqual({
+      dialogueLines: ['Hello there.']
     })
   })
 

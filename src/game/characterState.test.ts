@@ -141,7 +141,8 @@ describe('getCharacterControllerIntent', () => {
             kind: 'lua',
             scriptId: 'wander-near-home',
             radiusInTiles: 2,
-            moveSpeedTilesPerSecond: 4
+            moveSpeedTilesPerSecond: 4,
+            config: {}
           }
         },
         deltaMilliseconds: 250

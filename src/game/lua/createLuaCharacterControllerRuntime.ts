@@ -1,6 +1,8 @@
 import type {
   CharacterState,
-  LuaCharacterController
+  LuaCharacterController,
+  LuaCharacterControllerConfig,
+  LuaCharacterControllerConfigValue
 } from '../characterState'
 import {
   DEFAULT_LUA_CONTROLLER_MESSAGE_DURATION_MILLISECONDS,
@@ -140,13 +142,30 @@ const LUA_CONTROLLER_HAS_METHOD_HELPER_FUNCTION_NAME =
   '__engine_has_controller_method'
 const LUA_CONTROLLER_VALIDATE_HELPER_FUNCTION_NAME =
   '__engine_validate_controller'
+const LUA_CONTROLLER_RESET_CONFIG_HELPER_FUNCTION_NAME =
+  '__engine_reset_controller_config'
+const LUA_CONTROLLER_SET_CONFIG_STRING_HELPER_FUNCTION_NAME =
+  '__engine_set_controller_config_string'
+const LUA_CONTROLLER_SET_CONFIG_NUMBER_HELPER_FUNCTION_NAME =
+  '__engine_set_controller_config_number'
+const LUA_CONTROLLER_SET_CONFIG_BOOLEAN_HELPER_FUNCTION_NAME =
+  '__engine_set_controller_config_boolean'
+const LUA_CONTROLLER_APPEND_CONFIG_STRING_LIST_ITEM_HELPER_FUNCTION_NAME =
+  '__engine_append_controller_config_string_list_item'
+const LUA_CONTROLLER_APPEND_CONFIG_NUMBER_LIST_ITEM_HELPER_FUNCTION_NAME =
+  '__engine_append_controller_config_number_list_item'
+const LUA_CONTROLLER_APPEND_CONFIG_BOOLEAN_LIST_ITEM_HELPER_FUNCTION_NAME =
+  '__engine_append_controller_config_boolean_list_item'
+const LUA_CONTROLLER_REMOVE_CONFIG_HELPER_FUNCTION_NAME =
+  '__engine_remove_controller_config'
 const LUA_CONTROLLER_DRAIN_EVENTS_FUNCTION_NAME = '__engine_drain_events_json'
 const LUA_CONTROLLER_RUNTIME_HOST_API_SOURCE = `
 local runtime = {
   current_character_id = nil,
   current_source_character_id = nil,
   queued_events = {},
-  controllers_by_script_id = {}
+  controllers_by_script_id = {},
+  controller_config_by_character_id = {}
 }
 
 local function escape_json_string(value)
@@ -215,6 +234,20 @@ local function require_current_character_id()
   return runtime.current_character_id
 end
 
+local function clone_table(value)
+  local clone = {}
+
+  for key, entry in pairs(value) do
+    if type(entry) == 'table' then
+      clone[key] = clone_table(entry)
+    else
+      clone[key] = entry
+    end
+  end
+
+  return clone
+end
+
 function ${LUA_CONTROLLER_LOAD_HELPER_FUNCTION_NAME}(script_id, source, chunk_name)
   local chunk, load_error = load(source, chunk_name)
 
@@ -250,6 +283,62 @@ function ${LUA_CONTROLLER_HAS_METHOD_HELPER_FUNCTION_NAME}(script_id, method_nam
   local controller = runtime.controllers_by_script_id[script_id]
 
   return type(controller) == 'table' and type(controller[method_name]) == 'function' and 1 or 0
+end
+
+function ${LUA_CONTROLLER_RESET_CONFIG_HELPER_FUNCTION_NAME}(character_id)
+  runtime.controller_config_by_character_id[character_id] = {}
+end
+
+function ${LUA_CONTROLLER_SET_CONFIG_STRING_HELPER_FUNCTION_NAME}(character_id, key, value)
+  runtime.controller_config_by_character_id[character_id][key] = tostring(value)
+end
+
+function ${LUA_CONTROLLER_SET_CONFIG_NUMBER_HELPER_FUNCTION_NAME}(character_id, key, value)
+  runtime.controller_config_by_character_id[character_id][key] = value
+end
+
+function ${LUA_CONTROLLER_SET_CONFIG_BOOLEAN_HELPER_FUNCTION_NAME}(character_id, key, numeric_boolean)
+  runtime.controller_config_by_character_id[character_id][key] = numeric_boolean ~= 0
+end
+
+function ${LUA_CONTROLLER_APPEND_CONFIG_STRING_LIST_ITEM_HELPER_FUNCTION_NAME}(character_id, key, value)
+  local config = runtime.controller_config_by_character_id[character_id]
+  local list = config[key]
+
+  if type(list) ~= 'table' then
+    list = {}
+    config[key] = list
+  end
+
+  list[#list + 1] = tostring(value)
+end
+
+function ${LUA_CONTROLLER_APPEND_CONFIG_NUMBER_LIST_ITEM_HELPER_FUNCTION_NAME}(character_id, key, value)
+  local config = runtime.controller_config_by_character_id[character_id]
+  local list = config[key]
+
+  if type(list) ~= 'table' then
+    list = {}
+    config[key] = list
+  end
+
+  list[#list + 1] = value
+end
+
+function ${LUA_CONTROLLER_APPEND_CONFIG_BOOLEAN_LIST_ITEM_HELPER_FUNCTION_NAME}(character_id, key, numeric_boolean)
+  local config = runtime.controller_config_by_character_id[character_id]
+  local list = config[key]
+
+  if type(list) ~= 'table' then
+    list = {}
+    config[key] = list
+  end
+
+  list[#list + 1] = numeric_boolean ~= 0
+end
+
+function ${LUA_CONTROLLER_REMOVE_CONFIG_HELPER_FUNCTION_NAME}(character_id)
+  runtime.controller_config_by_character_id[character_id] = nil
 end
 
 function ${LUA_CONTROLLER_VALIDATE_HELPER_FUNCTION_NAME}(script_id, source, chunk_name)
@@ -374,7 +463,18 @@ function ${LUA_CONTROLLER_DRAIN_EVENTS_FUNCTION_NAME}()
 end
 
 ${LUA_CONTROLLER_PUBLIC_API_NAME} = ${LUA_CONTROLLER_PUBLIC_API_NAME} or {}
+${LUA_CONTROLLER_PUBLIC_API_NAME}.self = ${LUA_CONTROLLER_PUBLIC_API_NAME}.self or {}
 ${LUA_CONTROLLER_PUBLIC_API_NAME}.ui = ${LUA_CONTROLLER_PUBLIC_API_NAME}.ui or {}
+
+function ${LUA_CONTROLLER_PUBLIC_API_NAME}.self.get_controller_config()
+  local config = runtime.controller_config_by_character_id[require_current_character_id()]
+
+  if type(config) ~= 'table' then
+    return {}
+  end
+
+  return clone_table(config)
+end
 
 function ${LUA_CONTROLLER_PUBLIC_API_NAME}.ui.show_message(message, duration_seconds)
   if message == nil then
@@ -720,6 +820,12 @@ const attachCharacterToState = (
     scriptSources,
     attachedController.controller.scriptId
   )
+  syncControllerConfigToState(
+    lua,
+    luaState,
+    attachedController.character.id,
+    attachedController.controller.config
+  )
 
   if (
     !hasLuaControllerMethod(
@@ -765,6 +871,7 @@ const detachCharacterFromState = (
       LUA_CONTROLLER_UNREGISTER_METHOD_NAME
     )
   ) {
+    removeControllerConfigFromState(lua, luaState, attachedController.character.id)
     return
   }
 
@@ -780,6 +887,8 @@ const detachCharacterFromState = (
       createLuaControllerUnregisterInput(attachedController.character)
     )
   )
+
+  removeControllerConfigFromState(lua, luaState, attachedController.character.id)
 }
 
 const getRequiredScript = (
@@ -793,6 +902,109 @@ const getRequiredScript = (
   }
 
   return script
+}
+
+const syncControllerConfigToState = (
+  lua: LuaModule,
+  luaState: number,
+  characterId: string,
+  config: LuaCharacterControllerConfig
+) => {
+  callLuaFunction(lua, luaState, LUA_CONTROLLER_RESET_CONFIG_HELPER_FUNCTION_NAME, [
+    characterId
+  ])
+
+  for (const [configKey, configValue] of Object.entries(config)) {
+    pushControllerConfigValueToState(lua, luaState, characterId, configKey, configValue)
+  }
+}
+
+const pushControllerConfigValueToState = (
+  lua: LuaModule,
+  luaState: number,
+  characterId: string,
+  configKey: string,
+  configValue: LuaCharacterControllerConfigValue
+) => {
+  if (typeof configValue === 'string') {
+    callLuaFunction(lua, luaState, LUA_CONTROLLER_SET_CONFIG_STRING_HELPER_FUNCTION_NAME, [
+      characterId,
+      configKey,
+      configValue
+    ])
+    return
+  }
+
+  if (typeof configValue === 'number') {
+    callLuaFunction(lua, luaState, LUA_CONTROLLER_SET_CONFIG_NUMBER_HELPER_FUNCTION_NAME, [
+      characterId,
+      configKey,
+      configValue
+    ])
+    return
+  }
+
+  if (typeof configValue === 'boolean') {
+    callLuaFunction(lua, luaState, LUA_CONTROLLER_SET_CONFIG_BOOLEAN_HELPER_FUNCTION_NAME, [
+      characterId,
+      configKey,
+      configValue ? 1 : 0
+    ])
+    return
+  }
+
+  if (configValue.every((item) => typeof item === 'string')) {
+    for (const item of configValue) {
+      callLuaFunction(
+        lua,
+        luaState,
+        LUA_CONTROLLER_APPEND_CONFIG_STRING_LIST_ITEM_HELPER_FUNCTION_NAME,
+        [characterId, configKey, item]
+      )
+    }
+
+    return
+  }
+
+  if (configValue.every((item) => typeof item === 'number')) {
+    for (const item of configValue) {
+      callLuaFunction(
+        lua,
+        luaState,
+        LUA_CONTROLLER_APPEND_CONFIG_NUMBER_LIST_ITEM_HELPER_FUNCTION_NAME,
+        [characterId, configKey, item]
+      )
+    }
+
+    return
+  }
+
+  if (configValue.every((item) => typeof item === 'boolean')) {
+    for (const item of configValue) {
+      callLuaFunction(
+        lua,
+        luaState,
+        LUA_CONTROLLER_APPEND_CONFIG_BOOLEAN_LIST_ITEM_HELPER_FUNCTION_NAME,
+        [characterId, configKey, item ? 1 : 0]
+      )
+    }
+
+    return
+  }
+
+  throw new Error(
+    `Unsupported Lua controller config list "${configKey}": list items must all share one primitive type`
+  )
+}
+
+const removeControllerConfigFromState = (
+  lua: LuaModule,
+  luaState: number,
+  characterId: string
+) => {
+  callLuaFunction(lua, luaState, LUA_CONTROLLER_REMOVE_CONFIG_HELPER_FUNCTION_NAME, [
+    characterId
+  ])
 }
 
 const loadLuaModuleFactory = async (): Promise<LuaModuleFactory> => {

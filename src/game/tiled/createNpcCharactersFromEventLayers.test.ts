@@ -26,12 +26,21 @@ describe('createNpcCharactersFromEventLayers', () => {
     <object id="7" name="blacksmith" type="character" x="80" y="96">
       <properties>
         <property name="type" value="character_bearded_apron_man"/>
+        <property name="controller.scriptId" value="reply-with-message"/>
+        <property name="controller.dialogueLines" type="list">
+          <item value="Need any tools?"/>
+          <item value="Best steel in town."/>
+        </property>
+        <property name="controller.messageDurationSeconds" type="float" value="3.5"/>
       </properties>
     </object>
     <object id="8" name="ghost" type="character" x="112" y="128" width="16" height="32">
       <properties>
         <property name="type" value="character_wizard_purple"/>
         <property name="blocksMovement" type="bool" value="false"/>
+        <property name="controller.scriptId" value="wander-near-home"/>
+        <property name="controller.radiusInTiles" type="int" value="3"/>
+        <property name="controller.moveSpeedTilesPerSecond" type="float" value="1.5"/>
       </properties>
     </object>
     <object id="9" name="signpost" type="trigger" x="32" y="32"/>
@@ -63,9 +72,14 @@ describe('createNpcCharactersFromEventLayers', () => {
         },
         blocksMovement: true,
         controller: {
-          kind: 'npc',
-          behavior: 'idle',
-          moveSpeedTilesPerSecond: 8
+          kind: 'lua',
+          scriptId: 'reply-with-message',
+          radiusInTiles: 0,
+          moveSpeedTilesPerSecond: 8,
+          config: {
+            dialogueLines: ['Need any tools?', 'Best steel in town.'],
+            messageDurationSeconds: 3.5
+          }
         }
       },
       {
@@ -82,9 +96,11 @@ describe('createNpcCharactersFromEventLayers', () => {
         },
         blocksMovement: false,
         controller: {
-          kind: 'npc',
-          behavior: 'idle',
-          moveSpeedTilesPerSecond: 8
+          kind: 'lua',
+          scriptId: 'wander-near-home',
+          radiusInTiles: 3,
+          moveSpeedTilesPerSecond: 1.5,
+          config: {}
         }
       }
     ])

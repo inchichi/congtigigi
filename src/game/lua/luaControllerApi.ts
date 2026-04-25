@@ -1,6 +1,7 @@
 import type {
   CharacterState,
-  LuaCharacterController
+  LuaCharacterController,
+  LuaCharacterControllerConfig
 } from '../characterState'
 
 export const LUA_CONTROLLER_REGISTER_METHOD_NAME = 'register'
@@ -52,8 +53,13 @@ export type LuaControllerUiApi = {
   showMessage: (message: string, durationSeconds?: number) => void
 }
 
+export type LuaControllerSelfApi = {
+  getControllerConfig: () => LuaCharacterControllerConfig
+}
+
 export type LuaControllerPublicApi = {
   ui: LuaControllerUiApi
+  self: LuaControllerSelfApi
 }
 
 export type LuaControllerShowCharacterMessageEvent = {

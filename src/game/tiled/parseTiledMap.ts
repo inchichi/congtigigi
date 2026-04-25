@@ -30,7 +30,13 @@ export type ParsedTiledLayer = {
   tiles: ParsedTiledTile[]
 }
 
-export type ParsedTiledPropertyValue = boolean | number | string
+export type ParsedTiledPropertyValue =
+  | boolean
+  | number
+  | string
+  | boolean[]
+  | number[]
+  | string[]
 
 export type ParsedTiledEvent = {
   id: number
@@ -379,9 +385,55 @@ const parseProperties = (
 const parsePropertyValue = (propertyElement: Element): ParsedTiledPropertyValue => {
   const type = propertyElement.getAttribute('type') ?? 'string'
   const rawValue =
-    propertyElement.getAttribute('value') ?? getElementTextContent(propertyElement)
+    getStringAttribute(propertyElement, 'value') ?? getElementTextContent(propertyElement)
 
   switch (type) {
+    case 'bool':
+      return rawValue === 'true'
+    case 'int':
+    case 'float':
+      return Number(rawValue)
+    case 'list':
+      return parseListPropertyValue(propertyElement)
+    default:
+      return rawValue
+  }
+}
+
+const parseListPropertyValue = (
+  propertyElement: Element
+): boolean[] | number[] | string[] => {
+  const defaultItemType = getStringAttribute(propertyElement, 'propertytype') ?? 'string'
+  const values = getDirectChildElements(propertyElement, 'item').map((itemElement) =>
+    parseListItemValue(itemElement, defaultItemType)
+  )
+
+  if (values.every((value) => typeof value === 'boolean')) {
+    return values
+  }
+
+  if (values.every((value) => typeof value === 'number')) {
+    return values
+  }
+
+  if (values.every((value) => typeof value === 'string')) {
+    return values
+  }
+
+  throw new Error(
+    `Mixed list item types are not supported for property "${getRequiredAttribute(propertyElement, 'name')}"`
+  )
+}
+
+const parseListItemValue = (
+  itemElement: Element,
+  defaultItemType: string
+): boolean | number | string => {
+  const itemType = getStringAttribute(itemElement, 'type') ?? defaultItemType
+  const rawValue =
+    getStringAttribute(itemElement, 'value') ?? getElementTextContent(itemElement)
+
+  switch (itemType) {
     case 'bool':
       return rawValue === 'true'
     case 'int':
