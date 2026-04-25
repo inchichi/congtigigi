@@ -17,7 +17,7 @@ type ProcessInteractionEventsInput = {
     'canReceiveInteraction' | 'drainEvents' | 'handleInteraction'
   >
   now: number
-  interactionLockUntilBySourceCharacterId: Map<string, number>
+  interactionLockUntilByCharacterPair: Map<string, number>
 }
 
 export const processInteractionEvents = ({
@@ -25,7 +25,7 @@ export const processInteractionEvents = ({
   characters,
   controllerRuntime,
   now,
-  interactionLockUntilBySourceCharacterId
+  interactionLockUntilByCharacterPair
 }: ProcessInteractionEventsInput): ShowCharacterMessageGameEvent[] => {
   const emittedEvents = events.filter(
     (event): event is ShowCharacterMessageGameEvent =>
@@ -34,13 +34,6 @@ export const processInteractionEvents = ({
 
   for (const event of events) {
     if (event.kind !== 'interaction-requested') {
-      continue
-    }
-
-    const lockedUntil =
-      interactionLockUntilBySourceCharacterId.get(event.sourceCharacterId) ?? 0
-
-    if (lockedUntil > now) {
       continue
     }
 
@@ -59,6 +52,17 @@ export const processInteractionEvents = ({
     })
 
     if (!targetCharacter) {
+      continue
+    }
+
+    const interactionLockKey = createInteractionLockKey(
+      sourceCharacter.id,
+      targetCharacter.id
+    )
+    const lockedUntil =
+      interactionLockUntilByCharacterPair.get(interactionLockKey) ?? 0
+
+    if (lockedUntil > now) {
       continue
     }
 
@@ -91,8 +95,8 @@ export const processInteractionEvents = ({
       continue
     }
 
-    interactionLockUntilBySourceCharacterId.set(
-      sourceCharacter.id,
+    interactionLockUntilByCharacterPair.set(
+      interactionLockKey,
       now + interactionLockDurationMilliseconds
     )
   }
@@ -118,3 +122,8 @@ const getMaxMessageEventDuration = (
       Math.max(maxDurationMilliseconds, event.durationMilliseconds),
     0
   )
+
+const createInteractionLockKey = (
+  sourceCharacterId: string,
+  targetCharacterId: string
+): string => `${sourceCharacterId}:${targetCharacterId}`

@@ -169,7 +169,7 @@ export const createPixiTiledMapView = async ({
   const pressedActions = new Set<CharacterAction>()
   const triggeredActions = new Set<CharacterAction>()
   const gameEventQueue = createGameEventQueue()
-  const interactionLockUntilBySourceCharacterId = new Map<string, number>()
+  const interactionLockUntilByCharacterPair = new Map<string, number>()
   const activeCharacterMessages = new Map<string, ActiveCharacterMessage>()
   const renderedCharacters = new Map<string, Sprite>()
   const characterPixelWidth =
@@ -728,7 +728,7 @@ export const createPixiTiledMapView = async ({
         characters: characterStates,
         controllerRuntime,
         now,
-        interactionLockUntilBySourceCharacterId
+        interactionLockUntilByCharacterPair
       })
 
       for (const event of emittedEvents) {

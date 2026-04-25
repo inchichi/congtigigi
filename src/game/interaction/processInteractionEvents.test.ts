@@ -28,7 +28,7 @@ describe('processInteractionEvents', () => {
         height: 1
       }
     })
-    const interactionLockUntilBySourceCharacterId = new Map<string, number>()
+    const interactionLockUntilByCharacterPair = new Map<string, number>()
 
     expect(
       processInteractionEvents({
@@ -49,7 +49,7 @@ describe('processInteractionEvents', () => {
           }))
         },
         now: 100,
-        interactionLockUntilBySourceCharacterId
+        interactionLockUntilByCharacterPair
       })
     ).toEqual([
       {
@@ -59,10 +59,12 @@ describe('processInteractionEvents', () => {
         durationMilliseconds: 1200
       }
     ])
-    expect(interactionLockUntilBySourceCharacterId.get(player.id)).toBe(1300)
+    expect(interactionLockUntilByCharacterPair.get(`${player.id}:blacksmith`)).toBe(
+      1300
+    )
   })
 
-  it('ignores repeated interaction requests while the source is locked', () => {
+  it('ignores repeated interaction requests while the same source-target pair is locked', () => {
     const player = {
       ...createInitialPlayerCharacter({
         mapWidth: 20,
@@ -106,9 +108,81 @@ describe('processInteractionEvents', () => {
           }))
         },
         now: 500,
-        interactionLockUntilBySourceCharacterId: new Map([[player.id, 1000]])
+        interactionLockUntilByCharacterPair: new Map([
+          [`${player.id}:blacksmith`, 1000]
+        ])
       })
     ).toEqual([])
+  })
+
+  it('allows interactions with a different target while another target is locked', () => {
+    const player = {
+      ...createInitialPlayerCharacter({
+        mapWidth: 20,
+        mapHeight: 20
+      }),
+      position: {
+        x: 5,
+        y: 5
+      },
+      facing: 'down' as const
+    }
+    const blacksmith = createNpcCharacter({
+      id: 'blacksmith',
+      appearanceType: 'character_bearded_apron_man',
+      position: {
+        x: 6,
+        y: 5
+      },
+      collisionSize: {
+        width: 1,
+        height: 1
+      }
+    })
+    const villager = createNpcCharacter({
+      id: 'villager',
+      appearanceType: 'character_blue_hood',
+      position: {
+        x: 5,
+        y: 6
+      },
+      collisionSize: {
+        width: 1,
+        height: 1
+      }
+    })
+
+    expect(
+      processInteractionEvents({
+        events: [
+          {
+            kind: 'interaction-requested',
+            sourceCharacterId: player.id
+          }
+        ],
+        characters: [player, blacksmith, villager],
+        controllerRuntime: {
+          canReceiveInteraction: () => true,
+          drainEvents: vi.fn(() => []),
+          handleInteraction: vi.fn(() => ({
+            kind: 'message' as const,
+            message: 'Hello there.',
+            durationMilliseconds: 900
+          }))
+        },
+        now: 500,
+        interactionLockUntilByCharacterPair: new Map([
+          [`${player.id}:blacksmith`, 1000]
+        ])
+      })
+    ).toEqual([
+      {
+        kind: 'show-character-message',
+        characterId: 'villager',
+        message: 'Hello there.',
+        durationMilliseconds: 900
+      }
+    ])
   })
 
   it('passes through queued message events and prefers runtime-emitted interaction messages', () => {
@@ -135,7 +209,7 @@ describe('processInteractionEvents', () => {
         height: 1
       }
     })
-    const interactionLockUntilBySourceCharacterId = new Map<string, number>()
+    const interactionLockUntilByCharacterPair = new Map<string, number>()
 
     expect(
       processInteractionEvents({
@@ -169,7 +243,7 @@ describe('processInteractionEvents', () => {
           }))
         },
         now: 250,
-        interactionLockUntilBySourceCharacterId
+        interactionLockUntilByCharacterPair
       })
     ).toEqual([
       {
@@ -185,6 +259,8 @@ describe('processInteractionEvents', () => {
         durationMilliseconds: 1600
       }
     ])
-    expect(interactionLockUntilBySourceCharacterId.get(player.id)).toBe(1850)
+    expect(interactionLockUntilByCharacterPair.get(`${player.id}:blacksmith`)).toBe(
+      1850
+    )
   })
 })
