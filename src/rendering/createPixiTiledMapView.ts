@@ -3,8 +3,12 @@ import {
   Application,
   Assets,
   Container,
+  NineSliceSprite,
   Rectangle,
   Sprite,
+  Spritesheet,
+  Text,
+  TextStyle,
   Texture
 } from 'pixi.js'
 
@@ -69,11 +73,37 @@ type CollisionRect = {
 }
 
 type ActiveCharacterMessage = {
-  element: HTMLDivElement
+  container: Container
+  panel: NineSliceSprite
+  text: Text
   expiresAt: number
 }
 
 const DEPTH_SORTED_LAYER_NAME = 'object'
+const UI_SPRITESHEET_URL = new URL(
+  '../assets/spritesheets/uipack_rpg_sheet.json',
+  import.meta.url
+).href
+const MESSAGE_PANEL_TEXTURE_NAME = 'panelInset_beige.png'
+const MESSAGE_PANEL_BORDER_SIZE = 8
+const MESSAGE_PANEL_PADDING_X = 12
+const MESSAGE_PANEL_PADDING_Y = 8
+const MESSAGE_PANEL_MIN_WIDTH = 64
+const MESSAGE_PANEL_MIN_HEIGHT = 28
+const MESSAGE_TEXT_MAX_WIDTH = 188
+const MESSAGE_OFFSET_Y = 10
+const MESSAGE_TEXT_STYLE = new TextStyle({
+  align: 'center',
+  breakWords: true,
+  fill: 0x2e2313,
+  fontFamily: '"Jersey 25", NeoDunggeunmo, monospace',
+  fontSize: 14,
+  lineHeight: 18,
+  padding: 2,
+  wordWrap: true,
+  wordWrapWidth: MESSAGE_TEXT_MAX_WIDTH
+})
+let messageFontsReadyPromise: Promise<void> | undefined
 
 export const createPixiTiledMapView = async ({
   mountElement,
@@ -85,6 +115,10 @@ export const createPixiTiledMapView = async ({
   controllerRuntime
 }: CreatePixiTiledMapViewInput): Promise<Application> => {
   const app = new Application()
+  const [messagePanelTexture] = await Promise.all([
+    loadMessagePanelTexture(),
+    ensureMessageFontsLoaded()
+  ])
 
   await app.init({
     antialias: false,
@@ -98,17 +132,37 @@ export const createPixiTiledMapView = async ({
   })
 
   const sceneElement = document.createElement('div')
-  const messageLayerElement = document.createElement('div')
+  const runtimeWarningBannerElement = document.createElement('div')
 
   sceneElement.className = 'game-scene'
   sceneElement.style.width = `${map.pixelWidth}px`
   sceneElement.style.height = `${map.pixelHeight}px`
-  messageLayerElement.className = 'message-layer'
-  sceneElement.append(app.canvas, messageLayerElement)
+  sceneElement.append(app.canvas)
   mountElement.replaceChildren(sceneElement)
   app.canvas.classList.add('game-canvas')
 
+  runtimeWarningBannerElement.setAttribute('role', 'alert')
+  runtimeWarningBannerElement.setAttribute('aria-live', 'polite')
+  runtimeWarningBannerElement.hidden = true
+  runtimeWarningBannerElement.style.position = 'fixed'
+  runtimeWarningBannerElement.style.top = '12px'
+  runtimeWarningBannerElement.style.left = '50%'
+  runtimeWarningBannerElement.style.transform = 'translateX(-50%)'
+  runtimeWarningBannerElement.style.zIndex = '9999'
+  runtimeWarningBannerElement.style.maxWidth = 'min(720px, calc(100vw - 24px))'
+  runtimeWarningBannerElement.style.padding = '8px 12px'
+  runtimeWarningBannerElement.style.border = '1px solid #d94b4b'
+  runtimeWarningBannerElement.style.background = '#fff1f1'
+  runtimeWarningBannerElement.style.color = '#7a1f1f'
+  runtimeWarningBannerElement.style.fontFamily =
+    'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, Liberation Mono, monospace'
+  runtimeWarningBannerElement.style.fontSize = '0.7rem'
+  runtimeWarningBannerElement.style.whiteSpace = 'pre-wrap'
+  runtimeWarningBannerElement.style.pointerEvents = 'none'
+  document.body.append(runtimeWarningBannerElement)
+
   const world = new Container()
+  const messageLayer = new Container()
   const tilesetResources = new Map<string, TilesetRenderResources>()
   const wallTiles = createWallTileLookup(map)
   const pressedDirections = new Set<CharacterMoveDirection>()
@@ -130,8 +184,58 @@ export const createPixiTiledMapView = async ({
     collisionSize: { ...character.collisionSize }
   }))
 
-  controllerRuntime.syncCharacters(characterStates)
+  const syncRuntimeWarningBanner = () => {
+    const warnings = controllerRuntime.getRuntimeWarnings()
 
+    if (warnings.length === 0) {
+      runtimeWarningBannerElement.hidden = true
+      runtimeWarningBannerElement.replaceChildren()
+      return
+    }
+
+    runtimeWarningBannerElement.hidden = false
+    const warningBlocks = warnings.map((warning) => {
+      const warningElement = document.createElement('div')
+      const warningLines = warning.split('\n')
+
+      warningElement.style.display = 'grid'
+      warningElement.style.gap = '2px'
+
+      for (const line of warningLines) {
+        const lineElement = document.createElement('div')
+        const luaSourceReferenceMatch = line.match(/([A-Za-z0-9_./-]+\.lua:\d+)/u)
+
+        if (luaSourceReferenceMatch && luaSourceReferenceMatch.index !== undefined) {
+          const prefixElement = document.createElement('span')
+          const pathElement = document.createElement('span')
+          const suffixElement = document.createElement('span')
+          const matchStart = luaSourceReferenceMatch.index
+          const matchedPath = luaSourceReferenceMatch[1]
+
+          prefixElement.textContent = line.slice(0, matchStart)
+          pathElement.textContent = matchedPath
+          pathElement.style.textDecoration = 'underline'
+          pathElement.style.textDecorationThickness = '1px'
+          suffixElement.textContent = line.slice(matchStart + matchedPath.length)
+          lineElement.append(prefixElement, pathElement, suffixElement)
+        } else {
+          lineElement.textContent = line
+        }
+
+        warningElement.append(lineElement)
+      }
+
+      return warningElement
+    })
+
+    runtimeWarningBannerElement.replaceChildren(...warningBlocks)
+  }
+
+  controllerRuntime.syncCharacters(characterStates)
+  syncRuntimeWarningBanner()
+
+  messageLayer.label = 'layer:messages'
+  messageLayer.sortableChildren = true
   app.stage.addChild(world)
 
   for (const tileset of map.tilesets) {
@@ -242,6 +346,7 @@ export const createPixiTiledMapView = async ({
     renderedCharacters.set(character.id, sprite)
     depthSortedLayer.addChild(sprite)
   }
+  world.addChild(messageLayer)
 
   const getCharacterStateById = (characterId: string): CharacterState => {
     const character = characterStates.find(
@@ -292,13 +397,30 @@ export const createPixiTiledMapView = async ({
     )
 
     if (!character) {
-      activeMessage.element.remove()
+      activeMessage.container.removeFromParent()
+      activeMessage.container.destroy({ children: true })
       activeCharacterMessages.delete(characterId)
       return
     }
 
-    activeMessage.element.style.left = `${character.position.x * map.tileWidth + characterPixelWidth / 2}px`
-    activeMessage.element.style.top = `${character.position.y * map.tileHeight - 8}px`
+    activeMessage.container.position.set(
+      Math.round(
+        character.position.x * map.tileWidth +
+          characterPixelWidth / 2 -
+          activeMessage.panel.width / 2
+      ),
+      Math.round(
+        character.position.y * map.tileHeight -
+          activeMessage.panel.height -
+          MESSAGE_OFFSET_Y
+      )
+    )
+    activeMessage.container.zIndex = getCharacterDepthSortValue(
+      character.position.y,
+      characterPixelHeight,
+      map.tileHeight
+    )
+    messageLayer.sortChildren()
   }
 
   const syncActiveCharacterMessages = () => {
@@ -315,18 +437,47 @@ export const createPixiTiledMapView = async ({
     let activeMessage = activeCharacterMessages.get(characterId)
 
     if (!activeMessage) {
-      const element = document.createElement('div')
+      const container = new Container()
+      const panel = new NineSliceSprite({
+        texture: messagePanelTexture,
+        bottomHeight: MESSAGE_PANEL_BORDER_SIZE,
+        leftWidth: MESSAGE_PANEL_BORDER_SIZE,
+        rightWidth: MESSAGE_PANEL_BORDER_SIZE,
+        topHeight: MESSAGE_PANEL_BORDER_SIZE
+      })
+      const text = new Text({
+        style: MESSAGE_TEXT_STYLE,
+        text: ''
+      })
 
-      element.className = 'character-message'
-      messageLayerElement.append(element)
+      panel.roundPixels = true
+      text.roundPixels = true
+      container.addChild(panel, text)
+      messageLayer.addChild(container)
       activeMessage = {
-        element,
+        container,
+        panel,
+        text,
         expiresAt: 0
       }
       activeCharacterMessages.set(characterId, activeMessage)
     }
 
-    activeMessage.element.textContent = message
+    activeMessage.text.text = message
+    const panelWidth = Math.max(
+      MESSAGE_PANEL_MIN_WIDTH,
+      Math.ceil(activeMessage.text.width) + MESSAGE_PANEL_PADDING_X * 2
+    )
+    const panelHeight = Math.max(
+      MESSAGE_PANEL_MIN_HEIGHT,
+      Math.ceil(activeMessage.text.height) + MESSAGE_PANEL_PADDING_Y * 2
+    )
+
+    activeMessage.panel.setSize(panelWidth, panelHeight)
+    activeMessage.text.position.set(
+      Math.round((panelWidth - activeMessage.text.width) / 2),
+      Math.round((panelHeight - activeMessage.text.height) / 2)
+    )
     activeMessage.expiresAt = performance.now() + durationMilliseconds
     syncCharacterMessageElement(characterId)
   }
@@ -337,7 +488,8 @@ export const createPixiTiledMapView = async ({
         continue
       }
 
-      activeMessage.element.remove()
+      activeMessage.container.removeFromParent()
+      activeMessage.container.destroy({ children: true })
       activeCharacterMessages.delete(characterId)
     }
   }
@@ -605,6 +757,8 @@ export const createPixiTiledMapView = async ({
         console.error('Runtime update failed.', error)
         lastRuntimeErrorMessage = message
       }
+    } finally {
+      syncRuntimeWarningBanner()
     }
   }
 
@@ -670,15 +824,49 @@ export const createPixiTiledMapView = async ({
       app.ticker.remove(updateCharacters)
       gameEventQueue.clear()
       for (const activeMessage of activeCharacterMessages.values()) {
-        activeMessage.element.remove()
+        activeMessage.container.destroy({ children: true })
       }
       activeCharacterMessages.clear()
+      runtimeWarningBannerElement.remove()
       controllerRuntime.destroy()
       app.destroy({ removeView: true }, { children: true })
     })
   }
 
   return app
+}
+
+const loadMessagePanelTexture = async (): Promise<Texture> => {
+  const uiSpritesheet = await Assets.load<Spritesheet>(UI_SPRITESHEET_URL)
+
+  uiSpritesheet.textureSource.scaleMode = 'nearest'
+
+  const panelTexture = uiSpritesheet.textures[MESSAGE_PANEL_TEXTURE_NAME]
+
+  if (!panelTexture) {
+    throw new Error(
+      `Missing ${MESSAGE_PANEL_TEXTURE_NAME} in ${UI_SPRITESHEET_URL}`
+    )
+  }
+
+  return panelTexture
+}
+
+const ensureMessageFontsLoaded = async (): Promise<void> => {
+  if (messageFontsReadyPromise) {
+    return messageFontsReadyPromise
+  }
+
+  if (!document.fonts) {
+    return
+  }
+
+  messageFontsReadyPromise = Promise.all([
+    document.fonts.load('400 14px "Jersey 25"'),
+    document.fonts.load('400 14px "NeoDunggeunmo"')
+  ]).then(() => undefined)
+
+  return messageFontsReadyPromise
 }
 
 const loadTilesetRenderResources = async (

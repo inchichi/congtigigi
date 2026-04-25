@@ -1,7 +1,23 @@
+@font-face {
+  font-family: 'NeoDunggeunmo';
+  src: url('./assets/fonts/neodgm.woff2') format('woff2');
+  font-display: swap;
+  font-style: normal;
+  font-weight: 400;
+}
+
+@font-face {
+  font-family: 'Jersey 25';
+  src: url('./assets/fonts/Jersey25-Regular.ttf') format('truetype');
+  font-display: swap;
+  font-style: normal;
+  font-weight: 400;
+}
+
 :root {
   color: #f4e7c5;
   background: #171311;
-  font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  font-family: 'Jersey 25', 'NeoDunggeunmo', monospace;
 }
 
 * {
@@ -26,6 +42,10 @@ body {
   background: #171311;
   overflow: auto;
   overscroll-behavior: contain;
+}
+
+.game-scene {
+  position: relative;
 }
 
 .game-canvas {
