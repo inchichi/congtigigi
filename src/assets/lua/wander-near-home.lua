@@ -5,6 +5,7 @@
 ---@field pause_remaining number 잠시 멈춰 있어야 하는 남은 시간(초)
 ---@field target_x number 현재 이동하려는 목표 위치 X
 ---@field target_y number 현재 이동하려는 목표 위치 Y
+---@field interaction_line string 상호작용했을 때 보여줄 말풍선
 
 ---이 스크립트는 `docs/lua-controller-api.md` 와
 ---`src/game/lua/luaControllerApi.ts` 계약만 사용한다고 가정한다.
@@ -55,13 +56,17 @@ end
 ---@param home_y number 배회의 기준 위치 Y
 ---@param radius number 기준 위치에서 허용할 최대 배회 반경
 function controller.register(id, home_x, home_y, radius)
+  local config = engine.self.get_controller_config()
+
   controllers[id] = {
     home_x = home_x,
     home_y = home_y,
     radius = radius,
     pause_remaining = 0,
     target_x = home_x,
-    target_y = home_y
+    target_y = home_y,
+    interaction_line =
+      type(config.interactionLine) == "string" and config.interactionLine or "비켜"
   }
 end
 
@@ -108,7 +113,13 @@ function controller.step(id, dt, x, y)
 end
 
 function controller.interact(id, source_id)
-  engine.ui.show_message("비켜", 2.5)
+  local controller_state = controllers[id]
+
+  if controller_state == nil then
+    return nil, nil
+  end
+
+  engine.ui.show_message(controller_state.interaction_line, 2.5)
 
   return nil, nil
 end
