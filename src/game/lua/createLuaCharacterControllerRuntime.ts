@@ -4,6 +4,10 @@ import type {
 } from '../characterState'
 import {
   DEFAULT_LUA_CONTROLLER_MESSAGE_DURATION_MILLISECONDS,
+  LUA_CONTROLLER_INTERACT_METHOD_NAME,
+  LUA_CONTROLLER_REGISTER_METHOD_NAME,
+  LUA_CONTROLLER_STEP_METHOD_NAME,
+  LUA_CONTROLLER_UNREGISTER_METHOD_NAME,
   LUA_CONTROLLER_PUBLIC_API_NAME,
   MIN_LUA_CONTROLLER_MESSAGE_DURATION_MILLISECONDS,
   createLuaControllerInteractInput,
@@ -16,12 +20,12 @@ import {
   getLuaControllerRegisterFunctionArguments,
   getLuaControllerStepFunctionArguments,
   getLuaControllerUnregisterFunctionArguments,
-  type LuaControllerFunctionContract,
+  type LuaControllerMethodName,
   type LuaControllerInteractionResponse,
   type LuaControllerRuntimeEvent
 } from './luaControllerApi'
 
-export type LuaControllerScriptSource = LuaControllerFunctionContract & {
+export type LuaControllerScriptSource = {
   source: string
 }
 
@@ -110,6 +114,7 @@ export type LuaCharacterControllerRuntime = {
     sourceCharacter: CharacterState
   ) => LuaControllerInteractionResponse | undefined
   drainEvents: () => LuaControllerRuntimeEvent[]
+  getActiveErrorMessages: () => string[]
   updateScript: (scriptId: string, script: LuaControllerScriptSource) => void
   destroy: () => void
 }
@@ -129,13 +134,19 @@ type LuaControllerCallContext = {
 }
 
 const LUA_MODULE_PATH = '/vendor/lua/lua-5.3.6.mjs'
+const LUA_CONTROLLER_LOAD_HELPER_FUNCTION_NAME = '__engine_load_controller'
 const LUA_CONTROLLER_CALL_HELPER_FUNCTION_NAME = '__engine_call_controller'
+const LUA_CONTROLLER_HAS_METHOD_HELPER_FUNCTION_NAME =
+  '__engine_has_controller_method'
+const LUA_CONTROLLER_VALIDATE_HELPER_FUNCTION_NAME =
+  '__engine_validate_controller'
 const LUA_CONTROLLER_DRAIN_EVENTS_FUNCTION_NAME = '__engine_drain_events_json'
 const LUA_CONTROLLER_RUNTIME_HOST_API_SOURCE = `
 local runtime = {
   current_character_id = nil,
   current_source_character_id = nil,
-  queued_events = {}
+  queued_events = {},
+  controllers_by_script_id = {}
 }
 
 local function escape_json_string(value)
@@ -204,11 +215,131 @@ local function require_current_character_id()
   return runtime.current_character_id
 end
 
-function ${LUA_CONTROLLER_CALL_HELPER_FUNCTION_NAME}(function_name, character_id, source_character_id, ...)
-  local controller_fn = _G[function_name]
+function ${LUA_CONTROLLER_LOAD_HELPER_FUNCTION_NAME}(script_id, source, chunk_name)
+  local chunk, load_error = load(source, chunk_name)
+
+  if type(chunk) ~= 'function' then
+    error(
+      'Lua controller syntax error in "'
+        .. tostring(script_id)
+        .. '": '
+        .. tostring(load_error)
+    )
+  end
+
+  local results = table.pack(pcall(chunk))
+
+  if not results[1] then
+    error(results[2])
+  end
+
+  local controller = results[2]
+
+  if type(controller) ~= 'table' then
+    error(
+      'Lua controller validation failed for "'
+        .. tostring(script_id)
+        .. '": the module must return a controller table'
+    )
+  end
+
+  runtime.controllers_by_script_id[script_id] = controller
+end
+
+function ${LUA_CONTROLLER_HAS_METHOD_HELPER_FUNCTION_NAME}(script_id, method_name)
+  local controller = runtime.controllers_by_script_id[script_id]
+
+  return type(controller) == 'table' and type(controller[method_name]) == 'function' and 1 or 0
+end
+
+function ${LUA_CONTROLLER_VALIDATE_HELPER_FUNCTION_NAME}(script_id, source, chunk_name)
+  local env = setmetatable({
+    ${LUA_CONTROLLER_PUBLIC_API_NAME} = ${LUA_CONTROLLER_PUBLIC_API_NAME}
+  }, {
+    __index = _G
+  })
+  local chunk, load_error = load(source, chunk_name, 't', env)
+
+  if type(chunk) ~= 'function' then
+    error(
+      'Lua controller syntax error in "'
+        .. tostring(script_id)
+        .. '": '
+        .. tostring(load_error)
+    )
+  end
+
+  local results = table.pack(pcall(chunk))
+
+  if not results[1] then
+    error(results[2])
+  end
+
+  local controller = results[2]
+
+  if type(controller) ~= 'table' then
+    error(
+      'Lua controller validation failed for "'
+        .. tostring(script_id)
+        .. '": the module must return a controller table'
+    )
+  end
+
+  if type(controller.${LUA_CONTROLLER_STEP_METHOD_NAME}) ~= 'function' then
+    error(
+      'Lua controller validation failed for "'
+        .. tostring(script_id)
+        .. '": missing required method controller.${LUA_CONTROLLER_STEP_METHOD_NAME}(id, delta_seconds, x, y)'
+    )
+  end
+
+  if controller.${LUA_CONTROLLER_REGISTER_METHOD_NAME} ~= nil
+    and type(controller.${LUA_CONTROLLER_REGISTER_METHOD_NAME}) ~= 'function'
+  then
+    error(
+      'Lua controller validation failed for "'
+        .. tostring(script_id)
+        .. '": controller.${LUA_CONTROLLER_REGISTER_METHOD_NAME} must be a function when present'
+    )
+  end
+
+  if controller.${LUA_CONTROLLER_UNREGISTER_METHOD_NAME} ~= nil
+    and type(controller.${LUA_CONTROLLER_UNREGISTER_METHOD_NAME}) ~= 'function'
+  then
+    error(
+      'Lua controller validation failed for "'
+        .. tostring(script_id)
+        .. '": controller.${LUA_CONTROLLER_UNREGISTER_METHOD_NAME} must be a function when present'
+    )
+  end
+
+  if controller.${LUA_CONTROLLER_INTERACT_METHOD_NAME} ~= nil
+    and type(controller.${LUA_CONTROLLER_INTERACT_METHOD_NAME}) ~= 'function'
+  then
+    error(
+      'Lua controller validation failed for "'
+        .. tostring(script_id)
+        .. '": controller.${LUA_CONTROLLER_INTERACT_METHOD_NAME} must be a function when present'
+    )
+  end
+end
+
+function ${LUA_CONTROLLER_CALL_HELPER_FUNCTION_NAME}(script_id, method_name, character_id, source_character_id, ...)
+  local controller = runtime.controllers_by_script_id[script_id]
+
+  if type(controller) ~= 'table' then
+    error('Missing Lua controller module ' .. tostring(script_id))
+  end
+
+  local controller_fn = controller[method_name]
 
   if type(controller_fn) ~= 'function' then
-    error('Missing Lua function ' .. tostring(function_name))
+    error(
+      'Missing Lua controller method '
+        .. tostring(method_name)
+        .. ' in '
+        .. tostring(script_id)
+    )
   end
 
   runtime.current_character_id = character_id
@@ -326,7 +457,12 @@ export const createLuaCharacterControllerRuntime = async ({
         reportLuaRuntimeError(
           lastLoggedErrorByKey,
           `${controller.scriptId}:attach:${character.id}`,
-          error
+          error,
+          {
+            scriptId: controller.scriptId,
+            source:
+              getOptionalScriptSource(scriptSources, controller.scriptId) ?? ''
+          }
         )
       }
     },
@@ -340,7 +476,12 @@ export const createLuaCharacterControllerRuntime = async ({
         reportLuaRuntimeError(
           lastLoggedErrorByKey,
           `${controller.scriptId}:detach:${character.id}`,
-          error
+          error,
+          {
+            scriptId: controller.scriptId,
+            source:
+              getOptionalScriptSource(scriptSources, controller.scriptId) ?? ''
+          }
         )
       }
 
@@ -355,11 +496,12 @@ export const createLuaCharacterControllerRuntime = async ({
           })
         }
 
-        const script = getRequiredScript(scriptSources, controller.scriptId)
-        const [x, y] = callLuaControllerFunction(
+        getRequiredScript(scriptSources, controller.scriptId)
+        const [x, y] = callLuaControllerMethod(
           lua,
           luaState,
-          script.stepFunctionName,
+          controller.scriptId,
+          LUA_CONTROLLER_STEP_METHOD_NAME,
           {
             characterId: character.id
           },
@@ -387,15 +529,25 @@ export const createLuaCharacterControllerRuntime = async ({
         reportLuaRuntimeError(
           lastLoggedErrorByKey,
           `${controller.scriptId}:step:${character.id}`,
-          error
+          error,
+          {
+            scriptId: controller.scriptId,
+            source:
+              getOptionalScriptSource(scriptSources, controller.scriptId) ?? ''
+          }
         )
         return undefined
       }
     },
     canReceiveInteraction: (_character, controller) => {
-      const script = scriptSources.get(controller.scriptId)
+      getRequiredScript(scriptSources, controller.scriptId)
 
-      return Boolean(script?.interactFunctionName)
+      return hasLuaControllerMethod(
+        lua,
+        luaState,
+        controller.scriptId,
+        LUA_CONTROLLER_INTERACT_METHOD_NAME
+      )
     },
     handleInteraction: (character, controller, sourceCharacter) => {
       try {
@@ -406,17 +558,25 @@ export const createLuaCharacterControllerRuntime = async ({
           })
         }
 
-        const script = getRequiredScript(scriptSources, controller.scriptId)
+        getRequiredScript(scriptSources, controller.scriptId)
 
-        if (!script.interactFunctionName) {
+        if (
+          !hasLuaControllerMethod(
+            lua,
+            luaState,
+            controller.scriptId,
+            LUA_CONTROLLER_INTERACT_METHOD_NAME
+          )
+        ) {
           return undefined
         }
 
         const [message, durationSeconds] =
-          callLuaControllerFunctionForStringAndNumber(
+          callLuaControllerMethodForStringAndNumber(
           lua,
           luaState,
-          script.interactFunctionName,
+          controller.scriptId,
+          LUA_CONTROLLER_INTERACT_METHOD_NAME,
           {
             characterId: character.id,
             sourceCharacterId: sourceCharacter.id
@@ -436,7 +596,12 @@ export const createLuaCharacterControllerRuntime = async ({
         reportLuaRuntimeError(
           lastLoggedErrorByKey,
           `${controller.scriptId}:interact:${character.id}`,
-          error
+          error,
+          {
+            scriptId: controller.scriptId,
+            source:
+              getOptionalScriptSource(scriptSources, controller.scriptId) ?? ''
+          }
         )
         return undefined
       }
@@ -455,7 +620,10 @@ export const createLuaCharacterControllerRuntime = async ({
         return []
       }
     },
+    getActiveErrorMessages: () => [...new Set(lastLoggedErrorByKey.values())],
     updateScript: (scriptId, script) => {
+      const reloadErrorKey = `${scriptId}:reload`
+
       try {
         const nextScriptSources = new Map(scriptSources)
 
@@ -467,9 +635,12 @@ export const createLuaCharacterControllerRuntime = async ({
           scriptSources.set(nextScriptId, nextScript)
         }
 
-        clearLoggedError(lastLoggedErrorByKey, `${scriptId}:update`)
+        clearLoggedError(lastLoggedErrorByKey, reloadErrorKey)
       } catch (error) {
-        reportLuaRuntimeError(lastLoggedErrorByKey, `${scriptId}:update`, error)
+        reportLuaRuntimeError(lastLoggedErrorByKey, reloadErrorKey, error, {
+          scriptId,
+          source: script.source
+        })
       }
     },
     destroy: () => {
@@ -484,7 +655,15 @@ export const createLuaCharacterControllerRuntime = async ({
           reportLuaRuntimeError(
             lastLoggedErrorByKey,
             `${attachedController.controller.scriptId}:destroy:${attachedController.character.id}`,
-            error
+            error,
+            {
+              scriptId: attachedController.controller.scriptId,
+              source:
+                getOptionalScriptSource(
+                  scriptSources,
+                  attachedController.controller.scriptId
+                ) ?? ''
+            }
           )
         }
       }
@@ -500,6 +679,10 @@ const createLuaState = (
   lua: LuaModule,
   scriptSources: Map<string, LuaControllerScriptSource>
 ): number => {
+  for (const [scriptId, script] of scriptSources) {
+    validateLuaControllerScript(lua, scriptId, script)
+  }
+
   const luaState = lua._luaL_newstate()
 
   if (!luaState) {
@@ -517,7 +700,7 @@ const createLuaState = (
     )
 
     for (const [scriptId, script] of scriptSources) {
-      runLuaChunk(lua, luaState, script.source, `@${scriptId}.lua`)
+      loadLuaControllerModule(lua, luaState, scriptId, script)
     }
   } catch (error) {
     lua._lua_close(luaState)
@@ -533,15 +716,27 @@ const attachCharacterToState = (
   scriptSources: Map<string, LuaControllerScriptSource>,
   attachedController: AttachedLuaController
 ) => {
-  const script = getRequiredScript(
+  getRequiredScript(
     scriptSources,
     attachedController.controller.scriptId
   )
 
-  callLuaControllerFunction(
+  if (
+    !hasLuaControllerMethod(
+      lua,
+      luaState,
+      attachedController.controller.scriptId,
+      LUA_CONTROLLER_REGISTER_METHOD_NAME
+    )
+  ) {
+    return
+  }
+
+  callLuaControllerMethod(
     lua,
     luaState,
-    script.registerFunctionName,
+    attachedController.controller.scriptId,
+    LUA_CONTROLLER_REGISTER_METHOD_NAME,
     {
       characterId: attachedController.character.id
     },
@@ -560,16 +755,24 @@ const detachCharacterFromState = (
   scriptSources: Map<string, LuaControllerScriptSource>,
   attachedController: AttachedLuaController
 ) => {
-  const script = scriptSources.get(attachedController.controller.scriptId)
+  getRequiredScript(scriptSources, attachedController.controller.scriptId)
 
-  if (!script?.unregisterFunctionName) {
+  if (
+    !hasLuaControllerMethod(
+      lua,
+      luaState,
+      attachedController.controller.scriptId,
+      LUA_CONTROLLER_UNREGISTER_METHOD_NAME
+    )
+  ) {
     return
   }
 
-  callLuaControllerFunction(
+  callLuaControllerMethod(
     lua,
     luaState,
-    script.unregisterFunctionName,
+    attachedController.controller.scriptId,
+    LUA_CONTROLLER_UNREGISTER_METHOD_NAME,
     {
       characterId: attachedController.character.id
     },
@@ -613,6 +816,92 @@ const getBasePath = (path: string): string => {
   return `${normalizedBaseUrl}${path.replace(/^\//, '')}`
 }
 
+// Validate controller source before it can replace the active runtime.
+const validateLuaControllerScript = (
+  lua: LuaModule,
+  scriptId: string,
+  script: LuaControllerScriptSource
+) => {
+  const luaState = createValidationLuaState(lua)
+
+  try {
+    compileLuaChunk(lua, luaState, script.source, `@${scriptId}.lua`)
+    validateLuaControllerModule(lua, luaState, scriptId, script)
+  } catch (error) {
+    throw createLuaControllerScriptError(scriptId, script.source, error)
+  } finally {
+    lua._lua_close(luaState)
+  }
+}
+
+const createValidationLuaState = (lua: LuaModule): number => {
+  const luaState = lua._luaL_newstate()
+
+  if (!luaState) {
+    throw new Error('Failed to create a Lua validation state.')
+  }
+
+  lua._luaL_openlibs(luaState)
+  runLuaChunk(lua, luaState, LUA_CONTROLLER_RUNTIME_HOST_API_SOURCE, '@engine-runtime.lua')
+
+  return luaState
+}
+
+// Compile once without running so syntax errors fail early.
+const compileLuaChunk = (
+  lua: LuaModule,
+  luaState: number,
+  source: string,
+  chunkName: string
+) => {
+  const baseTop = lua._lua_gettop(luaState)
+  const sourceLength = lua.lengthBytesUTF8(source)
+  const sourcePointer = lua._malloc(sourceLength + 1)
+  const chunkNameLength = lua.lengthBytesUTF8(chunkName)
+  const chunkNamePointer = lua._malloc(chunkNameLength + 1)
+
+  lua.stringToUTF8(source, sourcePointer, sourceLength + 1)
+  lua.stringToUTF8(chunkName, chunkNamePointer, chunkNameLength + 1)
+
+  const loadStatus = lua._luaL_loadbufferx(
+    luaState,
+    sourcePointer,
+    sourceLength,
+    chunkNamePointer,
+    0
+  )
+
+  lua._free(chunkNamePointer)
+  lua._free(sourcePointer)
+
+  if (loadStatus !== 0) {
+    const errorMessage = readLuaError(lua, luaState)
+
+    lua._lua_settop(luaState, baseTop)
+    throw new Error(`Lua controller syntax error: ${errorMessage}`)
+  }
+
+  lua._lua_settop(luaState, baseTop)
+}
+
+// Run the module in an isolated env and verify the reserved method shape.
+const validateLuaControllerModule = (
+  lua: LuaModule,
+  luaState: number,
+  scriptId: string,
+  script: LuaControllerScriptSource
+) => {
+  try {
+    callLuaFunction(lua, luaState, LUA_CONTROLLER_VALIDATE_HELPER_FUNCTION_NAME, [
+      scriptId,
+      script.source,
+      `@${scriptId}.lua`
+    ])
+  } catch (error) {
+    throw normalizeLuaControllerValidationError(scriptId, error)
+  }
+}
+
 const runLuaChunk = (
   lua: LuaModule,
   luaState: number,
@@ -647,6 +936,20 @@ const runLuaChunk = (
   if (callStatus !== 0) {
     throw new Error(`Failed to execute Lua chunk: ${readLuaError(lua, luaState)}`)
   }
+}
+
+const loadLuaControllerModule = (
+  lua: LuaModule,
+  luaState: number,
+  scriptId: string,
+  script: LuaControllerScriptSource
+) => {
+  callLuaFunction(
+    lua,
+    luaState,
+    LUA_CONTROLLER_LOAD_HELPER_FUNCTION_NAME,
+    [scriptId, script.source, `@${scriptId}.lua`]
+  )
 }
 
 const callLuaFunction = (
@@ -694,10 +997,25 @@ const callLuaFunction = (
   return results
 }
 
-const callLuaControllerFunction = (
+const hasLuaControllerMethod = (
   lua: LuaModule,
   luaState: number,
-  functionName: string,
+  scriptId: string,
+  methodName: LuaControllerMethodName
+): boolean =>
+  callLuaFunction(
+    lua,
+    luaState,
+    LUA_CONTROLLER_HAS_METHOD_HELPER_FUNCTION_NAME,
+    [scriptId, methodName],
+    1
+  )[0] !== 0
+
+const callLuaControllerMethod = (
+  lua: LuaModule,
+  luaState: number,
+  scriptId: string,
+  methodName: LuaControllerMethodName,
   context: LuaControllerCallContext,
   arguments_: LuaFunctionArgument[],
   resultCount = 0
@@ -707,7 +1025,8 @@ const callLuaControllerFunction = (
     luaState,
     LUA_CONTROLLER_CALL_HELPER_FUNCTION_NAME,
     [
-      functionName,
+      scriptId,
+      methodName,
       context.characterId,
       context.sourceCharacterId ?? '',
       ...arguments_
@@ -786,10 +1105,11 @@ const callLuaFunctionForStringAndNumber = (
   return [message, durationSeconds]
 }
 
-const callLuaControllerFunctionForStringAndNumber = (
+const callLuaControllerMethodForStringAndNumber = (
   lua: LuaModule,
   luaState: number,
-  functionName: string,
+  scriptId: string,
+  methodName: LuaControllerMethodName,
   context: LuaControllerCallContext,
   arguments_: LuaFunctionArgument[]
 ): [string | undefined, number | undefined] =>
@@ -798,7 +1118,8 @@ const callLuaControllerFunctionForStringAndNumber = (
     luaState,
     LUA_CONTROLLER_CALL_HELPER_FUNCTION_NAME,
     [
-      functionName,
+      scriptId,
+      methodName,
       context.characterId,
       context.sourceCharacterId ?? '',
       ...arguments_
@@ -920,19 +1241,136 @@ const parseLuaControllerRuntimeEvents = (
   })
 }
 
+const getOptionalScriptSource = (
+  scriptSources: Map<string, LuaControllerScriptSource>,
+  scriptId: string
+): string | undefined => scriptSources.get(scriptId)?.source
+
+const normalizeLuaControllerBridgeError = (error: unknown): Error => {
+  const baseError = error instanceof Error ? error : new Error(String(error))
+  let message = baseError.message
+  const helperFunctionNames = [
+    LUA_CONTROLLER_LOAD_HELPER_FUNCTION_NAME,
+    LUA_CONTROLLER_CALL_HELPER_FUNCTION_NAME,
+    LUA_CONTROLLER_HAS_METHOD_HELPER_FUNCTION_NAME,
+    LUA_CONTROLLER_VALIDATE_HELPER_FUNCTION_NAME,
+    LUA_CONTROLLER_DRAIN_EVENTS_FUNCTION_NAME
+  ]
+
+  for (const helperName of helperFunctionNames) {
+    const helperPrefix = `Lua function ${helperName} failed: `
+
+    if (message.startsWith(helperPrefix)) {
+      message = message.slice(helperPrefix.length)
+      break
+    }
+  }
+
+  message = message.replace(/^engine-runtime\.lua:\d+:\s*/u, '')
+
+  if (message === baseError.message) {
+    return baseError
+  }
+
+  const normalizedError = new Error(message)
+
+  normalizedError.name = baseError.name
+
+  return normalizedError
+}
+
+const createLuaControllerScriptError = (
+  scriptId: string,
+  source: string,
+  error: unknown
+): Error => {
+  const baseError = normalizeLuaControllerBridgeError(error)
+  const lineNumber = extractLuaLineNumber(baseError.message)
+
+  if (!lineNumber) {
+    return baseError
+  }
+
+  const sourceLine = source.split(/\r?\n/u)[lineNumber - 1]?.trimEnd()
+
+  if (!sourceLine) {
+    return baseError
+  }
+
+  const annotatedMessage = `${baseError.message}\nLua source ${scriptId}.lua:${lineNumber}\n> ${sourceLine}`
+
+  if (annotatedMessage === baseError.message) {
+    return baseError
+  }
+
+  const annotatedError = new Error(annotatedMessage)
+
+  annotatedError.name = baseError.name
+
+  return annotatedError
+}
+
+const extractLuaLineNumber = (message: string): number | undefined => {
+  const match = message.match(
+    /(?:\[string "?@?[^"\]]+"?\]|@?[^:\n]+\.lua):(\d+):/u
+  )
+
+  if (!match) {
+    return undefined
+  }
+
+  const lineNumber = Number.parseInt(match[1], 10)
+
+  return Number.isFinite(lineNumber) ? lineNumber : undefined
+}
+
+const normalizeLuaControllerValidationError = (
+  scriptId: string,
+  error: unknown
+): Error => {
+  const baseError = normalizeLuaControllerBridgeError(error)
+  let message = baseError.message
+
+  if (
+    !message.startsWith('Lua controller validation failed')
+    && !message.startsWith('Lua controller syntax error')
+  ) {
+    message = `Lua controller validation failed for "${scriptId}": ${message}`
+  }
+
+  if (message === baseError.message) {
+    return baseError
+  }
+
+  const normalizedError = new Error(message)
+
+  normalizedError.name = baseError.name
+
+  return normalizedError
+}
+
 const reportLuaRuntimeError = (
   lastLoggedErrorByKey: Map<string, string>,
   errorKey: string,
-  error: unknown
+  error: unknown,
+  scriptSource?: {
+    scriptId: string
+    source: string
+  }
 ) => {
-  const message = error instanceof Error ? error.message : String(error)
+  const normalizedError = scriptSource
+    ? createLuaControllerScriptError(scriptSource.scriptId, scriptSource.source, error)
+    : error instanceof Error
+      ? error
+      : new Error(String(error))
+  const message = normalizedError.message
 
   if (lastLoggedErrorByKey.get(errorKey) === message) {
     return
   }
 
   lastLoggedErrorByKey.set(errorKey, message)
-  console.error(`Lua runtime error [${errorKey}]`, error)
+  console.error(`Lua controller error [${errorKey}]`, normalizedError)
 }
 
 const clearLoggedError = (

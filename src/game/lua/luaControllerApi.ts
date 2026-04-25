@@ -3,12 +3,16 @@ import type {
   LuaCharacterController
 } from '../characterState'
 
-export type LuaControllerFunctionContract = {
-  registerFunctionName: string
-  unregisterFunctionName?: string
-  stepFunctionName: string
-  interactFunctionName?: string
-}
+export const LUA_CONTROLLER_REGISTER_METHOD_NAME = 'register'
+export const LUA_CONTROLLER_UNREGISTER_METHOD_NAME = 'unregister'
+export const LUA_CONTROLLER_STEP_METHOD_NAME = 'step'
+export const LUA_CONTROLLER_INTERACT_METHOD_NAME = 'interact'
+
+export type LuaControllerMethodName =
+  | typeof LUA_CONTROLLER_REGISTER_METHOD_NAME
+  | typeof LUA_CONTROLLER_UNREGISTER_METHOD_NAME
+  | typeof LUA_CONTROLLER_STEP_METHOD_NAME
+  | typeof LUA_CONTROLLER_INTERACT_METHOD_NAME
 
 export type LuaControllerPosition = {
   x: number

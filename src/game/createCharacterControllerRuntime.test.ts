@@ -149,18 +149,13 @@ describe('createCharacterControllerRuntime', () => {
         durationMilliseconds: 900
       }
     ])
+    expect(runtime.getRuntimeWarnings()).toEqual(['Lua warning'])
 
     runtime.updateLuaControllerScript('wander-near-home', {
-      registerFunctionName: 'register_wander_controller',
-      unregisterFunctionName: 'unregister_wander_controller',
-      stepFunctionName: 'step_wander_controller',
       source: 'return 1'
     })
 
     expect(luaRuntime.updateScript).toHaveBeenCalledWith('wander-near-home', {
-      registerFunctionName: 'register_wander_controller',
-      unregisterFunctionName: 'unregister_wander_controller',
-      stepFunctionName: 'step_wander_controller',
       source: 'return 1'
     })
   })
@@ -169,7 +164,8 @@ describe('createCharacterControllerRuntime', () => {
 const createLuaRuntimeStub = ({
   movementDelta = undefined,
   interactionResponse = undefined,
-  emittedEvents = []
+  emittedEvents = [],
+  activeErrorMessages = ['Lua warning']
 }: {
   movementDelta?: { x: number; y: number } | undefined
   interactionResponse?:
@@ -181,6 +177,7 @@ const createLuaRuntimeStub = ({
     message: string
     durationMilliseconds: number
   }>
+  activeErrorMessages?: string[]
 } = {}): LuaCharacterControllerRuntime => ({
   attachCharacter: vi.fn(),
   detachCharacter: vi.fn(),
@@ -188,6 +185,7 @@ const createLuaRuntimeStub = ({
   canReceiveInteraction: vi.fn(() => interactionResponse !== undefined),
   handleInteraction: vi.fn(() => interactionResponse),
   drainEvents: vi.fn(() => emittedEvents),
+  getActiveErrorMessages: vi.fn(() => activeErrorMessages),
   updateScript: vi.fn(),
   destroy: vi.fn()
 })

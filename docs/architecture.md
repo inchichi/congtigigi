@@ -12,7 +12,7 @@ This document is a short guide for module boundaries and code placement.
 - `src/game/createCharacterControllerRuntime.ts`: controller attachment lifecycle, shared movement dispatch, and Lua script hot-update coordination.
 - `src/game/events/`: small central queue models for frame-level game events.
 - `src/game/interaction/`: target resolution and event processing for interaction flow.
-- `src/game/lua/`: Lua wasm bridge code that loads controller scripts, exposes the public `engine.*` Lua API, and evaluates scripts for runtime characters.
+- `src/game/lua/`: Lua wasm bridge code that loads controller modules, exposes the public `engine.*` Lua API, and evaluates scripts for runtime characters.
 - `src/game/lua/luaControllerApi.ts`: source of truth for the Lua-visible controller contract.
 - `src/game/tiled/`: TMX/TSX parsing, tile metadata, and event-layer data extraction.
 - `src/rendering/`: PixiJS rendering code and asset-to-view adaptation.
@@ -21,11 +21,25 @@ This document is a short guide for module boundaries and code placement.
 - `third_party/`: vendored external source code kept in-repo for deterministic builds.
 - `public/vendor/`: generated static artifacts served as-is by Vite.
 
+## Lua Controller Interface
+
+- `src/assets/lua/`: each Lua controller script should return one controller table.
+- Reserved controller methods:
+  - `register`: optional setup when the runtime attaches the script to one character
+  - `unregister`: optional cleanup when the runtime detaches the script from one character
+  - `step`: required movement-intent update
+  - `interact`: optional response when another character interacts with this character
+- `src/main.ts`: map only `scriptId -> source`. Do not repeat Lua method names in the app entry point.
+- `src/game/lua/createLuaCharacterControllerRuntime.ts`: own Lua module loading, method dispatch, script reload, and wasm bridge details.
+- `src/game/lua/luaControllerApi.ts`: own the public Lua-visible contract and reserved method names.
+- `docs/lua-controller-api.md`: explain the same contract in human-readable form for AI and script authors.
+- Validate Lua controller scripts before first load and hot reload. Use compile checking plus isolated contract validation so a broken script does not replace the active runtime.
+- Keep the public Lua surface narrow. Expose new data or actions through `engine.*` only after updating both the TypeScript contract and the Lua API document.
+- Let Lua return movement intent and request explicit `engine.*` actions only. Keep collision, target resolution, cooldown, event ordering, and final rendering effects outside Lua.
+
 ## Boundary Rules
 
 - Keep browser DOM code out of `src/game/` when possible.
 - Prefer pure data and pure functions in game logic so tests stay small and stable.
 - Keep controller definitions as plain data on the character state. Put attach, detach, and runtime-side script management in the controller runtime layer.
-- Keep the Lua controller surface narrow. Change `src/game/lua/luaControllerApi.ts` and `docs/lua-controller-api.md` before exposing new engine data to Lua.
-- Let controllers emit movement intent and explicit `engine.*` API requests only. Keep target selection, interaction ordering, cooldown, and final rendering side effects in shared game or rendering systems outside Lua.
 - When a rendering library is introduced later, keep rendering concerns separate from core game rules.

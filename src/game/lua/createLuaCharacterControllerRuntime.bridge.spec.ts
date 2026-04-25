@@ -18,6 +18,13 @@ const LUA_MODULE_WASM_URL = new URL(
   import.meta.url
 )
 const BRIDGE_SCRIPT_ID = 'bridge-test'
+const createControllerModuleSource = (methodsSource: string): string => `
+local controller = {}
+
+${methodsSource}
+
+return controller
+`
 
 afterEach(() => {
   vi.restoreAllMocks()
@@ -26,21 +33,21 @@ afterEach(() => {
 describe('createLuaCharacterControllerRuntime bridge', () => {
   it('round-trips movement and interaction results through the real wasm bridge', async () => {
     const runtime = await createBridgeRuntime({
-      source: `
+      source: createControllerModuleSource(`
 local controllers = {}
 
-function register_bridge_controller(id, home_x, home_y, radius)
+function controller.register(id, home_x, home_y, radius)
   controllers[id] = {
     greeting = "Hello",
     radius = radius
   }
 end
 
-function unregister_bridge_controller(id)
+function controller.unregister(id)
   controllers[id] = nil
 end
 
-function step_bridge_controller(id, dt, x, y)
+function controller.step(id, dt, x, y)
   if controllers[id] == nil then
     error("missing controller state")
   end
@@ -48,14 +55,14 @@ function step_bridge_controller(id, dt, x, y)
   return 0.5, -0.25
 end
 
-function interact_bridge_controller(id, source_id)
+function controller.interact(id, source_id)
   if controllers[id] == nil then
     error("missing controller state")
   end
 
   return controllers[id].greeting .. ", " .. source_id .. "!", 1.75
 end
-`
+`)
     })
     const character = createBridgeCharacter()
     const player = createInitialPlayerCharacter({
@@ -85,25 +92,25 @@ end
 
   it('reloads attached character scripts through updateScript', async () => {
     const runtime = await createBridgeRuntime({
-      source: `
+      source: createControllerModuleSource(`
 local controllers = {}
 
-function register_bridge_controller(id, home_x, home_y, radius)
+function controller.register(id, home_x, home_y, radius)
   controllers[id] = true
 end
 
-function unregister_bridge_controller(id)
+function controller.unregister(id)
   controllers[id] = nil
 end
 
-function step_bridge_controller(id, dt, x, y)
+function controller.step(id, dt, x, y)
   return 0.25, 0
 end
 
-function interact_bridge_controller(id, source_id)
+function controller.interact(id, source_id)
   return "Old reply", 1.0
 end
-`
+`)
     })
     const character = createBridgeCharacter()
     const player = createInitialPlayerCharacter({
@@ -122,29 +129,25 @@ end
       })
 
       runtime.updateScript(BRIDGE_SCRIPT_ID, {
-        registerFunctionName: 'register_bridge_controller',
-        unregisterFunctionName: 'unregister_bridge_controller',
-        stepFunctionName: 'step_bridge_controller',
-        interactFunctionName: 'interact_bridge_controller',
-        source: `
+        source: createControllerModuleSource(`
 local controllers = {}
 
-function register_bridge_controller(id, home_x, home_y, radius)
+function controller.register(id, home_x, home_y, radius)
   controllers[id] = true
 end
 
-function unregister_bridge_controller(id)
+function controller.unregister(id)
   controllers[id] = nil
 end
 
-function step_bridge_controller(id, dt, x, y)
+function controller.step(id, dt, x, y)
   return -1, 0.5
 end
 
-function interact_bridge_controller(id, source_id)
+function controller.interact(id, source_id)
   return "New reply", 2.5
 end
-`
+`)
       })
 
       expect(
@@ -166,26 +169,26 @@ end
 
   it('drains events emitted through the public engine api', async () => {
     const runtime = await createBridgeRuntime({
-      source: `
+      source: createControllerModuleSource(`
 local controllers = {}
 
-function register_bridge_controller(id, home_x, home_y, radius)
+function controller.register(id, home_x, home_y, radius)
   controllers[id] = true
 end
 
-function unregister_bridge_controller(id)
+function controller.unregister(id)
   controllers[id] = nil
 end
 
-function step_bridge_controller(id, dt, x, y)
+function controller.step(id, dt, x, y)
   engine.ui.show_message("step:" .. id, 1.25)
   return 0, 0
 end
 
-function interact_bridge_controller(id, source_id)
+function controller.interact(id, source_id)
   engine.ui.show_message("Hello, " .. source_id .. "!", 2.25)
 end
-`
+`)
     })
     const character = createBridgeCharacter()
     const player = createInitialPlayerCharacter({
@@ -227,23 +230,23 @@ end
   it('contains register, step, and interact Lua errors inside the bridge', async () => {
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
     const runtime = await createBridgeRuntime({
-      source: `
-function register_bridge_controller(id, home_x, home_y, radius)
+      source: createControllerModuleSource(`
+function controller.register(id, home_x, home_y, radius)
   error("register broke")
 end
 
-function unregister_bridge_controller(id)
+function controller.unregister(id)
   error("unregister broke")
 end
 
-function step_bridge_controller(id, dt, x, y)
+function controller.step(id, dt, x, y)
   error("step broke")
 end
 
-function interact_bridge_controller(id, source_id)
+function controller.interact(id, source_id)
   error("interact broke")
 end
-`
+`)
     })
     const character = createBridgeCharacter()
     const player = createInitialPlayerCharacter({
@@ -263,28 +266,100 @@ end
 
     expect(errorSpy).toHaveBeenCalledWith(
       expect.stringContaining(
-        `Lua runtime error [${BRIDGE_SCRIPT_ID}:attach:${character.id}]`
+        `Lua controller error [${BRIDGE_SCRIPT_ID}:attach:${character.id}]`
       ),
       expect.any(Error)
     )
     expect(errorSpy).toHaveBeenCalledWith(
       expect.stringContaining(
-        `Lua runtime error [${BRIDGE_SCRIPT_ID}:step:${character.id}]`
+        `Lua controller error [${BRIDGE_SCRIPT_ID}:step:${character.id}]`
       ),
       expect.any(Error)
     )
     expect(errorSpy).toHaveBeenCalledWith(
       expect.stringContaining(
-        `Lua runtime error [${BRIDGE_SCRIPT_ID}:interact:${character.id}]`
+        `Lua controller error [${BRIDGE_SCRIPT_ID}:interact:${character.id}]`
       ),
       expect.any(Error)
     )
     expect(errorSpy).toHaveBeenCalledWith(
       expect.stringContaining(
-        `Lua runtime error [${BRIDGE_SCRIPT_ID}:detach:${character.id}]`
+        `Lua controller error [${BRIDGE_SCRIPT_ID}:detach:${character.id}]`
       ),
       expect.any(Error)
     )
+  })
+
+  it('rejects invalid controller modules before they become active', async () => {
+    await expect(
+      createBridgeRuntime({
+        source: createControllerModuleSource(`
+function controller.register(id, home_x, home_y, radius)
+end
+`)
+      })
+    ).rejects.toThrow(
+      `Lua controller validation failed for "${BRIDGE_SCRIPT_ID}": missing required method controller.step(id, delta_seconds, x, y)`
+    )
+  })
+
+  it('keeps the previous script when a hot update fails validation', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const runtime = await createBridgeRuntime({
+      source: createControllerModuleSource(`
+function controller.step(id, dt, x, y)
+  return 0.25, 0
+end
+`)
+    })
+    const character = createBridgeCharacter()
+
+    try {
+      runtime.attachCharacter(character, character.controller)
+
+      expect(
+        runtime.getMovementDelta(character, character.controller, 250)
+      ).toEqual({
+        x: 0.25,
+        y: 0
+      })
+
+      runtime.updateScript(BRIDGE_SCRIPT_ID, {
+        source: createControllerModuleSource(`
+function controller.step(id, dt, x, y)
+  return
+`)
+      })
+
+      expect(runtime.getActiveErrorMessages()).toHaveLength(1)
+      expect(runtime.getActiveErrorMessages()[0]).toContain(
+        'Lua controller validation failed'
+      )
+      expect(
+        runtime.getMovementDelta(character, character.controller, 250)
+      ).toEqual({
+        x: 0.25,
+        y: 0
+      })
+      expect(errorSpy).toHaveBeenCalledWith(
+        expect.stringContaining(`Lua controller error [${BRIDGE_SCRIPT_ID}:reload]`),
+        expect.objectContaining({
+          message: expect.stringContaining('Lua source bridge-test.lua:')
+        })
+      )
+
+      runtime.updateScript(BRIDGE_SCRIPT_ID, {
+        source: createControllerModuleSource(`
+function controller.step(id, dt, x, y)
+  return 0.5, 0
+end
+`)
+      })
+
+      expect(runtime.getActiveErrorMessages()).toEqual([])
+    } finally {
+      runtime.destroy()
+    }
   })
 })
 
@@ -297,10 +372,6 @@ const createBridgeRuntime = async ({ source }: { source: string }) => {
   return createLuaCharacterControllerRuntime({
     scriptsById: {
       [BRIDGE_SCRIPT_ID]: {
-        registerFunctionName: 'register_bridge_controller',
-        unregisterFunctionName: 'unregister_bridge_controller',
-        stepFunctionName: 'step_bridge_controller',
-        interactFunctionName: 'interact_bridge_controller',
         source
       }
     },

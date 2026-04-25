@@ -8,9 +8,11 @@
 
 ---이 스크립트는 `docs/lua-controller-api.md` 와
 ---`src/game/lua/luaControllerApi.ts` 계약만 사용한다고 가정한다.
+---스크립트는 예약된 메서드 이름을 가진 controller table을 반환해야 한다.
 
 ---@type table<string, WanderControllerState>
 local controllers = {}
+local controller = {}
 local MIN_TARGET_DISTANCE = 0.6
 local ARRIVAL_DISTANCE = 0.2
 
@@ -52,7 +54,7 @@ end
 ---@param home_x number 배회의 기준 위치 X
 ---@param home_y number 배회의 기준 위치 Y
 ---@param radius number 기준 위치에서 허용할 최대 배회 반경
-function register_wander_controller(id, home_x, home_y, radius)
+function controller.register(id, home_x, home_y, radius)
   controllers[id] = {
     home_x = home_x,
     home_y = home_y,
@@ -65,7 +67,7 @@ end
 
 ---컨트롤러가 제거될 때 캐릭터별 내부 상태를 정리한다.
 ---@param id string 캐릭터 식별자
-function unregister_wander_controller(id)
+function controller.unregister(id)
   controllers[id] = nil
 end
 
@@ -77,25 +79,25 @@ end
 ---@param y number 현재 캐릭터 위치 Y
 ---@return number move_x 정규화된 X 이동 방향
 ---@return number move_y 정규화된 Y 이동 방향
-function step_wander_controller(id, dt, x, y)
-  local controller = controllers[id]
+function controller.step(id, dt, x, y)
+  local controller_state = controllers[id]
 
-  if controller == nil then
+  if controller_state == nil then
     return 0, 0
   end
 
-  if controller.pause_remaining > 0 then
-    controller.pause_remaining = math.max(0, controller.pause_remaining - dt)
+  if controller_state.pause_remaining > 0 then
+    controller_state.pause_remaining = math.max(0, controller_state.pause_remaining - dt)
     return 0, 0
   end
 
-  local dx = controller.target_x - x
-  local dy = controller.target_y - y
+  local dx = controller_state.target_x - x
+  local dy = controller_state.target_y - y
   local distance = math.sqrt(dx * dx + dy * dy)
 
   if distance < ARRIVAL_DISTANCE then
-    choose_target(controller)
-    controller.pause_remaining = 0.5 + math.random() * 1.0
+    choose_target(controller_state)
+    controller_state.pause_remaining = 0.5 + math.random() * 1.0
     return 0, 0
   end
 
@@ -104,3 +106,11 @@ function step_wander_controller(id, dt, x, y)
 
   return clamp(normalized_x, -1, 1), clamp(normalized_y, -1, 1)
 end
+
+function controller.interact(id, source_id)
+  engine.ui.show_message("비켜", 2.5)
+
+  return nil, nil
+end
+
+return controller

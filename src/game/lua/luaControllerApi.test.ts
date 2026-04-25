@@ -6,7 +6,11 @@ import {
 } from '../characterState'
 import {
   DEFAULT_LUA_CONTROLLER_MESSAGE_DURATION_MILLISECONDS,
+  LUA_CONTROLLER_INTERACT_METHOD_NAME,
   LUA_CONTROLLER_PUBLIC_API_NAME,
+  LUA_CONTROLLER_REGISTER_METHOD_NAME,
+  LUA_CONTROLLER_STEP_METHOD_NAME,
+  LUA_CONTROLLER_UNREGISTER_METHOD_NAME,
   MIN_LUA_CONTROLLER_MESSAGE_DURATION_MILLISECONDS,
   createLuaControllerInteractInput,
   createLuaControllerInteractionResponse,
@@ -154,5 +158,12 @@ describe('luaControllerApi', () => {
 
   it('keeps the public Lua api under the engine namespace', () => {
     expect(LUA_CONTROLLER_PUBLIC_API_NAME).toBe('engine')
+  })
+
+  it('keeps reserved controller method names stable', () => {
+    expect(LUA_CONTROLLER_REGISTER_METHOD_NAME).toBe('register')
+    expect(LUA_CONTROLLER_UNREGISTER_METHOD_NAME).toBe('unregister')
+    expect(LUA_CONTROLLER_STEP_METHOD_NAME).toBe('step')
+    expect(LUA_CONTROLLER_INTERACT_METHOD_NAME).toBe('interact')
   })
 })

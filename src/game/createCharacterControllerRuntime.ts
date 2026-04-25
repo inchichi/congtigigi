@@ -46,6 +46,7 @@ export type CharacterControllerRuntime = {
     sourceCharacter: CharacterState
   }) => CharacterInteractionResponse | undefined
   drainEvents: () => LuaControllerRuntimeEvent[]
+  getRuntimeWarnings: () => string[]
   updateLuaControllerScript: (
     scriptId: string,
     script: LuaControllerScriptSource
@@ -140,6 +141,7 @@ export const createCharacterControllerRuntime = ({
         sourceCharacter
       }),
     drainEvents: () => luaControllerRuntime?.drainEvents() ?? [],
+    getRuntimeWarnings: () => luaControllerRuntime?.getActiveErrorMessages() ?? [],
     updateLuaControllerScript: (scriptId, script) => {
       luaControllerRuntime?.updateScript(scriptId, script)
     },

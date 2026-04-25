@@ -84,16 +84,9 @@ const bootstrap = async () => {
     ? await createLuaCharacterControllerRuntime({
         scriptsById: {
           [replyWithMessageScriptId]: {
-            registerFunctionName: 'register_reply_controller',
-            unregisterFunctionName: 'unregister_reply_controller',
-            stepFunctionName: 'step_reply_controller',
-            interactFunctionName: 'interact_reply_controller',
             source: replyWithMessageControllerLua
           },
           [wanderNearHomeScriptId]: {
-            registerFunctionName: 'register_wander_controller',
-            unregisterFunctionName: 'unregister_wander_controller',
-            stepFunctionName: 'step_wander_controller',
             source: wanderNearHomeControllerLua
           }
         }
@@ -129,10 +122,6 @@ if (import.meta.hot) {
     }
 
     activeControllerRuntime.updateLuaControllerScript(replyWithMessageScriptId, {
-      registerFunctionName: 'register_reply_controller',
-      unregisterFunctionName: 'unregister_reply_controller',
-      stepFunctionName: 'step_reply_controller',
-      interactFunctionName: 'interact_reply_controller',
       source: nextModule.default
     })
   })
@@ -143,9 +132,6 @@ if (import.meta.hot) {
     }
 
     activeControllerRuntime.updateLuaControllerScript(wanderNearHomeScriptId, {
-      registerFunctionName: 'register_wander_controller',
-      unregisterFunctionName: 'unregister_wander_controller',
-      stepFunctionName: 'step_wander_controller',
       source: nextModule.default
     })
   })

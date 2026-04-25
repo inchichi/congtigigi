@@ -45,16 +45,39 @@ Rules:
 - Lua does not render the bubble directly
 - the runtime converts this request into a shared game event, and TypeScript decides how to render it
 
-## Lifecycle
+## Controller Module Shape
 
-Each Lua controller script may expose these functions:
+Each Lua controller script must return one controller table.
+Method names are reserved by the runtime and are not configured in TypeScript per script.
 
-- `register_*`: optional setup for one character when the controller is attached
-- `unregister_*`: optional cleanup for one character when the controller is detached
-- `step_*`: required per-frame update that returns movement intent
-- `interact_*`: optional callback when another character interacts with this character
+```lua
+local controller = {}
 
-The exact exported function names are configured in TypeScript.
+function controller.register(id, home_x, home_y, radius_in_tiles)
+end
+
+function controller.unregister(id)
+end
+
+function controller.step(id, delta_seconds, x, y)
+  return 0, 0
+end
+
+function controller.interact(id, source_character_id)
+end
+
+return controller
+```
+
+Lifecycle rules:
+
+- `register`: optional setup for one character when the controller is attached
+- `unregister`: optional cleanup for one character when the controller is detached
+- `step`: required per-frame update that returns movement intent
+- `interact`: optional callback when another character interacts with this character
+- keep module top-level code simple and side-effect free
+- the runtime validates Lua scripts on first load and hot reload before they replace the active controller
+- validation errors should include the Lua line number and line text when that information is available
 
 ## Public Data Model
 
@@ -92,7 +115,7 @@ Lua does not choose the target by itself.
 
 ## Movement Result
 
-The `step_*` function must return two numbers:
+The `controller.step` method must return two numbers:
 
 - `moveX`
 - `moveY`
@@ -105,7 +128,7 @@ Rules:
 
 ## Interaction Result
 
-The `interact_*` function may still return:
+The `controller.interact` method may still return:
 
 - `message`
 - `durationSeconds`
@@ -118,36 +141,36 @@ Rules:
 - do not mix `engine.ui.show_message(...)` and a direct message return in the same callback unless you intentionally want multiple results
 - the engine decides target selection, cooldown, event ordering, and speech bubble rendering outside Lua
 
-## Current Runtime Signature
+## Current Runtime Method Signatures
 
-The current runtime bridge calls Lua with positional arguments.
+The current runtime bridge still calls the reserved methods with positional arguments.
 
 ### Register
 
 ```lua
-register_controller(id, home_x, home_y, radius_in_tiles)
+controller.register(id, home_x, home_y, radius_in_tiles)
 ```
 
 ### Unregister
 
 ```lua
-unregister_controller(id)
+controller.unregister(id)
 ```
 
 ### Step
 
 ```lua
-move_x, move_y = step_controller(id, delta_seconds, x, y)
+move_x, move_y = controller.step(id, delta_seconds, x, y)
 ```
 
 ### Interact
 
 ```lua
-message, duration_seconds = interact_controller(id, source_character_id)
+message, duration_seconds = controller.interact(id, source_character_id)
 ```
 
 These positional arguments are a serialized form of the models from `src/game/lua/luaControllerApi.ts`.
-The `engine` global namespace is also available inside these callbacks.
+The `engine` global namespace is also available inside these methods.
 
 ## AI Guidance
 

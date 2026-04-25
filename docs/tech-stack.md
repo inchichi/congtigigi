@@ -10,7 +10,8 @@
   - `character` events use the `type` property to reference a `tiny-dungeon-16` appearance key.
 - Game scripting: Lua 5.3.6
 - Lua web runtime build: build the WebAssembly module with Emscripten.
-- During development, Vite HMR applies Lua controller source changes immediately, and the runtime reattaches current characters to the new Lua state.
+- Lua controller contract: each script returns one controller table with reserved runtime methods such as `register`, `unregister`, `step`, and optional `interact`.
+- During development, Vite HMR applies Lua controller source changes immediately, and the runtime reloads controller modules and reattaches current characters to the new Lua state.
 - Lua compatibility check: run the official Lua 5.3 basic tests against the wasm runtime only through `npm run lua:test`.
 - Bundler: Vite
 - Tests: Vitest
