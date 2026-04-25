@@ -130,6 +130,7 @@ export const createPixiTiledMapView = async ({
     resolution: window.devicePixelRatio || 1,
     width: map.pixelWidth
   })
+  app.ticker.maxFPS = 60
 
   const sceneElement = document.createElement('div')
   const runtimeWarningBannerElement = document.createElement('div')
@@ -809,18 +810,31 @@ export const createPixiTiledMapView = async ({
     triggeredActions.clear()
   }
 
+  const handleVisibilityChange = () => {
+    if (document.hidden) {
+      handleWindowBlur()
+      app.stop()
+      return
+    }
+
+    app.start()
+  }
+
   window.addEventListener('keydown', handleKeyDown)
   window.addEventListener('keyup', handleKeyUp)
   window.addEventListener('blur', handleWindowBlur)
+  document.addEventListener('visibilitychange', handleVisibilityChange)
   app.ticker.add(updateCharacters)
   syncAllCharacterSprites()
   centerViewportOnCharacter(getCharacterStateById(cameraTargetCharacterId))
+  handleVisibilityChange()
 
   if (import.meta.hot) {
     import.meta.hot.dispose(() => {
       window.removeEventListener('keydown', handleKeyDown)
       window.removeEventListener('keyup', handleKeyUp)
       window.removeEventListener('blur', handleWindowBlur)
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
       app.ticker.remove(updateCharacters)
       gameEventQueue.clear()
       for (const activeMessage of activeCharacterMessages.values()) {

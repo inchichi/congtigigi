@@ -4,6 +4,7 @@
 - Main game and server language: TypeScript
 - Platform: web browsers (desktop and mobile)
 - Rendering: PixiJS
+- Render loop: cap the Pixi ticker at 60 FPS and stop the app while the document is hidden.
 - Tilemap rendering: `@pixi/tilemap`
 - Map format: Tiled TMX/TSX
   - Use tile layers together with object-layer events.
