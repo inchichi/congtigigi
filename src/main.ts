@@ -8,7 +8,6 @@ import tinyDungeonTilesetUrl from './assets/tilesets/tiny-dungeon-16.png'
 
 import {
   PLAYER_CHARACTER_ID,
-  createLuaCharacterController,
   createInitialPlayerCharacter
 } from './game/characterState'
 import {
@@ -41,6 +40,14 @@ const tinyDungeonTileset = parseTiledTileset({
 const characterSpriteScale = 2
 const replyWithMessageScriptId = 'reply-with-message'
 const wanderNearHomeScriptId = 'wander-near-home'
+const availableLuaControllerScriptsById: Record<string, { source: string }> = {
+  [replyWithMessageScriptId]: {
+    source: replyWithMessageControllerLua
+  },
+  [wanderNearHomeScriptId]: {
+    source: wanderNearHomeControllerLua
+  }
+}
 const initialCharacters = [
   createInitialPlayerCharacter({
     mapWidth: parsedTownMap.width,
@@ -51,27 +58,7 @@ const initialCharacters = [
     defaultPixelWidth: tinyDungeonTileset.tileWidth * characterSpriteScale,
     defaultPixelHeight: tinyDungeonTileset.tileHeight * characterSpriteScale
   })
-].map((character) =>
-  character.id === 'villager_1'
-    ? {
-        ...character,
-        controller: createLuaCharacterController({
-          scriptId: wanderNearHomeScriptId,
-          radiusInTiles: 2,
-          moveSpeedTilesPerSecond: 1.5
-        })
-      }
-    : character.id === 'blacksmith'
-      ? {
-          ...character,
-          controller: createLuaCharacterController({
-            scriptId: replyWithMessageScriptId,
-            radiusInTiles: 0,
-            moveSpeedTilesPerSecond: 0
-          })
-        }
-      : character
-)
+]
 let activeControllerRuntime: CharacterControllerRuntime | undefined
 
 rootElement.className = 'game-root'
@@ -82,14 +69,7 @@ const bootstrap = async () => {
   )
   const luaControllerRuntime = hasLuaControlledCharacter
     ? await createLuaCharacterControllerRuntime({
-        scriptsById: {
-          [replyWithMessageScriptId]: {
-            source: replyWithMessageControllerLua
-          },
-          [wanderNearHomeScriptId]: {
-            source: wanderNearHomeControllerLua
-          }
-        }
+        scriptsById: collectLuaControllerScripts(initialCharacters)
       })
     : undefined
   const controllerRuntime = createCharacterControllerRuntime({
@@ -114,6 +94,27 @@ const bootstrap = async () => {
     controllerRuntime
   })
 }
+
+const collectLuaControllerScripts = (
+  characters: typeof initialCharacters
+): Record<string, { source: string }> =>
+  Object.fromEntries(
+    characters.flatMap((character) => {
+      if (character.controller.kind !== 'lua') {
+        return []
+      }
+
+      const script = availableLuaControllerScriptsById[character.controller.scriptId]
+
+      if (!script) {
+        throw new Error(
+          `Missing Lua controller source for scriptId "${character.controller.scriptId}"`
+        )
+      }
+
+      return [[character.controller.scriptId, script]]
+    })
+  )
 
 if (import.meta.hot) {
   import.meta.hot.accept('./assets/lua/reply-with-message.lua?raw', (nextModule) => {
