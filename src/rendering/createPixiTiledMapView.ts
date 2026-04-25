@@ -885,7 +885,7 @@ const loadTilesetRenderResources = async (
   if (scaleMode) {
     imageTexture.source.scaleMode = scaleMode
   }
-  imageTexture.source.wrapMode = 'clamp-to-edge'
+  imageTexture.source.addressMode = 'clamp-to-edge'
   const tileTextures = Array.from(
     { length: tileset.tileCount },
     (_, localId) => createTileTexture(imageTexture, tileset, localId)
