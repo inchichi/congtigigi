@@ -182,7 +182,7 @@
   </object>
   <object id="4" name="villager_1" type="character" x="513.671" y="864.495">
    <properties>
-    <property name="controller.interactionLine" value="꺼져."/>
+    <property name="controller.interactionLine" value="비켜."/>
     <property name="controller.moveSpeedTilesPerSecond" type="float" value="1.5"/>
     <property name="controller.radiusInTiles" type="int" value="2"/>
     <property name="controller.scriptId" value="wander-near-home"/>
