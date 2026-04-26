@@ -3,6 +3,7 @@ from pathlib import Path
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from PIL import Image
 from torchvision import transforms
 from torchvision.utils import save_image
@@ -23,7 +24,7 @@ def test_transform(size, crop):
 
 
 def style_transfer(vgg, decoder, content, style, alpha=1.0,
-                   interpolation_weights=None):
+                   interpolation_weights=None, mask=None):
     assert (0.0 <= alpha <= 1.0)
     content_f = vgg(content)
     style_f = vgg(style)
@@ -37,7 +38,51 @@ def style_transfer(vgg, decoder, content, style, alpha=1.0,
     else:
         feat = adaptive_instance_normalization(content_f, style_f)
     feat = feat * alpha + content_f * (1 - alpha)
+
+    if mask is not None:
+        # Resize mask to feature-map resolution and apply style only on masked region.
+        mask = F.interpolate(mask, size=feat.shape[-2:], mode='nearest')
+        feat = feat * mask + content_f * (1 - mask)
+
     return decoder(feat)
+
+
+def resolve_mask_path(content_path: Path, args):
+    if args.mask:
+        p = Path(args.mask)
+        return p if p.exists() else None
+    if not args.mask_dir:
+        return None
+
+    mask_dir = Path(args.mask_dir)
+    stem = content_path.stem
+    candidates = [
+        mask_dir / f"{stem}{args.mask_suffix}.png",
+        mask_dir / f"{stem}{args.mask_suffix}.jpg",
+        mask_dir / f"{stem}{args.mask_suffix}.jpeg",
+        mask_dir / f"{stem}{args.mask_suffix}.bmp",
+        mask_dir / f"{stem}{args.mask_suffix}.webp",
+        mask_dir / f"{stem}.png",
+        mask_dir / f"{stem}.jpg",
+        mask_dir / f"{stem}.jpeg",
+        mask_dir / f"{stem}.bmp",
+        mask_dir / f"{stem}.webp",
+    ]
+    for p in candidates:
+        if p.exists():
+            return p
+    return None
+
+
+def load_binary_mask(mask_path: Path, size: int, crop: bool, threshold: int, invert: bool):
+    # Use the same geometric transform as content for alignment.
+    mask_tf = test_transform(size, crop)
+    mask = mask_tf(Image.open(str(mask_path)).convert("L"))[:1, :, :]
+    th = threshold / 255.0
+    mask = (mask > th).float()
+    if invert:
+        mask = 1.0 - mask
+    return mask
 
 
 parser = argparse.ArgumentParser()
@@ -54,6 +99,12 @@ parser.add_argument('--style_dir', type=str,
                     help='Directory path to a batch of style images')
 parser.add_argument('--vgg', type=str, default='models/vgg_normalised.pth')
 parser.add_argument('--decoder', type=str, default='models/decoder.pth')
+parser.add_argument('--mask', type=str,
+                    help='File path to mask image (white: style, black: preserve content)')
+parser.add_argument('--mask_dir', type=str,
+                    help='Directory path to per-content masks')
+parser.add_argument('--mask_suffix', type=str, default='_semantic',
+                    help='Suffix added to content stem when loading masks from --mask_dir')
 
 # Additional options
 parser.add_argument('--content_size', type=int, default=512,
@@ -78,8 +129,13 @@ parser.add_argument('--alpha', type=float, default=1.0,
 parser.add_argument(
     '--style_interpolation_weights', type=str, default='',
     help='The weight for blending the style of multiple style images')
+parser.add_argument('--mask_threshold', type=int, default=0,
+                    help='Mask threshold in [0,255]. Pixels > threshold are stylized')
+parser.add_argument('--invert_mask', action='store_true',
+                    help='Invert mask meaning (black: style, white: preserve content)')
 
 args = parser.parse_args()
+assert 0 <= args.mask_threshold <= 255
 
 do_interpolation = False
 
@@ -129,15 +185,24 @@ content_tf = test_transform(args.content_size, args.crop)
 style_tf = test_transform(args.style_size, args.crop)
 
 for content_path in content_paths:
+    mask_path = resolve_mask_path(content_path, args)
+    content_mask = None
+    if mask_path is not None:
+        content_mask = load_binary_mask(
+            mask_path, args.content_size, args.crop,
+            args.mask_threshold, args.invert_mask
+        ).unsqueeze(0).to(device)
+
     if do_interpolation:  # one content image, N style image
-        style = torch.stack([style_tf(Image.open(str(p))) for p in style_paths])
-        content = content_tf(Image.open(str(content_path))) \
-            .unsqueeze(0).expand_as(style)
+        style = torch.stack([style_tf(Image.open(str(p)).convert("RGB")) for p in style_paths])
+        base_content = content_tf(Image.open(str(content_path)).convert("RGB"))
+        content = base_content.unsqueeze(0).expand_as(style)
         style = style.to(device)
         content = content.to(device)
         with torch.no_grad():
             output = style_transfer(vgg, decoder, content, style,
-                                    args.alpha, interpolation_weights)
+                                    args.alpha, interpolation_weights,
+                                    mask=content_mask)
         output = output.cpu()
         output_name = output_dir / '{:s}_interpolation{:s}'.format(
             content_path.stem, args.save_ext)
@@ -145,15 +210,15 @@ for content_path in content_paths:
 
     else:  # process one content and one style
         for style_path in style_paths:
-            content = content_tf(Image.open(str(content_path)))
-            style = style_tf(Image.open(str(style_path)))
+            content = content_tf(Image.open(str(content_path)).convert("RGB"))
+            style = style_tf(Image.open(str(style_path)).convert("RGB"))
             if args.preserve_color:
                 style = coral(style, content)
             style = style.to(device).unsqueeze(0)
             content = content.to(device).unsqueeze(0)
             with torch.no_grad():
                 output = style_transfer(vgg, decoder, content, style,
-                                        args.alpha)
+                                        args.alpha, mask=content_mask)
             output = output.cpu()
 
             output_name = output_dir / '{:s}_stylized_{:s}{:s}'.format(

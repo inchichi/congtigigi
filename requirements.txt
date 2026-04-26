@@ -1,10 +1,18 @@
+# Core runtime (Python 3.10~3.12)
 numpy>=1.26,<3
 Pillow>=10.2,<13
 protobuf>=4.25,<6
 six>=1.16,<2
-tensorboardX>=2.6.2
 torch==2.5.1
 torchvision==0.20.1
+
+# Training
+tensorboardX>=2.6.2
 tqdm>=4.66,<5
+
+# Video inference (test_video.py)
 opencv-python>=4.10,<5
 imageio>=2.34,<3
+
+# Report generation (report_assets/data/*.py)
+matplotlib>=3.8,<4
