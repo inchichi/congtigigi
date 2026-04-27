@@ -11,11 +11,6 @@ __pycache__/
 Thumbs.db
 *:Zone.Identifier
 
-# Model files
-*.pth
-*.pth.tar
-*.t7
-
 # Training artifacts
 experiments/
 experiments_improved/
