@@ -73,3 +73,82 @@ body {
 .error-panel p {
   color: #ffb4b4;
 }
+
+.world-map-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  pointer-events: none;
+}
+
+.world-map-overlay__backdrop,
+.world-map-overlay__panel {
+  appearance: none;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+
+.world-map-overlay__backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: auto;
+  background: rgba(9, 7, 6, 0.72);
+  cursor: zoom-out;
+  touch-action: manipulation;
+}
+
+.world-map-overlay__panel {
+  position: absolute;
+  z-index: 1;
+  pointer-events: auto;
+  overflow: hidden;
+  background: #10100e;
+  box-shadow: 0 0 0 2px rgba(244, 231, 197, 0.92), 0 16px 32px rgba(0, 0, 0, 0.45);
+  cursor: zoom-in;
+  touch-action: manipulation;
+}
+
+.world-map-overlay__panel--expanded {
+  background: rgba(16, 16, 14, 0.98);
+  cursor: zoom-out;
+}
+
+.world-map-overlay__panel:focus-visible,
+.world-map-overlay__backdrop:focus-visible {
+  outline: 2px solid #f4e7c5;
+  outline-offset: 2px;
+}
+
+.world-map-overlay__canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  image-rendering: pixelated;
+  pointer-events: none;
+}
+
+.world-map-overlay__viewport {
+  position: absolute;
+  border: 2px solid rgba(244, 231, 197, 0.95);
+  box-shadow: 0 0 0 1px rgba(23, 19, 17, 0.78);
+  pointer-events: none;
+}
+
+.world-map-overlay__badge {
+  position: absolute;
+  left: 8px;
+  top: 8px;
+  padding: 2px 6px;
+  border: 1px solid rgba(244, 231, 197, 0.5);
+  background: rgba(23, 19, 17, 0.88);
+  color: #f4e7c5;
+  font-size: 0.8rem;
+  letter-spacing: 0.08em;
+  line-height: 1;
+  text-transform: uppercase;
+  pointer-events: none;
+}

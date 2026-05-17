@@ -9,7 +9,8 @@ import {
   Spritesheet,
   Text,
   TextStyle,
-  Texture
+  Texture,
+  UPDATE_PRIORITY
 } from 'pixi.js'
 
 import {
@@ -38,6 +39,7 @@ import {
   getSpriteTransformForTile,
   hasTileTransform
 } from './tiledSpriteTransform'
+import { createMapOverlay } from './createMapOverlay'
 
 type CreatePixiTiledMapViewInput = {
   mountElement: HTMLElement
@@ -184,6 +186,31 @@ export const createPixiTiledMapView = async ({
     position: { ...character.position },
     collisionSize: { ...character.collisionSize }
   }))
+  const mapOverlay = createMapOverlay({
+    mountElement,
+    sourceCanvas: app.canvas,
+    mapPixelWidth: map.pixelWidth,
+    mapPixelHeight: map.pixelHeight,
+    getFocusPoint: () => {
+      const focusCharacter = characterStates.find(
+        (candidateCharacter) => candidateCharacter.id === cameraTargetCharacterId
+      )
+
+      if (!focusCharacter) {
+        return {
+          x: map.pixelWidth / 2,
+          y: map.pixelHeight / 2
+        }
+      }
+
+      return {
+        x: focusCharacter.position.x * map.tileWidth + characterPixelWidth / 2,
+        y:
+          focusCharacter.position.y * map.tileHeight +
+          characterPixelHeight / 2
+      }
+    }
+  })
 
   const syncRuntimeWarningBanner = () => {
     const warnings = controllerRuntime.getRuntimeWarnings()
@@ -825,8 +852,10 @@ export const createPixiTiledMapView = async ({
   window.addEventListener('blur', handleWindowBlur)
   document.addEventListener('visibilitychange', handleVisibilityChange)
   app.ticker.add(updateCharacters)
+  app.ticker.add(mapOverlay.syncFrame, undefined, UPDATE_PRIORITY.UTILITY)
   syncAllCharacterSprites()
   centerViewportOnCharacter(getCharacterStateById(cameraTargetCharacterId))
+  mapOverlay.syncFrame()
   handleVisibilityChange()
 
   if (import.meta.hot) {
@@ -836,12 +865,14 @@ export const createPixiTiledMapView = async ({
       window.removeEventListener('blur', handleWindowBlur)
       document.removeEventListener('visibilitychange', handleVisibilityChange)
       app.ticker.remove(updateCharacters)
+      app.ticker.remove(mapOverlay.syncFrame)
       gameEventQueue.clear()
       for (const activeMessage of activeCharacterMessages.values()) {
         activeMessage.container.destroy({ children: true })
       }
       activeCharacterMessages.clear()
       runtimeWarningBannerElement.remove()
+      mapOverlay.destroy()
       controllerRuntime.destroy()
       app.destroy({ removeView: true }, { children: true })
     })
