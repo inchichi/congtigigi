@@ -3,6 +3,8 @@ export type PlayerEquipmentSlotId = 'weapon' | 'armor' | 'boots' | 'accessory'
 export type PlayerEquipmentIconKey =
   | 'tiny-dungeon-weapon'
   | 'tiny-knight-gray-helmet'
+  | 'tiny-knight-open-helmet'
+  | 'town-crate-sword-right'
   | 'ui-circle-beige'
   | 'ui-check-beige'
 
@@ -21,6 +23,7 @@ export type PlayerEquipmentItem = {
 export type PlayerEquipmentItemDefinition = PlayerEquipmentItem & {
   slotId: PlayerEquipmentSlotId
   icon: PlayerEquipmentIcon
+  price: number
 }
 
 export type PlayerEquipmentSlot = {
@@ -56,6 +59,7 @@ const PLAYER_EQUIPMENT_ITEM_DEFINITIONS: PlayerEquipmentItemDefinition[] = [
     label: '기본 무기',
     level: 1,
     description: '초보용 근접 무기',
+    price: 120,
     icon: {
       key: 'tiny-dungeon-weapon',
       scale: 1.6
@@ -67,6 +71,7 @@ const PLAYER_EQUIPMENT_ITEM_DEFINITIONS: PlayerEquipmentItemDefinition[] = [
     label: '기본 옷',
     level: 1,
     description: '초보용 옷',
+    price: 100,
     icon: {
       key: 'tiny-knight-gray-helmet',
       scale: 1.4
@@ -78,6 +83,7 @@ const PLAYER_EQUIPMENT_ITEM_DEFINITIONS: PlayerEquipmentItemDefinition[] = [
     label: '기본 신발',
     level: 1,
     description: '초보용 신발',
+    price: 80,
     icon: {
       key: 'ui-circle-beige',
       scale: 1.2
@@ -89,6 +95,55 @@ const PLAYER_EQUIPMENT_ITEM_DEFINITIONS: PlayerEquipmentItemDefinition[] = [
     label: '기본 장신구',
     level: 1,
     description: '초보용 장신구',
+    price: 60,
+    icon: {
+      key: 'ui-check-beige',
+      scale: 1.2
+    }
+  },
+  {
+    id: 'bronze-sword',
+    slotId: 'weapon',
+    label: '청동 검',
+    level: 2,
+    description: '대장장이가 만든 단단한 검',
+    price: 320,
+    icon: {
+      key: 'town-crate-sword-right',
+      scale: 1.5
+    }
+  },
+  {
+    id: 'iron-armor',
+    slotId: 'armor',
+    label: '철 옷',
+    level: 2,
+    description: '초보용을 넘어선 철제 옷',
+    price: 260,
+    icon: {
+      key: 'tiny-knight-open-helmet',
+      scale: 1.4
+    }
+  },
+  {
+    id: 'leather-boots',
+    slotId: 'boots',
+    label: '가죽 신발',
+    level: 2,
+    description: '가볍고 단단한 가죽 신발',
+    price: 180,
+    icon: {
+      key: 'ui-circle-beige',
+      scale: 1.2
+    }
+  },
+  {
+    id: 'smith-charm',
+    slotId: 'accessory',
+    label: '수호 부적',
+    level: 2,
+    description: '대장장이가 준 작은 보호 부적',
+    price: 140,
     icon: {
       key: 'ui-check-beige',
       scale: 1.2
@@ -102,12 +157,16 @@ const PLAYER_EQUIPMENT_ITEM_DEFINITION_BY_ID = new Map(
     definition
   ])
 )
-const PLAYER_EQUIPMENT_ITEM_DEFINITION_BY_SLOT_ID = new Map(
-  PLAYER_EQUIPMENT_ITEM_DEFINITIONS.map((definition) => [
-    definition.slotId,
-    definition
-  ])
-)
+const PLAYER_EQUIPMENT_ITEM_DEFINITION_BY_SLOT_ID = new Map<
+  PlayerEquipmentSlotId,
+  PlayerEquipmentItemDefinition
+>()
+
+for (const definition of PLAYER_EQUIPMENT_ITEM_DEFINITIONS) {
+  if (!PLAYER_EQUIPMENT_ITEM_DEFINITION_BY_SLOT_ID.has(definition.slotId)) {
+    PLAYER_EQUIPMENT_ITEM_DEFINITION_BY_SLOT_ID.set(definition.slotId, definition)
+  }
+}
 
 export const createInitialPlayerEquipment = (): PlayerEquipment => ({
   setName: '기본 장비',

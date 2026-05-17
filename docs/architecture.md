@@ -4,7 +4,7 @@ This document is a short guide for module boundaries and code placement.
 
 ## Current Structure
 
-- `src/main.ts`: web entry point. Compose the application and connect browser-specific code here.
+- `src/main.ts`: web entry point. Compose the application, bootstrap scenes, and route portal-driven scene transitions here.
 - `src/assets/`: runtime assets that are imported by the web client.
 - `src/assets/lua/`: project Lua controller scripts that are loaded by the web client at runtime.
 - `src/game/`: pure game or engine logic that should stay easy to test with Vitest.
@@ -14,17 +14,20 @@ This document is a short guide for module boundaries and code placement.
 - `src/game/interaction/`: target resolution and event processing for interaction flow.
 - `src/game/lua/`: Lua wasm bridge code that loads controller modules, exposes the public `engine.*` Lua API, and evaluates scripts for runtime characters.
 - `src/game/lua/luaControllerApi.ts`: source of truth for the Lua-visible controller contract.
-- `src/game/playerEquipment.ts`: player-facing equipment state, starter gear data, and item icon metadata used by the combined player panel.
+- `src/game/blacksmithShop.ts`: blacksmith merchant inventory, buy/sell trade rules, and stock initialization for the shop NPC.
+- `src/game/playerEquipment.ts`: player-facing equipment state, starter gear data, blacksmith gear data, item price metadata, and item icon metadata used by the combined player panel.
 - `src/game/playerProfile.ts`: player-facing name, class, resource, stat, and skill data used by the HUD.
-- `src/game/playerInventory.ts`: player-only backpack state and slot mutation helpers.
+- `src/game/playerInventory.ts`: shared gold-and-slot inventory shape, including the player backpack and NPC trade inventories, plus slot mutation helpers.
 - `src/game/playerLoadout.ts`: pure equip and unequip transitions between the backpack and the starter gear slots.
 - `src/game/tiled/`: TMX/TSX parsing, tile metadata, and event-layer data extraction.
 - `src/game/tiled/createNpcCharactersFromEventLayers.ts`: translate `character` object-layer events plus `controller.*` TMX properties into shared NPC character state.
+- `src/game/tiled/createMapPortalsFromEventLayers.ts`: translate `portal` object-layer events into scene transition data for map exits and entrances.
 - `src/rendering/`: PixiJS rendering code and asset-to-view adaptation.
 - `src/rendering/`: map tile rendering, depth sorting, event character presentation, and fixed-screen HUD overlays.
-- `src/rendering/createPixiTiledMapView.ts`: owns the live world scene, character sprite placement, and the player weapon sprite attached to the player render node.
+- `src/rendering/createPixiTiledMapView.ts`: owns the live world scene, character sprite placement, the player weapon sprite attached to the player render node, the blacksmith shop open state, and portal-triggered scene transition requests.
 - `src/rendering/createPlayerHudOverlay.ts`: fixed-screen character status panel with bag icon and skill slots. The bag icon opens the combined player panel.
-- `src/rendering/createPlayerInventoryOverlay.ts`: combined fixed-screen player panel that shows the equipment layout, a centered player portrait preview, and the backpack grid, with click-to-equip and click-to-unequip behavior.
+- `src/rendering/createPlayerInventoryOverlay.ts`: combined fixed-screen player panel that shows the equipment layout, a centered player portrait preview, the backpack grid, and current gold, with click-to-equip and click-to-unequip behavior.
+- `src/rendering/createBlacksmithShopOverlay.ts`: fixed-screen blacksmith trade modal with portrait headers, category tabs, and side-by-side purchase/sale lists for buy/sell clicks.
 - `scripts/`: project automation scripts such as third-party fetch/build steps.
 - `third_party/`: vendored external source code kept in-repo for deterministic builds.
 - `public/vendor/`: generated static artifacts served as-is by Vite.

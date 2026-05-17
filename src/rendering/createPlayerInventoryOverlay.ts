@@ -40,10 +40,16 @@ const TINY_DUNGEON_TILESET_IMAGE_URL = new URL(
   '../assets/tilesets/tiny-dungeon-16.png',
   import.meta.url
 ).href
+const TOWN_TILESET_IMAGE_URL = new URL(
+  '../assets/tilesets/town-32.png',
+  import.meta.url
+).href
 const UI_SPRITESHEET_WIDTH = 512
 const UI_SPRITESHEET_HEIGHT = 512
 const TINY_DUNGEON_TILESET_WIDTH = 192
 const TINY_DUNGEON_TILESET_HEIGHT = 176
+const TOWN_TILESET_WIDTH = 256
+const TOWN_TILESET_HEIGHT = 2240
 const OVERLAY_MARGIN = 16
 const PLAYER_PORTRAIT_FRAME_BY_APPEARANCE_TYPE: Record<
   string,
@@ -134,6 +140,28 @@ const EQUIPMENT_ICON_FRAME_BY_KEY: Record<
       height: 16
     }
   },
+  'tiny-knight-open-helmet': {
+    imageUrl: TINY_DUNGEON_TILESET_IMAGE_URL,
+    imageWidth: TINY_DUNGEON_TILESET_WIDTH,
+    imageHeight: TINY_DUNGEON_TILESET_HEIGHT,
+    frame: {
+      x: 16,
+      y: 128,
+      width: 16,
+      height: 16
+    }
+  },
+  'town-crate-sword-right': {
+    imageUrl: TOWN_TILESET_IMAGE_URL,
+    imageWidth: TOWN_TILESET_WIDTH,
+    imageHeight: TOWN_TILESET_HEIGHT,
+    frame: {
+      x: 64,
+      y: 1504,
+      width: 32,
+      height: 32
+    }
+  },
   'ui-circle-beige': {
     imageUrl: UI_SPRITESHEET_IMAGE_URL,
     imageWidth: UI_SPRITESHEET_WIDTH,
@@ -219,7 +247,7 @@ export const createPlayerInventoryOverlay = ({
   backdropButton.type = 'button'
   backdropButton.className = 'player-inventory-overlay__backdrop'
   backdropButton.hidden = true
-  backdropButton.setAttribute('aria-label', 'Close inventory')
+  backdropButton.setAttribute('aria-label', '가방 닫기')
 
   panel.id = 'player-inventory-panel'
   panel.className = 'player-inventory-overlay__panel'
@@ -233,9 +261,9 @@ export const createPlayerInventoryOverlay = ({
   titleGroup.className = 'player-inventory-overlay__title-group'
   titleElement.id = 'player-inventory-title'
   titleElement.className = 'player-inventory-overlay__title'
-  titleElement.textContent = 'INVENTORY'
+  titleElement.textContent = '가방'
   summaryElement.className = 'player-inventory-overlay__summary'
-  summaryElement.textContent = '0 / 12 slots filled'
+  summaryElement.textContent = `${getPlayerInventoryFilledSlotCount(initialInventory)} / ${initialInventory.slots.length}칸 · ${formatGoldAmount(initialInventory.gold)}`
 
   equipmentSection.className = 'player-inventory-overlay__equipment-section'
   equipmentSectionHeader.className = 'player-inventory-overlay__equipment-header'
@@ -269,14 +297,14 @@ export const createPlayerInventoryOverlay = ({
   equipmentCenterJob.textContent = profile.job
   equipmentCenterLevel.className =
     'player-inventory-overlay__equipment-center-level'
-  equipmentCenterLevel.textContent = `LV ${profile.level}`
+  equipmentCenterLevel.textContent = `레벨 ${profile.level}`
   equipmentCenterSet.className = 'player-inventory-overlay__equipment-center-set'
   equipmentCenterSet.textContent = initialEquipment.setName
 
   closeButton.type = 'button'
   closeButton.className = 'player-inventory-overlay__close'
-  closeButton.setAttribute('aria-label', 'Close inventory')
-  closeButton.title = 'Close inventory (Esc)'
+  closeButton.setAttribute('aria-label', '가방 닫기')
+  closeButton.title = '가방 닫기 (Esc)'
 
   closeIcon.className = 'player-inventory-overlay__close-icon'
   closeIcon.setAttribute('aria-hidden', 'true')
@@ -285,10 +313,10 @@ export const createPlayerInventoryOverlay = ({
   slotGrid.style.gap = '12px'
 
   footerElement.className = 'player-inventory-overlay__footer'
-  footerElement.textContent = 'I, Esc로 닫기 · 클릭으로 장착/해제'
+  footerElement.textContent = 'I, Esc로 닫기 · 클릭으로 착용/해제'
 
   emptyStateElement.className = 'player-inventory-overlay__empty-state'
-  emptyStateElement.textContent = 'No items yet'
+  emptyStateElement.textContent = '아직 아이템이 없습니다'
 
   for (const slot of initialEquipment.slots) {
     const slotCard = document.createElement('button')
@@ -313,10 +341,10 @@ export const createPlayerInventoryOverlay = ({
 
     slotDescriptionLabel.className =
       'player-inventory-overlay__equipment-slot-description'
-    slotDescriptionLabel.textContent = slot.item?.description ?? '인벤토리에서 장착하세요'
+    slotDescriptionLabel.textContent = slot.item?.description ?? '가방에서 장착하세요'
 
     slotLevelBadge.className = 'player-inventory-overlay__equipment-slot-level'
-    slotLevelBadge.textContent = `LV ${slot.item?.level ?? '-'}`
+    slotLevelBadge.textContent = `레벨 ${slot.item?.level ?? '-'}`
 
     slotIcon.className = 'player-inventory-overlay__equipment-slot-icon'
     slotIcon.setAttribute('aria-hidden', 'true')
@@ -367,7 +395,7 @@ export const createPlayerInventoryOverlay = ({
     slotButton.type = 'button'
     slotButton.className = 'player-inventory-overlay__slot'
     slotButton.dataset.playerInventorySlotIndex = String(index)
-    slotButton.setAttribute('aria-label', `빈 인벤토리 칸 ${index + 1}`)
+    slotButton.setAttribute('aria-label', `빈 가방 칸 ${index + 1}`)
 
     slotIndexLabel.className = 'player-inventory-overlay__slot-index'
     slotIndexLabel.textContent = String(index + 1).padStart(2, '0')
@@ -606,10 +634,10 @@ export const createPlayerInventoryOverlay = ({
     setPreviewPosition(equipmentCenterPortraitBoots, 50, 84)
     setPreviewPosition(equipmentCenterPortraitAccessory, 41, 54)
 
-    equipmentSectionSummary.textContent = `${equipment.setName} • LV ${equipment.level}`
+    equipmentSectionSummary.textContent = `${equipment.setName} • 레벨 ${equipment.level}`
     equipmentCenterName.textContent = profile.name
     equipmentCenterJob.textContent = profile.job
-    equipmentCenterLevel.textContent = `LV ${profile.level}`
+    equipmentCenterLevel.textContent = `레벨 ${profile.level}`
     equipmentCenterSet.textContent = equipment.setName
 
     for (let index = 0; index < equipmentSlotCards.length; index += 1) {
@@ -634,18 +662,18 @@ export const createPlayerInventoryOverlay = ({
         'aria-label',
         slotItem
           ? `${slotLabel} ${slotItem.label}. 클릭하면 해제`
-          : `${slotLabel} 비어 있음. 인벤토리에서 장착`
+          : `${slotLabel} 비어 있음. 가방에서 장착`
       )
       slotCard.title = slotItem
         ? `${slotLabel} ${slotItem.label}. 클릭하면 해제`
-        : `${slotLabel} 비어 있음. 인벤토리에서 장착`
+        : `${slotLabel} 비어 있음. 가방에서 장착`
 
       slotHeaderLabel.textContent = slotLabel
       slotItemLabel.textContent = slotItem ? slotItem.label : '비어 있음'
       slotDescriptionLabel.textContent = slotItem
         ? slotItem.description
-        : '인벤토리에서 장착하세요'
-      slotLevelBadge.textContent = slotItem ? `LV ${slotItem.level}` : '--'
+        : '가방에서 장착하세요'
+      slotLevelBadge.textContent = slotItem ? `레벨 ${slotItem.level}` : '--'
       renderEquipmentIcon(slotIcon, slotItem?.id, equipmentSlotScale)
     }
 
@@ -688,13 +716,13 @@ export const createPlayerInventoryOverlay = ({
           ? slotDefinition
             ? `${slot.label}${slot.quantity > 1 ? ` x${slot.quantity}` : ''}. 클릭하면 ${targetSlotLabel}에 장착`
             : `${slot.label}${slot.quantity > 1 ? ` x${slot.quantity}` : ''}`
-          : `빈 인벤토리 칸 ${index + 1}`
+          : `빈 가방 칸 ${index + 1}`
       )
       slotButton.title = slot
         ? slotDefinition
           ? `${slot.label}${slot.quantity > 1 ? ` x${slot.quantity}` : ''}. 클릭하면 ${targetSlotLabel}에 장착`
           : `${slot.label}${slot.quantity > 1 ? ` x${slot.quantity}` : ''}`
-        : `빈 인벤토리 칸 ${index + 1}`
+        : `빈 가방 칸 ${index + 1}`
 
       if (slot) {
         slotItemLabel.hidden = false
@@ -718,7 +746,7 @@ export const createPlayerInventoryOverlay = ({
     }
     const filledSlotCount = getPlayerInventoryFilledSlotCount(inventory)
 
-    summaryElement.textContent = `${filledSlotCount} / ${inventory.slots.length} slots filled`
+    summaryElement.textContent = `${filledSlotCount} / ${inventory.slots.length}칸 · ${formatGoldAmount(inventory.gold)}`
     emptyStateElement.hidden = filledSlotCount > 0
   }
 
@@ -872,3 +900,6 @@ export const createPlayerInventoryOverlay = ({
 
 const clamp = (value: number, min: number, max: number): number =>
   Math.min(max, Math.max(min, value))
+
+const formatGoldAmount = (gold: number): string =>
+  `${gold.toLocaleString('ko-KR')}원`

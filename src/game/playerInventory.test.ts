@@ -11,13 +11,22 @@ import {
 describe('createInitialPlayerInventory', () => {
   it('creates 12 empty slots by default', () => {
     expect(createInitialPlayerInventory()).toEqual({
+      gold: 1000,
       slots: Array.from({ length: 12 }, () => undefined)
     })
   })
 
   it('supports custom slot counts', () => {
     expect(createInitialPlayerInventory({ slotCount: 4 })).toEqual({
+      gold: 1000,
       slots: Array.from({ length: 4 }, () => undefined)
+    })
+  })
+
+  it('supports custom starting gold', () => {
+    expect(createInitialPlayerInventory({ gold: 250 })).toEqual({
+      gold: 250,
+      slots: Array.from({ length: 12 }, () => undefined)
     })
   })
 })
@@ -99,6 +108,7 @@ describe('findFirstEmptyPlayerInventorySlotIndex', () => {
 
   it('returns undefined when the inventory is full', () => {
     const inventory = {
+      gold: 1000,
       slots: [
         {
           id: 'potion',

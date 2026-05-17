@@ -7,13 +7,16 @@ export type PlayerInventoryItem = {
 export type PlayerInventorySlot = PlayerInventoryItem | undefined
 
 export type PlayerInventory = {
+  gold: number
   slots: PlayerInventorySlot[]
 }
 
 const DEFAULT_PLAYER_INVENTORY_SLOT_COUNT = 12
+const DEFAULT_PLAYER_INVENTORY_GOLD = 1000
 
 type CreateInitialPlayerInventoryInput = {
   slotCount?: number
+  gold?: number
 }
 
 type SetPlayerInventorySlotInput = {
@@ -28,8 +31,10 @@ type ClearPlayerInventorySlotInput = {
 }
 
 export const createInitialPlayerInventory = ({
-  slotCount = DEFAULT_PLAYER_INVENTORY_SLOT_COUNT
+  slotCount = DEFAULT_PLAYER_INVENTORY_SLOT_COUNT,
+  gold = DEFAULT_PLAYER_INVENTORY_GOLD
 }: CreateInitialPlayerInventoryInput = {}): PlayerInventory => ({
+  gold,
   slots: Array.from({ length: slotCount }, () => undefined)
 })
 
@@ -45,6 +50,7 @@ export const setPlayerInventorySlot = ({
   slots[slotIndex] = item
 
   return {
+    gold: inventory.gold,
     slots
   }
 }
@@ -60,6 +66,7 @@ export const clearPlayerInventorySlot = ({
   slots[slotIndex] = undefined
 
   return {
+    gold: inventory.gold,
     slots
   }
 }

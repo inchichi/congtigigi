@@ -13,6 +13,11 @@ const townMapXml = readFileSync(
   'utf8'
 )
 
+const huntingGroundMapXml = readFileSync(
+  new URL('../../assets/maps/hunting-ground.tmx', import.meta.url),
+  'utf8'
+)
+
 const townTilesetXml = readFileSync(
   new URL('../../assets/tilesets/town-32.tsx', import.meta.url),
   'utf8'
@@ -58,7 +63,10 @@ describe('parseTiledMap', () => {
       'deco',
       'roof'
     ])
-    expect(map.eventLayers.map((layer) => layer.name)).toEqual(['characters'])
+    expect(map.eventLayers.map((layer) => layer.name)).toEqual([
+      'characters',
+      'portals'
+    ])
     expect(map.tilesets).toHaveLength(1)
     expect(map.tilesets[0]).toMatchObject({
       firstGid: 1,
@@ -120,6 +128,73 @@ describe('parseTiledMap', () => {
     })
     expect(map.eventLayers[0].events[0].x).toBeGreaterThan(0)
     expect(map.eventLayers[0].events[0].y).toBeGreaterThan(0)
+    expect(map.eventLayers[1]).toMatchObject({
+      id: 9,
+      name: 'portals',
+      opacity: 1,
+      visible: true
+    })
+    expect(map.eventLayers[1].events[0]).toMatchObject({
+      id: 8,
+      name: 'east_gate',
+      className: 'portal',
+      x: 1568,
+      y: 544,
+      width: 32,
+      height: 64,
+      visible: true,
+      properties: {
+        appearanceType: 'stairs_stone_step_base_00',
+        targetFacing: 'left',
+        targetSceneId: 'hunting-ground',
+        targetSpawnTileX: 2,
+        targetSpawnTileY: 10
+      }
+    })
+  })
+
+  it('parses the beginner hunting ground TMX map', () => {
+    const map = parseTiledMap({
+      mapXml: huntingGroundMapXml,
+      externalTilesets: {
+        '../tilesets/town-32.tsx': townTilesetXml
+      }
+    })
+
+    expect(map.width).toBe(32)
+    expect(map.height).toBe(20)
+    expect(map.pixelWidth).toBe(1024)
+    expect(map.pixelHeight).toBe(640)
+    expect(map.layers).toHaveLength(1)
+    expect(map.layers[0].name).toBe('ground')
+    expect(map.layers[0].tiles[0]).toMatchObject({
+      x: 0,
+      y: 0,
+      gid: 308,
+      localId: 307,
+      flipHorizontally: false,
+      flipVertically: false,
+      flipDiagonally: false
+    })
+    expect(map.eventLayers.map((layer) => layer.name)).toEqual([
+      'characters',
+      'portals'
+    ])
+    expect(map.eventLayers[0].events).toHaveLength(0)
+    expect(map.eventLayers[1].events[0]).toMatchObject({
+      id: 4,
+      name: 'return_gate',
+      className: 'portal',
+      width: 32,
+      height: 64,
+      properties: {
+        appearanceType: 'stairs_stone_step_base_00',
+        targetFacing: 'right',
+        targetSceneId: 'town',
+        targetSpawnTileX: 46,
+        targetSpawnTileY: 17
+      }
+    })
   })
 
   it('parses tileset tile types for character appearance lookup', () => {

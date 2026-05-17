@@ -53,8 +53,8 @@ export const createPlayerHudOverlay = ({
   const bagButton = document.createElement('button')
   const bagIcon = createBagIconSvg()
   const resourceGrid = document.createElement('div')
-  const hpRow = createResourceRow('HP')
-  const mpRow = createResourceRow('MP')
+  const hpRow = createResourceRow('체력')
+  const mpRow = createResourceRow('마나')
   const statGrid = document.createElement('div')
   const skillSection = document.createElement('div')
   const skillSectionTitle = document.createElement('div')
@@ -69,7 +69,7 @@ export const createPlayerHudOverlay = ({
   overlayRoot.className = 'player-hud-overlay'
 
   panel.className = 'player-hud-overlay__panel'
-  panel.setAttribute('aria-label', 'Character status')
+  panel.setAttribute('aria-label', '캐릭터 상태')
 
   panelBody.className = 'player-hud-overlay__panel-body'
   headerRow.className = 'player-hud-overlay__header'
@@ -79,15 +79,15 @@ export const createPlayerHudOverlay = ({
   jobElement.className = 'player-hud-overlay__job'
   jobElement.textContent = profile.job
   levelBadge.className = 'player-hud-overlay__level'
-  levelBadge.textContent = `LV ${profile.level}`
+  levelBadge.textContent = `레벨 ${profile.level}`
 
   bagButton.type = 'button'
   bagButton.className = 'player-hud-overlay__bag-button'
-  bagButton.setAttribute('aria-label', 'Open inventory')
+  bagButton.setAttribute('aria-label', '가방 열기')
   bagButton.setAttribute('aria-haspopup', 'dialog')
   bagButton.setAttribute('aria-controls', 'player-inventory-panel')
   bagButton.setAttribute('aria-expanded', 'false')
-  bagButton.title = 'Open inventory'
+  bagButton.title = '가방 열기'
 
   bagIcon.classList.add('player-hud-overlay__bag-icon')
   bagIcon.setAttribute('aria-hidden', 'true')
@@ -97,13 +97,13 @@ export const createPlayerHudOverlay = ({
   statGrid.className = 'player-hud-overlay__stat-grid'
   skillSection.className = 'player-hud-overlay__skill-section'
   skillSectionTitle.className = 'player-hud-overlay__skill-title'
-  skillSectionTitle.textContent = 'SKILLS'
+  skillSectionTitle.textContent = '스킬'
   skillGrid.className = 'player-hud-overlay__skill-grid'
 
   for (const stat of [
-    ['ATK', profile.stats.attack],
-    ['DEF', profile.stats.defense],
-    ['AGI', profile.stats.agility]
+    ['공격', profile.stats.attack],
+    ['방어', profile.stats.defense],
+    ['민첩', profile.stats.agility]
   ] as const) {
     const chip = document.createElement('div')
 
@@ -227,9 +227,9 @@ export const createPlayerHudOverlay = ({
     bagButton.setAttribute('aria-expanded', String(getIsInventoryOpen()))
     bagButton.setAttribute(
       'aria-label',
-      getIsInventoryOpen() ? 'Close inventory' : 'Open inventory'
+      getIsInventoryOpen() ? '가방 닫기' : '가방 열기'
     )
-    bagButton.title = getIsInventoryOpen() ? 'Close inventory' : 'Open inventory'
+    bagButton.title = getIsInventoryOpen() ? '가방 닫기' : '가방 열기'
 
     syncResourceRow(hpRow.row, profile.hp, HEALTH_BAR_COLOR)
     syncResourceRow(mpRow.row, profile.mp, MANA_BAR_COLOR)

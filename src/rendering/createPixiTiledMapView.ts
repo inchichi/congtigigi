@@ -31,6 +31,10 @@ import type { PlayerEquipment } from '../game/playerEquipment'
 import type { PlayerInventory } from '../game/playerInventory'
 import type { PlayerProfile } from '../game/playerProfile'
 import {
+  createMapPortalsFromEventLayers,
+  type MapPortal
+} from '../game/tiled/createMapPortalsFromEventLayers'
+import {
   createWallTileLookup,
   isWallTileAt
 } from '../game/tiled/createWallTileLookup'
@@ -44,6 +48,7 @@ import {
   hasTileTransform
 } from './tiledSpriteTransform'
 import { createMapOverlay } from './createMapOverlay'
+import { createBlacksmithShopOverlay } from './createBlacksmithShopOverlay'
 import { createPlayerHudOverlay } from './createPlayerHudOverlay'
 import { createPlayerInventoryOverlay } from './createPlayerInventoryOverlay'
 
@@ -54,6 +59,7 @@ type CreatePixiTiledMapViewInput = {
   playerProfile: PlayerProfile
   playerEquipment: PlayerEquipment
   playerInventory: PlayerInventory
+  merchantInventory: PlayerInventory
   cameraTargetCharacterId: string
   characterSpriteSheet: {
     tileset: ParsedTiledTileset
@@ -61,6 +67,19 @@ type CreatePixiTiledMapViewInput = {
   }
   imageUrls: Record<string, string>
   controllerRuntime: CharacterControllerRuntime
+  onPlayerInventoryChange: (nextInventory: PlayerInventory) => void
+  onPlayerEquipmentChange: (nextEquipment: PlayerEquipment) => void
+  onMerchantInventoryChange: (nextInventory: PlayerInventory) => void
+  onRequestSceneChange: (request: SceneTransitionRequest) => void
+}
+
+export type SceneTransitionRequest = {
+  sceneId: string
+  spawn: {
+    x: number
+    y: number
+  }
+  facing?: CharacterMoveDirection
 }
 
 type TilesetRenderResources = {
@@ -95,6 +114,11 @@ type RenderedCharacterNode = {
   sprite: Sprite
 }
 
+type RenderedPortalNode = {
+  container: Container
+  sprite: Sprite
+}
+
 const DEPTH_SORTED_LAYER_NAME = 'object'
 const UI_SPRITESHEET_URL = new URL(
   '../assets/spritesheets/uipack_rpg_sheet.json',
@@ -123,6 +147,7 @@ const MESSAGE_TEXT_STYLE = new TextStyle({
   wordWrap: true,
   wordWrapWidth: MESSAGE_TEXT_MAX_WIDTH
 })
+const BLACKSMITH_SHOP_NPC_ID = 'blacksmith'
 const PLAYER_WEAPON_TILE_LOCAL_ID = 117
 const PLAYER_WEAPON_TILE_FRAME_SOURCE: TileTextureFrameSource = {
   columns: 12,
@@ -151,11 +176,16 @@ export const createPixiTiledMapView = async ({
   playerProfile,
   playerEquipment,
   playerInventory,
+  merchantInventory,
   cameraTargetCharacterId,
   characterSpriteSheet,
   imageUrls,
-  controllerRuntime
-}: CreatePixiTiledMapViewInput): Promise<Application> => {
+  controllerRuntime,
+  onPlayerInventoryChange,
+  onPlayerEquipmentChange,
+  onMerchantInventoryChange,
+  onRequestSceneChange
+}: CreatePixiTiledMapViewInput): Promise<{ destroy: () => void }> => {
   const app = new Application()
   const [messagePanelTexture, tinyDungeonWeaponImageTexture] = await Promise.all([
     loadMessagePanelTexture(),
@@ -219,20 +249,25 @@ export const createPixiTiledMapView = async ({
   const interactionLockUntilByCharacterPair = new Map<string, number>()
   const activeCharacterMessages = new Map<string, ActiveCharacterMessage>()
   const renderedCharacters = new Map<string, RenderedCharacterNode>()
+  const renderedPortals = new Map<string, RenderedPortalNode>()
   const characterPixelWidth =
     characterSpriteSheet.tileset.tileWidth * characterSpriteSheet.scale
   const characterPixelHeight =
     characterSpriteSheet.tileset.tileHeight * characterSpriteSheet.scale
   let currentPlayerEquipment = playerEquipment
   let currentPlayerInventory = playerInventory
+  let currentBlacksmithInventory = merchantInventory
   let playerWeaponSprite: Sprite | undefined
   let syncPlayerCharacterVisual = () => {}
+  let isSceneTransitionPending = false
+  let isDestroyed = false
   const clearPressedInputState = () => {
     pressedDirections.clear()
     pressedActions.clear()
     triggeredActions.clear()
   }
   let isPlayerUiOpen = false
+  let isBlacksmithShopOpen = false
   let playerHudOverlay: {
     syncFrame: () => void
     destroy: () => void
@@ -247,6 +282,13 @@ export const createPixiTiledMapView = async ({
     syncFrame: () => {},
     destroy: () => {}
   }
+  let playerShopOverlay: {
+    syncFrame: () => void
+    destroy: () => void
+  } = {
+    syncFrame: () => {},
+    destroy: () => {}
+  }
   let lastRuntimeErrorMessage: string | undefined
   let depthSortedLayer: Container | undefined
   let characterStates = characters.map((character) => ({
@@ -254,6 +296,7 @@ export const createPixiTiledMapView = async ({
     position: { ...character.position },
     collisionSize: { ...character.collisionSize }
   }))
+  const mapPortals = createMapPortalsFromEventLayers({ map })
   const mapOverlay = createMapOverlay({
     mountElement,
     sourceCanvas: app.canvas,
@@ -282,6 +325,7 @@ export const createPixiTiledMapView = async ({
   const syncPlayerUiOverlays = () => {
     playerHudOverlay.syncFrame()
     playerInventoryOverlay.syncFrame()
+    playerShopOverlay.syncFrame()
   }
   const setPlayerUiOpen = (nextIsOpen: boolean) => {
     if (isPlayerUiOpen === nextIsOpen) {
@@ -289,11 +333,59 @@ export const createPixiTiledMapView = async ({
     }
 
     isPlayerUiOpen = nextIsOpen
+    if (nextIsOpen) {
+      isBlacksmithShopOpen = false
+    }
+    clearPressedInputState()
+    syncPlayerUiOverlays()
+  }
+  const setBlacksmithShopOpen = (nextIsOpen: boolean) => {
+    if (isBlacksmithShopOpen === nextIsOpen) {
+      return
+    }
+
+    isBlacksmithShopOpen = nextIsOpen
+    if (nextIsOpen) {
+      isPlayerUiOpen = false
+    }
     clearPressedInputState()
     syncPlayerUiOverlays()
   }
   const closeAllOverlays = () => {
-    setPlayerUiOpen(false)
+    if (!isPlayerUiOpen && !isBlacksmithShopOpen) {
+      return
+    }
+
+    isPlayerUiOpen = false
+    isBlacksmithShopOpen = false
+    clearPressedInputState()
+    syncPlayerUiOverlays()
+  }
+  const requestSceneTransition = (portal: MapPortal) => {
+    if (isSceneTransitionPending) {
+      return
+    }
+
+    isSceneTransitionPending = true
+    closeAllOverlays()
+    clearPressedInputState()
+    triggeredActions.clear()
+    gameEventQueue.clear()
+    onRequestSceneChange({
+      sceneId: portal.targetSceneId,
+      spawn: {
+        x: portal.targetSpawn.x,
+        y: portal.targetSpawn.y
+      },
+      facing: portal.targetFacing
+    })
+  }
+  const findTouchedMapPortal = (character: CharacterState): MapPortal | undefined => {
+    const characterRect = createCollisionRectFromCharacter(character)
+
+    return mapPortals.find((portal) =>
+      doCollisionRectsIntersect(characterRect, createCollisionRectFromPortal(portal))
+    )
   }
   playerHudOverlay = createPlayerHudOverlay({
     mountElement,
@@ -310,11 +402,30 @@ export const createPixiTiledMapView = async ({
     onRequestOpenChange: setPlayerUiOpen,
     onRequestInventoryChange: (nextInventory) => {
       currentPlayerInventory = nextInventory
+      onPlayerInventoryChange(nextInventory)
       syncPlayerUiOverlays()
     },
     onRequestEquipmentChange: (nextEquipment) => {
       currentPlayerEquipment = nextEquipment
+      onPlayerEquipmentChange(nextEquipment)
       syncPlayerCharacterVisual()
+      syncPlayerUiOverlays()
+    }
+  })
+  playerShopOverlay = createBlacksmithShopOverlay({
+    mountElement,
+    getPlayerInventory: () => currentPlayerInventory,
+    getMerchantInventory: () => currentBlacksmithInventory,
+    getIsOpen: () => isBlacksmithShopOpen,
+    onRequestOpenChange: setBlacksmithShopOpen,
+    onRequestTradeStateChange: (
+      nextPlayerInventory,
+      nextMerchantInventory
+    ) => {
+      currentPlayerInventory = nextPlayerInventory
+      currentBlacksmithInventory = nextMerchantInventory
+      onPlayerInventoryChange(nextPlayerInventory)
+      onMerchantInventoryChange(nextMerchantInventory)
       syncPlayerUiOverlays()
     }
   })
@@ -389,6 +500,25 @@ export const createPixiTiledMapView = async ({
     PLAYER_WEAPON_TILE_FRAME_SOURCE,
     PLAYER_WEAPON_TILE_LOCAL_ID
   )
+  const resolveMapPortalTexture = (appearanceType: string): Texture => {
+    for (const tileset of map.tilesets) {
+      const renderResources = tilesetResources.get(tileset.source)
+
+      if (!renderResources) {
+        throw new Error(`Missing render resources for tileset ${tileset.source}`)
+      }
+
+      try {
+        return renderResources.tileTextures[
+          resolveTilesetLocalIdByType(tileset, appearanceType)
+        ]
+      } catch {
+        continue
+      }
+    }
+
+    throw new Error(`Could not resolve portal texture ${appearanceType}`)
+  }
 
   for (const layer of map.layers) {
     if (layer.name.toLowerCase() === DEPTH_SORTED_LAYER_NAME) {
@@ -506,6 +636,32 @@ export const createPixiTiledMapView = async ({
     })
     depthSortedLayer.addChild(container)
   }
+
+  for (const portal of mapPortals) {
+    const container = new Container()
+    const sprite = new Sprite(resolveMapPortalTexture(portal.appearanceType))
+
+    container.label = `portal:${portal.id}:container`
+    container.sortableChildren = true
+    sprite.label = `portal:${portal.id}`
+    sprite.scale.set(portal.collisionSize.width, portal.collisionSize.height)
+    sprite.roundPixels = true
+    sprite.zIndex = 0
+    container.position.set(
+      portal.position.x * map.tileWidth,
+      portal.position.y * map.tileHeight
+    )
+    container.zIndex = Math.round(
+      (portal.position.y + portal.collisionSize.height) * map.tileHeight
+    )
+    container.addChild(sprite)
+    renderedPortals.set(portal.id, {
+      container,
+      sprite
+    })
+    depthSortedLayer.addChild(container)
+  }
+  depthSortedLayer.sortChildren()
   world.addChild(messageLayer)
 
   const getCharacterStateById = (characterId: string): CharacterState => {
@@ -872,6 +1028,15 @@ export const createPixiTiledMapView = async ({
       syncCharacterSprite(nextCharacter)
     }
 
+    if (nextCharacter.id === PLAYER_CHARACTER_ID && didPositionChange) {
+      const touchedPortal = findTouchedMapPortal(nextCharacter)
+
+      if (touchedPortal) {
+        requestSceneTransition(touchedPortal)
+        return
+      }
+    }
+
     if (nextCharacter.id === cameraTargetCharacterId && didPositionChange) {
       keepCharacterVisible(nextCharacter)
     }
@@ -905,6 +1070,10 @@ export const createPixiTiledMapView = async ({
           tryMoveCharacter(character.id, intent.movement.x, intent.movement.y)
         }
 
+        if (isSceneTransitionPending) {
+          return
+        }
+
         drainControllerRuntimeEventsIntoQueue()
 
         if (intent.actions?.includes('interact')) {
@@ -933,6 +1102,10 @@ export const createPixiTiledMapView = async ({
           event.message,
           event.durationMilliseconds
         )
+
+        if (event.characterId === BLACKSMITH_SHOP_NPC_ID) {
+          setBlacksmithShopOpen(true)
+        }
       }
 
       pruneExpiredCharacterMessages(now)
@@ -967,7 +1140,7 @@ export const createPixiTiledMapView = async ({
       return
     }
 
-    if (isPlayerUiOpen) {
+    if (isPlayerUiOpen || isBlacksmithShopOpen) {
       const action = getCharacterActionFromKey(event.key)
       const direction = getCharacterMoveDirectionFromKey(event.key)
 
@@ -1048,38 +1221,52 @@ export const createPixiTiledMapView = async ({
     undefined,
     UPDATE_PRIORITY.UTILITY
   )
+  app.ticker.add(playerShopOverlay.syncFrame, undefined, UPDATE_PRIORITY.UTILITY)
   syncAllCharacterSprites()
   centerViewportOnCharacter(getCharacterStateById(cameraTargetCharacterId))
   mapOverlay.syncFrame()
   playerHudOverlay.syncFrame()
   playerInventoryOverlay.syncFrame()
+  playerShopOverlay.syncFrame()
   handleVisibilityChange()
 
-  if (import.meta.hot) {
-    import.meta.hot.dispose(() => {
-      window.removeEventListener('keydown', handleKeyDown)
-      window.removeEventListener('keyup', handleKeyUp)
-      window.removeEventListener('blur', handleWindowBlur)
-      document.removeEventListener('visibilitychange', handleVisibilityChange)
-      app.ticker.remove(updateCharacters)
-      app.ticker.remove(mapOverlay.syncFrame)
-      app.ticker.remove(playerHudOverlay.syncFrame)
-      app.ticker.remove(playerInventoryOverlay.syncFrame)
-      gameEventQueue.clear()
-      for (const activeMessage of activeCharacterMessages.values()) {
-        activeMessage.container.destroy({ children: true })
-      }
-      activeCharacterMessages.clear()
-      runtimeWarningBannerElement.remove()
-      mapOverlay.destroy()
-      playerHudOverlay.destroy()
-      playerInventoryOverlay.destroy()
-      controllerRuntime.destroy()
-      app.destroy({ removeView: true }, { children: true })
-    })
+  const destroy = () => {
+    if (isDestroyed) {
+      return
+    }
+
+    isDestroyed = true
+    window.removeEventListener('keydown', handleKeyDown)
+    window.removeEventListener('keyup', handleKeyUp)
+    window.removeEventListener('blur', handleWindowBlur)
+    document.removeEventListener('visibilitychange', handleVisibilityChange)
+    app.ticker.remove(updateCharacters)
+    app.ticker.remove(mapOverlay.syncFrame)
+    app.ticker.remove(playerHudOverlay.syncFrame)
+    app.ticker.remove(playerInventoryOverlay.syncFrame)
+    app.ticker.remove(playerShopOverlay.syncFrame)
+    gameEventQueue.clear()
+    for (const activeMessage of activeCharacterMessages.values()) {
+      activeMessage.container.destroy({ children: true })
+    }
+    activeCharacterMessages.clear()
+    runtimeWarningBannerElement.remove()
+    mapOverlay.destroy()
+    playerHudOverlay.destroy()
+    playerInventoryOverlay.destroy()
+    playerShopOverlay.destroy()
+    controllerRuntime.destroy()
+    app.destroy({ removeView: true }, { children: true })
+    sceneElement.remove()
   }
 
-  return app
+  if (import.meta.hot) {
+    import.meta.hot.dispose(destroy)
+  }
+
+  return {
+    destroy
+  }
 }
 
 const loadMessagePanelTexture = async (): Promise<Texture> => {
@@ -1227,6 +1414,13 @@ const createCollisionRectFromCharacter = (
   y: character.position.y,
   width: character.collisionSize.width,
   height: character.collisionSize.height
+})
+
+const createCollisionRectFromPortal = (portal: MapPortal): CollisionRect => ({
+  x: portal.position.x,
+  y: portal.position.y,
+  width: portal.collisionSize.width,
+  height: portal.collisionSize.height
 })
 
 const getTileDepthSortValue = (tileY: number, tileHeight: number): number =>

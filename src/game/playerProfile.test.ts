@@ -5,8 +5,8 @@ import { createInitialPlayerProfile } from './playerProfile'
 describe('createInitialPlayerProfile', () => {
   it('creates the default player HUD profile', () => {
     expect(createInitialPlayerProfile()).toEqual({
-      name: 'Arin',
-      job: 'Wanderer',
+      name: '아린',
+      job: '방랑자',
       level: 1,
       hp: {
         current: 24,
@@ -24,23 +24,23 @@ describe('createInitialPlayerProfile', () => {
       skills: [
         {
           hotkey: '1',
-          label: 'Slash',
-          description: 'Quick close-range strike'
+          label: '베기',
+          description: '재빠른 근거리 공격'
         },
         {
           hotkey: '2',
-          label: 'Guard',
-          description: 'Brace against incoming damage'
+          label: '방어 자세',
+          description: '들어오는 피해를 막아냅니다'
         },
         {
           hotkey: '3',
-          label: 'Dash',
-          description: 'Short burst of movement'
+          label: '돌진',
+          description: '짧게 빠르게 이동합니다'
         },
         {
           hotkey: '4',
-          label: 'Focus',
-          description: 'Recover a small amount of mana'
+          label: '집중',
+          description: '마나를 조금 회복합니다'
         }
       ]
     })
