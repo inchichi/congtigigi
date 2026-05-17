@@ -14,10 +14,17 @@ This document is a short guide for module boundaries and code placement.
 - `src/game/interaction/`: target resolution and event processing for interaction flow.
 - `src/game/lua/`: Lua wasm bridge code that loads controller modules, exposes the public `engine.*` Lua API, and evaluates scripts for runtime characters.
 - `src/game/lua/luaControllerApi.ts`: source of truth for the Lua-visible controller contract.
+- `src/game/playerEquipment.ts`: player-facing equipment state, starter gear data, and item icon metadata used by the combined player panel.
+- `src/game/playerProfile.ts`: player-facing name, class, resource, stat, and skill data used by the HUD.
+- `src/game/playerInventory.ts`: player-only backpack state and slot mutation helpers.
+- `src/game/playerLoadout.ts`: pure equip and unequip transitions between the backpack and the starter gear slots.
 - `src/game/tiled/`: TMX/TSX parsing, tile metadata, and event-layer data extraction.
 - `src/game/tiled/createNpcCharactersFromEventLayers.ts`: translate `character` object-layer events plus `controller.*` TMX properties into shared NPC character state.
 - `src/rendering/`: PixiJS rendering code and asset-to-view adaptation.
-- `src/rendering/`: map tile rendering, depth sorting, and event character presentation.
+- `src/rendering/`: map tile rendering, depth sorting, event character presentation, and fixed-screen HUD overlays.
+- `src/rendering/createPixiTiledMapView.ts`: owns the live world scene, character sprite placement, and the player weapon sprite attached to the player render node.
+- `src/rendering/createPlayerHudOverlay.ts`: fixed-screen character status panel with bag icon and skill slots. The bag icon opens the combined player panel.
+- `src/rendering/createPlayerInventoryOverlay.ts`: combined fixed-screen player panel that shows the equipment layout, a centered player portrait preview, and the backpack grid, with click-to-equip and click-to-unequip behavior.
 - `scripts/`: project automation scripts such as third-party fetch/build steps.
 - `third_party/`: vendored external source code kept in-repo for deterministic builds.
 - `public/vendor/`: generated static artifacts served as-is by Vite.

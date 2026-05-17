@@ -10,6 +10,9 @@ import {
   PLAYER_CHARACTER_ID,
   createInitialPlayerCharacter
 } from './game/characterState'
+import { createInitialPlayerEquipment } from './game/playerEquipment'
+import { createInitialPlayerInventory } from './game/playerInventory'
+import { createInitialPlayerProfile } from './game/playerProfile'
 import {
   createCharacterControllerRuntime,
   type CharacterControllerRuntime
@@ -59,6 +62,9 @@ const initialCharacters = [
     defaultPixelHeight: tinyDungeonTileset.tileHeight * characterSpriteScale
   })
 ]
+const playerProfile = createInitialPlayerProfile()
+const playerEquipment = createInitialPlayerEquipment()
+const playerInventory = createInitialPlayerInventory()
 let activeControllerRuntime: CharacterControllerRuntime | undefined
 
 rootElement.className = 'game-root'
@@ -82,6 +88,9 @@ const bootstrap = async () => {
     mountElement: rootElement,
     map: parsedTownMap,
     characters: initialCharacters,
+    playerProfile,
+    playerEquipment,
+    playerInventory,
     cameraTargetCharacterId: PLAYER_CHARACTER_ID,
     characterSpriteSheet: {
       tileset: tinyDungeonTileset,

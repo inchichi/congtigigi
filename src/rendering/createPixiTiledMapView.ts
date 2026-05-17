@@ -14,6 +14,7 @@ import {
 } from 'pixi.js'
 
 import {
+  PLAYER_CHARACTER_ID,
   getCharacterActionFromKey,
   getCharacterMoveDirectionFromKey,
   moveCharacterState
@@ -26,6 +27,9 @@ import type {
 import type { CharacterControllerRuntime } from '../game/createCharacterControllerRuntime'
 import { createGameEventQueue } from '../game/events/createGameEventQueue'
 import { processInteractionEvents } from '../game/interaction/processInteractionEvents'
+import type { PlayerEquipment } from '../game/playerEquipment'
+import type { PlayerInventory } from '../game/playerInventory'
+import type { PlayerProfile } from '../game/playerProfile'
 import {
   createWallTileLookup,
   isWallTileAt
@@ -40,11 +44,16 @@ import {
   hasTileTransform
 } from './tiledSpriteTransform'
 import { createMapOverlay } from './createMapOverlay'
+import { createPlayerHudOverlay } from './createPlayerHudOverlay'
+import { createPlayerInventoryOverlay } from './createPlayerInventoryOverlay'
 
 type CreatePixiTiledMapViewInput = {
   mountElement: HTMLElement
   map: ParsedTiledMap
   characters: CharacterState[]
+  playerProfile: PlayerProfile
+  playerEquipment: PlayerEquipment
+  playerInventory: PlayerInventory
   cameraTargetCharacterId: string
   characterSpriteSheet: {
     tileset: ParsedTiledTileset
@@ -81,9 +90,18 @@ type ActiveCharacterMessage = {
   expiresAt: number
 }
 
+type RenderedCharacterNode = {
+  container: Container
+  sprite: Sprite
+}
+
 const DEPTH_SORTED_LAYER_NAME = 'object'
 const UI_SPRITESHEET_URL = new URL(
   '../assets/spritesheets/uipack_rpg_sheet.json',
+  import.meta.url
+).href
+const TINY_DUNGEON_TILESET_IMAGE_URL = new URL(
+  '../assets/tilesets/tiny-dungeon-16.png',
   import.meta.url
 ).href
 const MESSAGE_PANEL_TEXTURE_NAME = 'panelInset_beige.png'
@@ -105,22 +123,48 @@ const MESSAGE_TEXT_STYLE = new TextStyle({
   wordWrap: true,
   wordWrapWidth: MESSAGE_TEXT_MAX_WIDTH
 })
+const PLAYER_WEAPON_TILE_LOCAL_ID = 117
+const PLAYER_WEAPON_TILE_FRAME_SOURCE: TileTextureFrameSource = {
+  columns: 12,
+  margin: 0,
+  spacing: 0,
+  tileWidth: 16,
+  tileHeight: 16
+}
+const PLAYER_WEAPON_WORLD_SCALE = 1.35
+const PLAYER_WEAPON_PLACEMENT_RIGHT = {
+  x: 23,
+  y: 21,
+  rotation: 0.75
+}
+const PLAYER_WEAPON_PLACEMENT_LEFT = {
+  x: 9,
+  y: 21,
+  rotation: -0.75
+}
 let messageFontsReadyPromise: Promise<void> | undefined
 
 export const createPixiTiledMapView = async ({
   mountElement,
   map,
   characters,
+  playerProfile,
+  playerEquipment,
+  playerInventory,
   cameraTargetCharacterId,
   characterSpriteSheet,
   imageUrls,
   controllerRuntime
 }: CreatePixiTiledMapViewInput): Promise<Application> => {
   const app = new Application()
-  const [messagePanelTexture] = await Promise.all([
+  const [messagePanelTexture, tinyDungeonWeaponImageTexture] = await Promise.all([
     loadMessagePanelTexture(),
-    ensureMessageFontsLoaded()
+    Assets.load<Texture>(TINY_DUNGEON_TILESET_IMAGE_URL)
   ])
+
+  tinyDungeonWeaponImageTexture.source.scaleMode = 'nearest'
+  tinyDungeonWeaponImageTexture.source.addressMode = 'clamp-to-edge'
+  await ensureMessageFontsLoaded()
 
   await app.init({
     antialias: false,
@@ -174,11 +218,35 @@ export const createPixiTiledMapView = async ({
   const gameEventQueue = createGameEventQueue()
   const interactionLockUntilByCharacterPair = new Map<string, number>()
   const activeCharacterMessages = new Map<string, ActiveCharacterMessage>()
-  const renderedCharacters = new Map<string, Sprite>()
+  const renderedCharacters = new Map<string, RenderedCharacterNode>()
   const characterPixelWidth =
     characterSpriteSheet.tileset.tileWidth * characterSpriteSheet.scale
   const characterPixelHeight =
     characterSpriteSheet.tileset.tileHeight * characterSpriteSheet.scale
+  let currentPlayerEquipment = playerEquipment
+  let currentPlayerInventory = playerInventory
+  let playerWeaponSprite: Sprite | undefined
+  let syncPlayerCharacterVisual = () => {}
+  const clearPressedInputState = () => {
+    pressedDirections.clear()
+    pressedActions.clear()
+    triggeredActions.clear()
+  }
+  let isPlayerUiOpen = false
+  let playerHudOverlay: {
+    syncFrame: () => void
+    destroy: () => void
+  } = {
+    syncFrame: () => {},
+    destroy: () => {}
+  }
+  let playerInventoryOverlay: {
+    syncFrame: () => void
+    destroy: () => void
+  } = {
+    syncFrame: () => {},
+    destroy: () => {}
+  }
   let lastRuntimeErrorMessage: string | undefined
   let depthSortedLayer: Container | undefined
   let characterStates = characters.map((character) => ({
@@ -209,6 +277,45 @@ export const createPixiTiledMapView = async ({
           focusCharacter.position.y * map.tileHeight +
           characterPixelHeight / 2
       }
+    }
+  })
+  const syncPlayerUiOverlays = () => {
+    playerHudOverlay.syncFrame()
+    playerInventoryOverlay.syncFrame()
+  }
+  const setPlayerUiOpen = (nextIsOpen: boolean) => {
+    if (isPlayerUiOpen === nextIsOpen) {
+      return
+    }
+
+    isPlayerUiOpen = nextIsOpen
+    clearPressedInputState()
+    syncPlayerUiOverlays()
+  }
+  const closeAllOverlays = () => {
+    setPlayerUiOpen(false)
+  }
+  playerHudOverlay = createPlayerHudOverlay({
+    mountElement,
+    profile: playerProfile,
+    getIsInventoryOpen: () => isPlayerUiOpen,
+    onRequestInventoryOpenChange: setPlayerUiOpen
+  })
+  playerInventoryOverlay = createPlayerInventoryOverlay({
+    mountElement,
+    profile: playerProfile,
+    getInventory: () => currentPlayerInventory,
+    getEquipment: () => currentPlayerEquipment,
+    getIsOpen: () => isPlayerUiOpen,
+    onRequestOpenChange: setPlayerUiOpen,
+    onRequestInventoryChange: (nextInventory) => {
+      currentPlayerInventory = nextInventory
+      syncPlayerUiOverlays()
+    },
+    onRequestEquipmentChange: (nextEquipment) => {
+      currentPlayerEquipment = nextEquipment
+      syncPlayerCharacterVisual()
+      syncPlayerUiOverlays()
     }
   })
 
@@ -276,6 +383,11 @@ export const createPixiTiledMapView = async ({
     characterSpriteSheet.tileset,
     imageUrls,
     'nearest'
+  )
+  const playerWeaponTexture = createTileTexture(
+    tinyDungeonWeaponImageTexture,
+    PLAYER_WEAPON_TILE_FRAME_SOURCE,
+    PLAYER_WEAPON_TILE_LOCAL_ID
   )
 
   for (const layer of map.layers) {
@@ -360,6 +472,7 @@ export const createPixiTiledMapView = async ({
   }
 
   for (const character of characterStates) {
+    const container = new Container()
     const sprite = new Sprite(
       resolveCharacterTexture(
         characterTilesetResources.tileTextures,
@@ -367,12 +480,31 @@ export const createPixiTiledMapView = async ({
         character.appearanceType
       )
     )
+    const isPlayer = character.id === PLAYER_CHARACTER_ID
 
+    container.label = `character:${character.id}:container`
+    container.sortableChildren = true
     sprite.label = `character:${character.id}`
     sprite.scale.set(characterSpriteSheet.scale)
     sprite.roundPixels = true
-    renderedCharacters.set(character.id, sprite)
-    depthSortedLayer.addChild(sprite)
+    sprite.zIndex = 0
+    container.addChild(sprite)
+
+    if (isPlayer) {
+      playerWeaponSprite = new Sprite(playerWeaponTexture)
+      playerWeaponSprite.label = 'character:player:weapon'
+      playerWeaponSprite.anchor.set(0.5, 1)
+      playerWeaponSprite.visible = false
+      playerWeaponSprite.roundPixels = true
+      playerWeaponSprite.zIndex = 1
+      container.addChild(playerWeaponSprite)
+    }
+
+    renderedCharacters.set(character.id, {
+      container,
+      sprite
+    })
+    depthSortedLayer.addChild(container)
   }
   world.addChild(messageLayer)
 
@@ -388,29 +520,63 @@ export const createPixiTiledMapView = async ({
     return character
   }
 
-  const syncCharacterSprite = (character: CharacterState) => {
-    const sprite = renderedCharacters.get(character.id)
+  syncPlayerCharacterVisual = () => {
+    syncCharacterSprite(getCharacterStateById(PLAYER_CHARACTER_ID))
+  }
 
-    if (!sprite) {
+  const syncCharacterSprite = (character: CharacterState) => {
+    const renderNode = renderedCharacters.get(character.id)
+
+    if (!renderNode) {
       throw new Error(`Missing rendered sprite for character ${character.id}`)
     }
 
-    sprite.position.set(
+    renderNode.container.position.set(
       character.position.x * map.tileWidth,
       character.position.y * map.tileHeight
     )
-    sprite.zIndex = getCharacterDepthSortValue(
+    renderNode.container.zIndex = getCharacterDepthSortValue(
       character.position.y,
       characterPixelHeight,
       map.tileHeight
     )
     depthSortedLayer?.sortChildren()
+
+    if (character.id === PLAYER_CHARACTER_ID) {
+      syncPlayerWeaponSprite(character)
+    }
   }
 
   const syncAllCharacterSprites = () => {
     for (const character of characterStates) {
       syncCharacterSprite(character)
     }
+  }
+
+  const syncPlayerWeaponSprite = (character: CharacterState) => {
+    if (!playerWeaponSprite) {
+      return
+    }
+
+    const weaponSlot = currentPlayerEquipment.slots.find(
+      (slot) => slot.id === 'weapon'
+    )
+    const weaponItem = weaponSlot?.item
+
+    if (!weaponItem) {
+      playerWeaponSprite.visible = false
+      return
+    }
+
+    const placement =
+      character.facing === 'left'
+        ? PLAYER_WEAPON_PLACEMENT_LEFT
+        : PLAYER_WEAPON_PLACEMENT_RIGHT
+
+    playerWeaponSprite.visible = true
+    playerWeaponSprite.position.set(placement.x, placement.y)
+    playerWeaponSprite.rotation = placement.rotation
+    playerWeaponSprite.scale.set(PLAYER_WEAPON_WORLD_SCALE)
   }
 
   const syncCharacterMessageElement = (characterId: string) => {
@@ -697,18 +863,16 @@ export const createPixiTiledMapView = async ({
       character.id === nextCharacter.id ? nextCharacter : character
     )
 
-    if (
+    const didPositionChange =
       nextCharacter.position.x !== currentCharacter.position.x ||
       nextCharacter.position.y !== currentCharacter.position.y
-    ) {
+    const didFacingChange = nextCharacter.facing !== currentCharacter.facing
+
+    if (didPositionChange || didFacingChange) {
       syncCharacterSprite(nextCharacter)
     }
 
-    if (
-      nextCharacter.id === cameraTargetCharacterId &&
-      (nextCharacter.position.x !== currentCharacter.position.x ||
-        nextCharacter.position.y !== currentCharacter.position.y)
-    ) {
+    if (nextCharacter.id === cameraTargetCharacterId && didPositionChange) {
       keepCharacterVisible(nextCharacter)
     }
   }
@@ -791,6 +955,33 @@ export const createPixiTiledMapView = async ({
   }
 
   const handleKeyDown = (event: KeyboardEvent) => {
+    const isInventoryToggleKey =
+      event.code === 'KeyI' || event.key.toLowerCase() === 'i'
+
+    if (isInventoryToggleKey) {
+      if (!event.repeat) {
+        event.preventDefault()
+        setPlayerUiOpen(!isPlayerUiOpen)
+      }
+
+      return
+    }
+
+    if (isPlayerUiOpen) {
+      const action = getCharacterActionFromKey(event.key)
+      const direction = getCharacterMoveDirectionFromKey(event.key)
+
+      if (event.key === 'Escape' || action || direction) {
+        event.preventDefault()
+      }
+
+      if (event.key === 'Escape') {
+        closeAllOverlays()
+      }
+
+      return
+    }
+
     const action = getCharacterActionFromKey(event.key)
 
     if (action) {
@@ -832,9 +1023,7 @@ export const createPixiTiledMapView = async ({
   }
 
   const handleWindowBlur = () => {
-    pressedDirections.clear()
-    pressedActions.clear()
-    triggeredActions.clear()
+    clearPressedInputState()
   }
 
   const handleVisibilityChange = () => {
@@ -853,9 +1042,17 @@ export const createPixiTiledMapView = async ({
   document.addEventListener('visibilitychange', handleVisibilityChange)
   app.ticker.add(updateCharacters)
   app.ticker.add(mapOverlay.syncFrame, undefined, UPDATE_PRIORITY.UTILITY)
+  app.ticker.add(playerHudOverlay.syncFrame, undefined, UPDATE_PRIORITY.UTILITY)
+  app.ticker.add(
+    playerInventoryOverlay.syncFrame,
+    undefined,
+    UPDATE_PRIORITY.UTILITY
+  )
   syncAllCharacterSprites()
   centerViewportOnCharacter(getCharacterStateById(cameraTargetCharacterId))
   mapOverlay.syncFrame()
+  playerHudOverlay.syncFrame()
+  playerInventoryOverlay.syncFrame()
   handleVisibilityChange()
 
   if (import.meta.hot) {
@@ -866,6 +1063,8 @@ export const createPixiTiledMapView = async ({
       document.removeEventListener('visibilitychange', handleVisibilityChange)
       app.ticker.remove(updateCharacters)
       app.ticker.remove(mapOverlay.syncFrame)
+      app.ticker.remove(playerHudOverlay.syncFrame)
+      app.ticker.remove(playerInventoryOverlay.syncFrame)
       gameEventQueue.clear()
       for (const activeMessage of activeCharacterMessages.values()) {
         activeMessage.container.destroy({ children: true })
@@ -873,6 +1072,8 @@ export const createPixiTiledMapView = async ({
       activeCharacterMessages.clear()
       runtimeWarningBannerElement.remove()
       mapOverlay.destroy()
+      playerHudOverlay.destroy()
+      playerInventoryOverlay.destroy()
       controllerRuntime.destroy()
       app.destroy({ removeView: true }, { children: true })
     })

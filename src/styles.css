@@ -152,3 +152,827 @@ body {
   text-transform: uppercase;
   pointer-events: none;
 }
+
+.player-hud-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 45;
+  pointer-events: none;
+}
+
+.player-hud-overlay__panel {
+  position: absolute;
+  left: 50%;
+  bottom: 0;
+  transform: translateX(-50%);
+  pointer-events: auto;
+  overflow: hidden;
+  background: #f0e0b8;
+  box-shadow: 0 0 0 2px rgba(244, 231, 197, 0.92), 0 18px 36px rgba(0, 0, 0, 0.45);
+  color: #2e2313;
+}
+
+.player-hud-overlay__panel-body {
+  display: grid;
+  gap: 12px;
+  width: 100%;
+  height: 100%;
+  padding: 20px 22px 18px;
+}
+
+.player-hud-overlay__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.player-hud-overlay__header-identity {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.player-hud-overlay__name {
+  color: #2e2313;
+  font-size: 1.1rem;
+  letter-spacing: 0.08em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.player-hud-overlay__job {
+  color: #6b5534;
+  font-size: 0.72rem;
+  letter-spacing: 0.12em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.player-hud-overlay__header-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-left: auto;
+}
+
+.player-hud-overlay__level {
+  padding: 4px 8px;
+  border: 1px solid rgba(111, 89, 58, 0.42);
+  background: rgba(255, 249, 238, 0.55);
+  color: #6b5534;
+  font-size: 0.72rem;
+  letter-spacing: 0.1em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.player-hud-overlay__bag-button,
+.player-hud-overlay__equipment-button {
+  appearance: none;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: #2e2313;
+  font: inherit;
+  cursor: pointer;
+  touch-action: manipulation;
+  display: grid;
+  place-items: center;
+  pointer-events: auto;
+  transition: filter 120ms ease, transform 120ms ease;
+}
+
+.player-hud-overlay__bag-button:hover,
+.player-hud-overlay__equipment-button:hover,
+.player-hud-overlay__bag-button:focus-visible,
+.player-hud-overlay__equipment-button:focus-visible {
+  filter: brightness(1.05);
+  transform: translateY(-1px);
+}
+
+.player-hud-overlay__bag-button:focus-visible {
+  outline: 2px solid rgba(111, 89, 58, 0.8);
+  outline-offset: 2px;
+}
+
+.player-hud-overlay__equipment-button:focus-visible {
+  outline: 2px solid rgba(111, 89, 58, 0.8);
+  outline-offset: 2px;
+}
+
+.player-hud-overlay__bag-button--active {
+  filter: brightness(1.06) saturate(1.08);
+}
+
+.player-hud-overlay__equipment-button--active {
+  filter: brightness(1.06) saturate(1.08);
+}
+
+.player-hud-overlay__bag-icon {
+  display: block;
+  width: 22px;
+  height: 22px;
+  pointer-events: none;
+}
+
+.player-hud-overlay__equipment-icon {
+  display: block;
+  width: 21px;
+  height: 21px;
+  pointer-events: none;
+}
+
+.player-hud-overlay__resource-grid {
+  display: grid;
+  gap: 8px;
+}
+
+.player-hud-overlay__resource-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+}
+
+.player-hud-overlay__resource-label,
+.player-hud-overlay__resource-value {
+  color: #6b5534;
+  font-size: 0.72rem;
+  letter-spacing: 0.1em;
+  line-height: 1;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.player-hud-overlay__resource-track {
+  position: relative;
+  height: 15px;
+  border: 1px solid rgba(111, 89, 58, 0.42);
+  background: rgba(255, 249, 238, 0.5);
+  overflow: hidden;
+}
+
+.player-hud-overlay__resource-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 0;
+  background: #d06b5d;
+}
+
+.player-hud-overlay__stat-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.player-hud-overlay__stat-chip {
+  padding: 4px 8px;
+  border: 1px solid rgba(111, 89, 58, 0.42);
+  background: rgba(255, 249, 238, 0.55);
+  color: #2e2313;
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.player-hud-overlay__skill-section {
+  display: grid;
+  gap: 8px;
+}
+
+.player-hud-overlay__skill-title {
+  color: #6b5534;
+  font-size: 0.7rem;
+  letter-spacing: 0.12em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.player-hud-overlay__skill-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.player-hud-overlay__skill-slot {
+  position: relative;
+  display: grid;
+  align-content: start;
+  min-width: 0;
+  padding: 8px 8px 9px;
+  color: #2e2313;
+  text-align: left;
+  touch-action: manipulation;
+  cursor: default;
+  transition: filter 120ms ease, transform 120ms ease;
+}
+
+.player-hud-overlay__skill-slot:hover,
+.player-hud-overlay__skill-slot:focus-visible {
+  filter: brightness(1.04);
+  transform: translateY(-1px);
+}
+
+.player-hud-overlay__skill-hotkey {
+  position: absolute;
+  left: 6px;
+  top: 5px;
+  color: #6b5534;
+  font-size: 0.66rem;
+  line-height: 1;
+  letter-spacing: 0.08em;
+}
+
+.player-hud-overlay__skill-name {
+  align-self: center;
+  justify-self: center;
+  margin-top: 12px;
+  color: #2e2313;
+  font-size: 0.76rem;
+  line-height: 1.1;
+  text-align: center;
+}
+
+.player-hud-overlay__skill-description {
+  display: none;
+}
+
+.player-inventory-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  pointer-events: none;
+}
+
+.player-inventory-overlay__backdrop,
+.player-inventory-overlay__close,
+.player-inventory-overlay__slot,
+.player-inventory-overlay__equipment-slot {
+  appearance: none;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+
+.player-inventory-overlay__backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: auto;
+  background: rgba(9, 7, 6, 0.66);
+  cursor: zoom-out;
+  touch-action: manipulation;
+}
+
+.player-inventory-overlay__panel {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  z-index: 1;
+  display: grid;
+  transform: translate(-50%, -50%);
+  pointer-events: auto;
+  overflow: hidden;
+  background: #f0e0b8;
+  box-shadow: 0 0 0 2px rgba(244, 231, 197, 0.92), 0 18px 36px rgba(0, 0, 0, 0.45);
+  color: #2e2313;
+}
+
+.player-inventory-overlay__panel-body {
+  display: grid;
+  gap: 14px;
+  width: 100%;
+  height: 100%;
+  padding: 22px 26px 20px;
+}
+
+.player-inventory-overlay__header {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding-right: 68px;
+}
+
+.player-inventory-overlay__title-group {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.player-inventory-overlay__title {
+  color: #2e2313;
+  font-size: 1rem;
+  letter-spacing: 0.08em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.player-inventory-overlay__summary,
+.player-inventory-overlay__empty-state,
+.player-inventory-overlay__footer {
+  color: #6b5534;
+  font-size: 0.74rem;
+  letter-spacing: 0.06em;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
+.player-inventory-overlay__empty-state {
+  text-align: center;
+}
+
+.player-inventory-overlay__close {
+  position: absolute;
+  right: 0;
+  top: 0;
+  display: grid;
+  flex: none;
+  place-items: center;
+  z-index: 2;
+  pointer-events: auto;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.player-inventory-overlay__close:focus-visible {
+  outline: 2px solid rgba(244, 231, 197, 0.92);
+  outline-offset: 2px;
+}
+
+.player-inventory-overlay__close-icon {
+  display: block;
+  pointer-events: none;
+}
+
+.player-inventory-overlay__slot-grid {
+  display: grid;
+  grid-template-columns: repeat(4, auto);
+  justify-content: center;
+  align-content: start;
+  width: 100%;
+}
+
+.player-inventory-overlay__slot {
+  position: relative;
+  display: grid;
+  align-content: start;
+  justify-items: start;
+  min-width: 0;
+  min-height: 0;
+  color: #2e2313;
+  cursor: pointer;
+  text-align: left;
+  touch-action: manipulation;
+  transition: filter 120ms ease, transform 120ms ease;
+}
+
+.player-inventory-overlay__slot:hover,
+.player-inventory-overlay__slot:focus-visible {
+  filter: brightness(1.05);
+  transform: translateY(-1px);
+}
+
+.player-inventory-overlay__slot-index,
+.player-inventory-overlay__slot-quantity {
+  position: relative;
+  z-index: 1;
+  font-size: 0.7rem;
+  line-height: 1;
+  letter-spacing: 0.08em;
+}
+
+.player-inventory-overlay__slot-quantity {
+  justify-self: end;
+}
+
+.player-inventory-overlay__slot-item {
+  position: relative;
+  z-index: 1;
+  align-self: center;
+  justify-self: center;
+  max-width: 100%;
+  padding: 0 4px;
+  color: #2e2313;
+  font-size: 0.78rem;
+  line-height: 1.05;
+  overflow-wrap: anywhere;
+  text-align: center;
+}
+
+.player-inventory-overlay__slot-empty-marker {
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  opacity: 0.22;
+  pointer-events: none;
+}
+
+.player-inventory-overlay__slot-icon {
+  position: absolute;
+  left: 8px;
+  bottom: 8px;
+  z-index: 1;
+  display: block;
+  pointer-events: none;
+}
+
+.player-inventory-overlay__slot--filled .player-inventory-overlay__slot-index {
+  color: rgba(46, 35, 19, 0.78);
+}
+
+.player-inventory-overlay__slot--filled .player-inventory-overlay__slot-empty-marker {
+  opacity: 0;
+}
+
+.player-inventory-overlay__footer {
+  padding-top: 2px;
+  text-align: center;
+}
+
+.player-inventory-overlay__equipment-section {
+  display: grid;
+  gap: 10px;
+  width: 100%;
+}
+
+.player-inventory-overlay__equipment-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.player-inventory-overlay__equipment-title {
+  color: #2e2313;
+  font-size: 0.86rem;
+  letter-spacing: 0.1em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.player-inventory-overlay__equipment-summary {
+  color: #6b5534;
+  font-size: 0.68rem;
+  letter-spacing: 0.06em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.player-inventory-overlay__equipment-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(154px, 1.15fr) minmax(0, 1fr);
+  grid-template-rows: repeat(2, auto);
+  grid-template-areas:
+    'weapon center accessory'
+    'armor center boots';
+  gap: 10px 12px;
+  align-items: stretch;
+  width: 100%;
+}
+
+.player-inventory-overlay__equipment-center,
+.player-inventory-overlay__equipment-slot {
+  position: relative;
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  color: #2e2313;
+  justify-self: center;
+}
+
+.player-inventory-overlay__equipment-center {
+  grid-area: center;
+  align-content: start;
+  justify-items: center;
+  gap: 10px;
+  padding: 10px 10px 12px;
+  overflow: hidden;
+  text-align: center;
+}
+
+.player-inventory-overlay__equipment-center-preview {
+  position: relative;
+  display: grid;
+  width: 100%;
+  place-items: center;
+  pointer-events: none;
+}
+
+.player-inventory-overlay__equipment-center-portrait {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  display: block;
+  image-rendering: pixelated;
+  pointer-events: none;
+}
+
+.player-inventory-overlay__equipment-center-gear {
+  position: absolute;
+  display: block;
+  image-rendering: pixelated;
+  pointer-events: none;
+}
+
+.player-inventory-overlay__equipment-center-details {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  justify-items: center;
+}
+
+.player-inventory-overlay__equipment-center-name {
+  font-size: 0.92rem;
+  letter-spacing: 0.08em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.player-inventory-overlay__equipment-center-job,
+.player-inventory-overlay__equipment-center-level,
+.player-inventory-overlay__equipment-center-set {
+  color: #6b5534;
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
+.player-inventory-overlay__equipment-slot {
+  align-content: start;
+  justify-items: start;
+  gap: 4px;
+  overflow: hidden;
+  text-align: left;
+  touch-action: manipulation;
+  cursor: pointer;
+  transition: filter 120ms ease, transform 120ms ease;
+}
+
+.player-inventory-overlay__equipment-slot:hover,
+.player-inventory-overlay__equipment-slot:focus-visible {
+  filter: brightness(1.05);
+  transform: translateY(-1px);
+}
+
+.player-inventory-overlay__equipment-slot--empty {
+  opacity: 0.92;
+}
+
+.player-inventory-overlay__equipment-slot--weapon {
+  grid-area: weapon;
+}
+
+.player-inventory-overlay__equipment-slot--armor {
+  grid-area: armor;
+}
+
+.player-inventory-overlay__equipment-slot--boots {
+  grid-area: boots;
+}
+
+.player-inventory-overlay__equipment-slot--accessory {
+  grid-area: accessory;
+}
+
+.player-inventory-overlay__equipment-slot-label,
+.player-inventory-overlay__equipment-slot-level {
+  position: relative;
+  z-index: 1;
+  font-size: 0.64rem;
+  line-height: 1;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.player-inventory-overlay__equipment-slot-item {
+  position: relative;
+  z-index: 1;
+  align-self: center;
+  justify-self: start;
+  max-width: 100%;
+  padding: 0 2px;
+  color: #2e2313;
+  font-size: 0.76rem;
+  line-height: 1.05;
+  overflow-wrap: anywhere;
+  text-align: left;
+}
+
+.player-inventory-overlay__equipment-slot-description {
+  position: relative;
+  z-index: 1;
+  max-width: 100%;
+  color: rgba(46, 35, 19, 0.72);
+  font-size: 0.62rem;
+  line-height: 1.15;
+  overflow-wrap: anywhere;
+}
+
+.player-inventory-overlay__equipment-slot-level {
+  justify-self: end;
+}
+
+.player-inventory-overlay__equipment-slot-icon {
+  position: absolute;
+  right: 8px;
+  top: 8px;
+  z-index: 1;
+  display: block;
+  width: 16px;
+  height: 15px;
+  opacity: 0.72;
+  pointer-events: none;
+}
+
+.player-equipment-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 51;
+  pointer-events: none;
+}
+
+.player-equipment-overlay__backdrop,
+.player-equipment-overlay__close {
+  appearance: none;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+
+.player-equipment-overlay__backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: auto;
+  background: rgba(9, 7, 6, 0.66);
+  cursor: zoom-out;
+  touch-action: manipulation;
+}
+
+.player-equipment-overlay__panel {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  z-index: 1;
+  display: grid;
+  transform: translate(-50%, -50%);
+  pointer-events: auto;
+  overflow: hidden;
+  background: #f0e0b8;
+  box-shadow: 0 0 0 2px rgba(244, 231, 197, 0.92), 0 18px 36px rgba(0, 0, 0, 0.45);
+  color: #2e2313;
+}
+
+.player-equipment-overlay__panel-body {
+  display: grid;
+  gap: 16px;
+  width: 100%;
+  height: 100%;
+  padding: 28px 30px;
+}
+
+.player-equipment-overlay__header {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding-right: 68px;
+}
+
+.player-equipment-overlay__title-group {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.player-equipment-overlay__title {
+  color: #2e2313;
+  font-size: 1rem;
+  letter-spacing: 0.08em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.player-equipment-overlay__summary,
+.player-equipment-overlay__footer {
+  color: #6b5534;
+  font-size: 0.74rem;
+  letter-spacing: 0.06em;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
+.player-equipment-overlay__close {
+  position: absolute;
+  right: 0;
+  top: 0;
+  display: grid;
+  flex: none;
+  place-items: center;
+  z-index: 2;
+  pointer-events: auto;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.player-equipment-overlay__close:focus-visible {
+  outline: 2px solid rgba(244, 231, 197, 0.92);
+  outline-offset: 2px;
+}
+
+.player-equipment-overlay__close-icon {
+  display: block;
+  pointer-events: none;
+}
+
+.player-equipment-overlay__slot-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+  justify-items: center;
+  width: 100%;
+}
+
+.player-equipment-overlay__slot {
+  position: relative;
+  display: grid;
+  align-content: start;
+  justify-items: start;
+  gap: 4px;
+  min-width: 0;
+  min-height: 0;
+  color: #2e2313;
+  text-align: left;
+  touch-action: manipulation;
+  transition: filter 120ms ease, transform 120ms ease;
+}
+
+.player-equipment-overlay__slot-header-label,
+.player-equipment-overlay__slot-level {
+  font-size: 0.7rem;
+  line-height: 1;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.player-equipment-overlay__slot-header-label {
+  position: relative;
+  z-index: 1;
+}
+
+.player-equipment-overlay__slot-item {
+  position: relative;
+  z-index: 1;
+  align-self: center;
+  justify-self: start;
+  max-width: 100%;
+  color: #2e2313;
+  font-size: 0.92rem;
+  line-height: 1.05;
+  overflow-wrap: anywhere;
+}
+
+.player-equipment-overlay__slot-description {
+  position: relative;
+  z-index: 1;
+  max-width: 100%;
+  color: rgba(46, 35, 19, 0.78);
+  font-size: 0.72rem;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
+.player-equipment-overlay__slot-level {
+  position: absolute;
+  right: 12px;
+  bottom: 11px;
+  z-index: 1;
+  color: rgba(46, 35, 19, 0.78);
+}
+
+.player-equipment-overlay__slot-check-icon {
+  position: absolute;
+  right: 11px;
+  top: 10px;
+  z-index: 1;
+  display: block;
+  width: 16px;
+  height: 15px;
+  opacity: 0.7;
+  pointer-events: none;
+}
+
+.player-equipment-overlay__footer {
+  padding-top: 2px;
+  text-align: center;
+}
