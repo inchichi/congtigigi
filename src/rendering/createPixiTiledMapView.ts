@@ -157,6 +157,14 @@ const PLAYER_WEAPON_TILE_FRAME_SOURCE: TileTextureFrameSource = {
   tileHeight: 16
 }
 const PLAYER_WEAPON_WORLD_SCALE = 1.35
+const PLAYER_ATTACK_DURATION_MILLISECONDS = 220
+const PLAYER_ATTACK_TRAIL_PROGRESS_STEP = 0.12
+const PLAYER_ATTACK_TRAIL_ALPHA = [0.42, 0.28, 0.18, 0.1]
+const PLAYER_ATTACK_TRAIL_SPRITE_COUNT = PLAYER_ATTACK_TRAIL_ALPHA.length
+const PLAYER_ATTACK_SWING_X_OFFSET = 4
+const PLAYER_ATTACK_LIFT_Y_OFFSET = 3
+const PLAYER_ATTACK_ROTATION_OFFSET = 1.15
+const PLAYER_ATTACK_SCALE_BOOST = 0.06
 const PLAYER_WEAPON_PLACEMENT_RIGHT = {
   x: 23,
   y: 21,
@@ -257,6 +265,8 @@ export const createPixiTiledMapView = async ({
   let currentPlayerEquipment = playerEquipment
   let currentPlayerInventory = playerInventory
   let currentBlacksmithInventory = merchantInventory
+  let playerAttackStartedAtMilliseconds: number | undefined
+  let playerWeaponTrailSprites: Sprite[] = []
   let playerWeaponSprite: Sprite | undefined
   let syncPlayerCharacterVisual = () => {}
   let isSceneTransitionPending = false
@@ -326,6 +336,11 @@ export const createPixiTiledMapView = async ({
     playerHudOverlay.syncFrame()
     playerInventoryOverlay.syncFrame()
     playerShopOverlay.syncFrame()
+  }
+  const isAttackKey = (event: KeyboardEvent): boolean =>
+    event.code === 'KeyA' || event.key.toLowerCase() === 'a'
+  const triggerPlayerAttack = (now: number) => {
+    playerAttackStartedAtMilliseconds = now
   }
   const setPlayerUiOpen = (nextIsOpen: boolean) => {
     if (isPlayerUiOpen === nextIsOpen) {
@@ -621,12 +636,27 @@ export const createPixiTiledMapView = async ({
     container.addChild(sprite)
 
     if (isPlayer) {
+      playerWeaponTrailSprites = Array.from(
+        { length: PLAYER_ATTACK_TRAIL_SPRITE_COUNT },
+        (_, index) => {
+          const trailSprite = new Sprite(playerWeaponTexture)
+
+          trailSprite.label = `character:player:weapon-trail:${index}`
+          trailSprite.anchor.set(0.5, 1)
+          trailSprite.visible = false
+          trailSprite.roundPixels = true
+          trailSprite.zIndex = index + 1
+          container.addChild(trailSprite)
+
+          return trailSprite
+        }
+      )
       playerWeaponSprite = new Sprite(playerWeaponTexture)
       playerWeaponSprite.label = 'character:player:weapon'
       playerWeaponSprite.anchor.set(0.5, 1)
       playerWeaponSprite.visible = false
       playerWeaponSprite.roundPixels = true
-      playerWeaponSprite.zIndex = 1
+      playerWeaponSprite.zIndex = PLAYER_ATTACK_TRAIL_SPRITE_COUNT + 1
       container.addChild(playerWeaponSprite)
     }
 
@@ -721,6 +751,9 @@ export const createPixiTiledMapView = async ({
 
     if (!weaponItem) {
       playerWeaponSprite.visible = false
+      for (const trailSprite of playerWeaponTrailSprites) {
+        trailSprite.visible = false
+      }
       return
     }
 
@@ -728,11 +761,79 @@ export const createPixiTiledMapView = async ({
       character.facing === 'left'
         ? PLAYER_WEAPON_PLACEMENT_LEFT
         : PLAYER_WEAPON_PLACEMENT_RIGHT
+    const now = performance.now()
+    const attackElapsedMilliseconds =
+      playerAttackStartedAtMilliseconds === undefined
+        ? undefined
+        : now - playerAttackStartedAtMilliseconds
+    const attackProgress =
+      attackElapsedMilliseconds === undefined ||
+      attackElapsedMilliseconds < 0 ||
+      attackElapsedMilliseconds >= PLAYER_ATTACK_DURATION_MILLISECONDS
+        ? undefined
+        : attackElapsedMilliseconds / PLAYER_ATTACK_DURATION_MILLISECONDS
+    const facingMultiplier = character.facing === 'left' ? -1 : 1
+    const createPose = (progress: number | undefined) => {
+      if (progress === undefined) {
+        return {
+          x: placement.x,
+          y: placement.y,
+          rotation: placement.rotation,
+          scale: PLAYER_WEAPON_WORLD_SCALE
+        }
+      }
 
-    playerWeaponSprite.visible = true
-    playerWeaponSprite.position.set(placement.x, placement.y)
-    playerWeaponSprite.rotation = placement.rotation
-    playerWeaponSprite.scale.set(PLAYER_WEAPON_WORLD_SCALE)
+      const swingAmount = Math.sin(progress * Math.PI)
+      const liftAmount = Math.sin(progress * Math.PI * 0.5)
+
+      return {
+        x:
+          placement.x +
+          facingMultiplier * PLAYER_ATTACK_SWING_X_OFFSET * swingAmount,
+        y: placement.y - PLAYER_ATTACK_LIFT_Y_OFFSET * liftAmount,
+        rotation:
+          placement.rotation +
+          facingMultiplier * PLAYER_ATTACK_ROTATION_OFFSET * swingAmount,
+        scale: PLAYER_WEAPON_WORLD_SCALE + PLAYER_ATTACK_SCALE_BOOST * swingAmount
+      }
+    }
+    const applyPose = (
+      sprite: Sprite,
+      pose: {
+        x: number
+        y: number
+        rotation: number
+        scale: number
+      },
+      alpha: number
+    ) => {
+      sprite.visible = true
+      sprite.position.set(pose.x, pose.y)
+      sprite.rotation = pose.rotation
+      sprite.scale.set(pose.scale)
+      sprite.alpha = alpha
+    }
+
+    applyPose(playerWeaponSprite, createPose(attackProgress), 1)
+
+    for (let index = 0; index < playerWeaponTrailSprites.length; index += 1) {
+      const trailSprite = playerWeaponTrailSprites[index]
+      const trailProgress =
+        attackProgress === undefined
+          ? undefined
+          : attackProgress - (index + 1) * PLAYER_ATTACK_TRAIL_PROGRESS_STEP
+
+      if (trailProgress === undefined || trailProgress <= 0) {
+        trailSprite.visible = false
+        continue
+      }
+
+      applyPose(
+        trailSprite,
+        createPose(trailProgress),
+        PLAYER_ATTACK_TRAIL_ALPHA[index] ?? 0.1
+      )
+    }
   }
 
   const syncCharacterMessageElement = (characterId: string) => {
@@ -1082,6 +1183,13 @@ export const createPixiTiledMapView = async ({
             sourceCharacterId: character.id
           })
         }
+
+        if (
+          intent.actions?.includes('attack') &&
+          character.id === PLAYER_CHARACTER_ID
+        ) {
+          triggerPlayerAttack(now)
+        }
       }
 
       const emittedEvents = processInteractionEvents({
@@ -1110,6 +1218,7 @@ export const createPixiTiledMapView = async ({
 
       pruneExpiredCharacterMessages(now)
       syncActiveCharacterMessages()
+      syncPlayerWeaponSprite(getCharacterStateById(PLAYER_CHARACTER_ID))
       triggeredActions.clear()
       lastRuntimeErrorMessage = undefined
     } catch (error) {
@@ -1144,7 +1253,7 @@ export const createPixiTiledMapView = async ({
       const action = getCharacterActionFromKey(event.key)
       const direction = getCharacterMoveDirectionFromKey(event.key)
 
-      if (event.key === 'Escape' || action || direction) {
+      if (event.key === 'Escape' || action || direction || isAttackKey(event)) {
         event.preventDefault()
       }
 
@@ -1157,14 +1266,16 @@ export const createPixiTiledMapView = async ({
 
     const action = getCharacterActionFromKey(event.key)
 
-    if (action) {
+    if (action || isAttackKey(event)) {
       event.preventDefault()
 
-      if (!pressedActions.has(action)) {
-        triggeredActions.add(action)
+      const nextAction = action ?? 'attack'
+
+      if (!pressedActions.has(nextAction)) {
+        triggeredActions.add(nextAction)
       }
 
-      pressedActions.add(action)
+      pressedActions.add(nextAction)
       return
     }
 
@@ -1183,6 +1294,11 @@ export const createPixiTiledMapView = async ({
 
     if (action) {
       pressedActions.delete(action)
+      return
+    }
+
+    if (isAttackKey(event)) {
+      pressedActions.delete('attack')
       return
     }
 

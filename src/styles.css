@@ -216,7 +216,8 @@ body {
   margin-left: auto;
 }
 
-.player-hud-overlay__level {
+.player-hud-overlay__level,
+.player-hud-overlay__attack-badge {
   padding: 4px 8px;
   border: 1px solid rgba(111, 89, 58, 0.42);
   background: rgba(255, 249, 238, 0.55);

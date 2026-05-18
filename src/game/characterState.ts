@@ -4,7 +4,7 @@ export const PLAYER_CHARACTER_APPEARANCE_TYPE =
 export const DEFAULT_CHARACTER_MOVE_SPEED_TILES_PER_SECOND = 8
 
 export type CharacterMoveDirection = 'up' | 'down' | 'left' | 'right'
-export type CharacterAction = 'interact'
+export type CharacterAction = 'interact' | 'attack'
 export type CharacterControllerIntent = {
   movement?: {
     x: number
@@ -223,7 +223,8 @@ export const getCharacterControllerIntent = ({
           moveSpeedTilesPerSecond: character.controller.moveSpeedTilesPerSecond,
           deltaMilliseconds
         }),
-        actions: triggeredActions.has('interact') ? ['interact'] : undefined
+        actions:
+          triggeredActions.size > 0 ? Array.from(triggeredActions) : undefined
       })
     case 'npc':
       return createCharacterControllerIntent({

@@ -24,7 +24,7 @@ This document is a short guide for module boundaries and code placement.
 - `src/game/tiled/createMapPortalsFromEventLayers.ts`: translate `portal` object-layer events into scene transition data for map exits and entrances.
 - `src/rendering/`: PixiJS rendering code and asset-to-view adaptation.
 - `src/rendering/`: map tile rendering, depth sorting, event character presentation, and fixed-screen HUD overlays.
-- `src/rendering/createPixiTiledMapView.ts`: owns the live world scene, character sprite placement, the player weapon sprite attached to the player render node, the blacksmith shop open state, and portal-triggered scene transition requests.
+- `src/rendering/createPixiTiledMapView.ts`: owns the live world scene, character sprite placement, the player weapon sprite attached to the player render node, the basic attack swing and afterimage trail state, the blacksmith shop open state, and portal-triggered scene transition requests.
 - `src/rendering/createPlayerHudOverlay.ts`: fixed-screen character status panel with bag icon and skill slots. The bag icon opens the combined player panel.
 - `src/rendering/createPlayerInventoryOverlay.ts`: combined fixed-screen player panel that shows the equipment layout, a centered player portrait preview, the backpack grid, and current gold, with click-to-equip and click-to-unequip behavior.
 - `src/rendering/createBlacksmithShopOverlay.ts`: fixed-screen blacksmith trade modal with portrait headers, category tabs, and side-by-side purchase/sale lists for buy/sell clicks.

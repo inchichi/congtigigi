@@ -50,6 +50,7 @@ export const createPlayerHudOverlay = ({
   const nameElement = document.createElement('div')
   const jobElement = document.createElement('div')
   const levelBadge = document.createElement('div')
+  const attackBadge = document.createElement('div')
   const bagButton = document.createElement('button')
   const bagIcon = createBagIconSvg()
   const resourceGrid = document.createElement('div')
@@ -80,6 +81,8 @@ export const createPlayerHudOverlay = ({
   jobElement.textContent = profile.job
   levelBadge.className = 'player-hud-overlay__level'
   levelBadge.textContent = `레벨 ${profile.level}`
+  attackBadge.className = 'player-hud-overlay__attack-badge'
+  attackBadge.textContent = '공격 A'
 
   bagButton.type = 'button'
   bagButton.className = 'player-hud-overlay__bag-button'
@@ -150,7 +153,7 @@ export const createPlayerHudOverlay = ({
   headerMeta.className = 'player-hud-overlay__header-meta'
 
   headerIdentity.append(nameElement, jobElement)
-  headerMeta.append(levelBadge, bagButton)
+  headerMeta.append(levelBadge, attackBadge, bagButton)
   bagButton.append(bagIcon)
   headerRow.append(headerIdentity, headerMeta)
 
