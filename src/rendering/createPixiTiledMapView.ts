@@ -1,8 +1,10 @@
 import { CompositeTilemap } from '@pixi/tilemap'
 import {
   Application,
+  AnimatedSprite,
   Assets,
   Container,
+  Graphics,
   NineSliceSprite,
   Rectangle,
   Sprite,
@@ -31,6 +33,19 @@ import type { PlayerEquipment } from '../game/playerEquipment'
 import type { PlayerInventory } from '../game/playerInventory'
 import type { PlayerProfile } from '../game/playerProfile'
 import {
+  createMonsterPatrolState,
+  stepMonsterPatrol,
+  type MonsterPatrolState
+} from '../game/monsterPatrol'
+import {
+  applyMonsterDamage,
+  createMonsterCombatState,
+  isMonsterDefeated,
+  type MonsterCombatState
+} from '../game/monsterCombat'
+import { getMonsterGoldDropAmount } from '../game/monsterRewards'
+import { resolveCharacterInteractionTarget } from '../game/interaction/resolveCharacterInteractionTarget'
+import {
   createMapPortalsFromEventLayers,
   type MapPortal
 } from '../game/tiled/createMapPortalsFromEventLayers'
@@ -51,6 +66,9 @@ import { createMapOverlay } from './createMapOverlay'
 import { createBlacksmithShopOverlay } from './createBlacksmithShopOverlay'
 import { createPlayerHudOverlay } from './createPlayerHudOverlay'
 import { createPlayerInventoryOverlay } from './createPlayerInventoryOverlay'
+import type { MonsterAnimationTextures } from './monsterAnimationTextures'
+import { loadMonsterPigAnimationTextures } from './loadMonsterPigAnimationTextures'
+import { loadMonsterSlimeAnimationTextures } from './loadMonsterSlimeAnimationTextures'
 
 type CreatePixiTiledMapViewInput = {
   mountElement: HTMLElement
@@ -60,6 +78,7 @@ type CreatePixiTiledMapViewInput = {
   playerEquipment: PlayerEquipment
   playerInventory: PlayerInventory
   merchantInventory: PlayerInventory
+  sceneIntroMessage: string
   cameraTargetCharacterId: string
   characterSpriteSheet: {
     tileset: ParsedTiledTileset
@@ -109,14 +128,76 @@ type ActiveCharacterMessage = {
   expiresAt: number
 }
 
+type ActiveCharacterDamageText = {
+  container: Container
+  text: Text
+  startedAt: number
+  durationMilliseconds: number
+  expiresAt: number
+}
+
+type MonsterGoldDrop = {
+  id: string
+  container: Container
+  coin: Graphics
+  amountText: Text
+  amount: number
+  position: {
+    x: number
+    y: number
+  }
+  createdAt: number
+}
+
 type RenderedCharacterNode = {
   container: Container
   sprite: Sprite
+  levelBadge?: Text
+  monsterHealthBar?: {
+    container: Container
+    track: Graphics
+    fill: Graphics
+  }
 }
 
 type RenderedPortalNode = {
   container: Container
   sprite: Sprite
+}
+
+type MonsterPigAnimationMode = 'idle' | 'run' | 'hit' | 'attack'
+
+type MonsterPigBehaviorState = {
+  isAggroed: boolean
+  nextAttackAtMilliseconds: number
+  attackUntilMilliseconds: number
+  hitReactionUntilMilliseconds: number
+}
+
+type MonsterBehaviorConfig = {
+  renderScale: number
+  aggroRangeTiles: number
+  deAggroRangeTiles: number
+  chaseSpeedTilesPerSecond: number
+  patrolSpeedTilesPerSecond: number
+  attackRangeTiles: number
+  attackIntervalMilliseconds: number
+  attackDurationMilliseconds: number
+  hitReactionDurationMilliseconds: number
+  idleAnimationSpeed: number
+  runAnimationSpeed: number
+  hitAnimationSpeed: number
+  attackAnimationSpeed: number
+  usesRunAnimation: boolean
+  runMotionBobPixels: number
+  runMotionSwayPixels: number
+}
+
+type PlayerHitReactionState = {
+  directionX: number
+  directionY: number
+  startedAtMilliseconds: number
+  expiresAtMilliseconds: number
 }
 
 const DEPTH_SORTED_LAYER_NAME = 'object'
@@ -147,7 +228,75 @@ const MESSAGE_TEXT_STYLE = new TextStyle({
   wordWrap: true,
   wordWrapWidth: MESSAGE_TEXT_MAX_WIDTH
 })
+const DAMAGE_TEXT_STYLE = new TextStyle({
+  align: 'center',
+  fill: 0xff5b5b,
+  fontFamily: '"Jersey 25", NeoDunggeunmo, monospace',
+  fontSize: 16,
+  lineHeight: 18,
+  stroke: {
+    color: 0x2a0909,
+    width: 3
+  }
+})
 const BLACKSMITH_SHOP_NPC_ID = 'blacksmith'
+const MONSTER_PIG_APPEARANCE_TYPE = 'monster_pig'
+const MONSTER_SLIME_APPEARANCE_TYPE = 'monster_slime'
+const MONSTER_PIG_WORLD_SCALE = 0.315
+const MONSTER_SLIME_WORLD_SCALE = 0.287
+const MONSTER_PIG_CHASE_SPEED_TILES_PER_SECOND = 4.4
+const MONSTER_PIG_IDLE_ANIMATION_SPEED = 0.08
+const MONSTER_PIG_RUN_ANIMATION_SPEED = 0.22
+const MONSTER_PIG_HIT_ANIMATION_SPEED = 0.18
+const MONSTER_PIG_ATTACK_ANIMATION_SPEED = 0.14
+const MONSTER_PIG_ATTACK_INTERVAL_MILLISECONDS = 5000
+const MONSTER_PIG_ATTACK_DURATION_MILLISECONDS = 720
+const MONSTER_PIG_ATTACK_RANGE_TILES = 1.2
+const MONSTER_PIG_AGGRO_RANGE_TILES = 4.8
+const MONSTER_PIG_DE_AGGRO_RANGE_TILES = 7.2
+const MONSTER_PIG_HIT_REACTION_DURATION_MILLISECONDS = 260
+const MONSTER_PIG_RESPAWN_DELAY_MILLISECONDS = 8000
+const MONSTER_CONTACT_DAMAGE_COOLDOWN_MILLISECONDS = 900
+const PLAYER_ATTACK_PROBE_DISTANCE_IN_TILES = 1.2
+const DAMAGE_TEXT_FLOAT_DISTANCE = 16
+const DAMAGE_TEXT_DURATION_MILLISECONDS = 1000
+const DAMAGE_TEXT_OFFSET_Y = 8
+const MONSTER_CONTACT_DAMAGE_TOUCH_TOLERANCE_TILES = 0.14
+const MONSTER_ATTACK_RANGE_TOUCH_TOLERANCE_TILES = 0.14
+const PLAYER_RESPAWN_DELAY_MILLISECONDS = 3000
+const PLAYER_HIT_REACTION_DURATION_MILLISECONDS = 180
+const PLAYER_HIT_REACTION_MAX_OFFSET_PIXELS = 6
+const MONSTER_GOLD_DROP_ICON_RADIUS = 7
+const MONSTER_GOLD_DROP_ICON_SHINE_RADIUS = 2
+const MONSTER_GOLD_DROP_AMOUNT_TEXT_STYLE = new TextStyle({
+  align: 'center',
+  fill: 0xffd86b,
+  fontFamily: '"Jersey 25", NeoDunggeunmo, monospace',
+  fontSize: 12,
+  lineHeight: 14,
+  stroke: {
+    color: 0x4f3200,
+    width: 3
+  }
+})
+const MONSTER_GOLD_DROP_PICKUP_WIDTH = 14
+const MONSTER_GOLD_DROP_PICKUP_HEIGHT = 14
+const MONSTER_LEVEL_BADGE_STYLE = new TextStyle({
+  align: 'center',
+  fill: 0xf4e7c5,
+  fontFamily: '"Jersey 25", NeoDunggeunmo, monospace',
+  fontSize: 12,
+  stroke: {
+    color: 0x2e2313,
+    width: 3
+  }
+})
+const MONSTER_HEALTH_BAR_WIDTH = 34
+const MONSTER_HEALTH_BAR_HEIGHT = 5
+const MONSTER_HEALTH_BAR_TRACK_COLOR = 0x2e2313
+const MONSTER_HEALTH_BAR_FILL_COLOR = 0x7dc96d
+const MONSTER_HEALTH_BAR_BORDER_COLOR = 0xf4e7c5
+const MONSTER_HEALTH_BAR_GAP = 4
 const PLAYER_WEAPON_TILE_LOCAL_ID = 117
 const PLAYER_WEAPON_TILE_FRAME_SOURCE: TileTextureFrameSource = {
   columns: 12,
@@ -157,7 +306,6 @@ const PLAYER_WEAPON_TILE_FRAME_SOURCE: TileTextureFrameSource = {
   tileHeight: 16
 }
 const PLAYER_WEAPON_WORLD_SCALE = 1.35
-const PLAYER_ATTACK_DURATION_MILLISECONDS = 220
 const PLAYER_ATTACK_TRAIL_PROGRESS_STEP = 0.12
 const PLAYER_ATTACK_TRAIL_ALPHA = [0.42, 0.28, 0.18, 0.1]
 const PLAYER_ATTACK_TRAIL_SPRITE_COUNT = PLAYER_ATTACK_TRAIL_ALPHA.length
@@ -175,6 +323,83 @@ const PLAYER_WEAPON_PLACEMENT_LEFT = {
   y: 21,
   rotation: -0.75
 }
+const SCENE_INTRO_VISIBLE_DURATION_MILLISECONDS = 3000
+const PLAYER_ATTACK_DURATION_MILLISECONDS = 320
+const PLAYER_ATTACK_COOLDOWN_MILLISECONDS = 420
+type MonsterAppearanceType =
+  | typeof MONSTER_PIG_APPEARANCE_TYPE
+  | typeof MONSTER_SLIME_APPEARANCE_TYPE
+
+const MONSTER_BEHAVIOR_CONFIG_BY_APPEARANCE_TYPE: Record<
+  MonsterAppearanceType,
+  MonsterBehaviorConfig
+> = {
+  [MONSTER_PIG_APPEARANCE_TYPE]: {
+    renderScale: MONSTER_PIG_WORLD_SCALE,
+    aggroRangeTiles: MONSTER_PIG_AGGRO_RANGE_TILES,
+    deAggroRangeTiles: MONSTER_PIG_DE_AGGRO_RANGE_TILES,
+    chaseSpeedTilesPerSecond: MONSTER_PIG_CHASE_SPEED_TILES_PER_SECOND,
+    patrolSpeedTilesPerSecond: 2.4,
+    attackRangeTiles: MONSTER_PIG_ATTACK_RANGE_TILES,
+    attackIntervalMilliseconds: MONSTER_PIG_ATTACK_INTERVAL_MILLISECONDS,
+    attackDurationMilliseconds: MONSTER_PIG_ATTACK_DURATION_MILLISECONDS,
+    hitReactionDurationMilliseconds: MONSTER_PIG_HIT_REACTION_DURATION_MILLISECONDS,
+    idleAnimationSpeed: MONSTER_PIG_IDLE_ANIMATION_SPEED,
+    runAnimationSpeed: MONSTER_PIG_RUN_ANIMATION_SPEED,
+    hitAnimationSpeed: MONSTER_PIG_HIT_ANIMATION_SPEED,
+    attackAnimationSpeed: MONSTER_PIG_ATTACK_ANIMATION_SPEED,
+    usesRunAnimation: true,
+    runMotionBobPixels: 0,
+    runMotionSwayPixels: 0
+  },
+  [MONSTER_SLIME_APPEARANCE_TYPE]: {
+    renderScale: MONSTER_SLIME_WORLD_SCALE,
+    aggroRangeTiles: 4.4,
+    deAggroRangeTiles: 6.8,
+    chaseSpeedTilesPerSecond: 3.1,
+    patrolSpeedTilesPerSecond: 1.8,
+    attackRangeTiles: 1.0,
+    attackIntervalMilliseconds: 5400,
+    attackDurationMilliseconds: 760,
+    hitReactionDurationMilliseconds: 240,
+    idleAnimationSpeed: 0.06,
+    runAnimationSpeed: 0.16,
+    hitAnimationSpeed: 0.16,
+    attackAnimationSpeed: 0.12,
+    usesRunAnimation: true,
+    runMotionBobPixels: 0,
+    runMotionSwayPixels: 0
+  }
+}
+
+const getMonsterBehaviorConfig = (
+  character: CharacterState
+): MonsterBehaviorConfig =>
+  MONSTER_BEHAVIOR_CONFIG_BY_APPEARANCE_TYPE[
+    character.appearanceType as MonsterAppearanceType
+  ] ?? MONSTER_BEHAVIOR_CONFIG_BY_APPEARANCE_TYPE[MONSTER_PIG_APPEARANCE_TYPE]
+
+const createMonsterHealthBar = (): NonNullable<
+  RenderedCharacterNode['monsterHealthBar']
+> => {
+  const container = new Container()
+  const track = new Graphics()
+  const fill = new Graphics()
+
+  container.sortableChildren = true
+  track.roundPixels = true
+  fill.roundPixels = true
+  track.zIndex = 0
+  fill.zIndex = 1
+  container.addChild(track, fill)
+
+  return {
+    container,
+    track,
+    fill
+  }
+}
+
 let messageFontsReadyPromise: Promise<void> | undefined
 
 export const createPixiTiledMapView = async ({
@@ -185,6 +410,7 @@ export const createPixiTiledMapView = async ({
   playerEquipment,
   playerInventory,
   merchantInventory,
+  sceneIntroMessage,
   cameraTargetCharacterId,
   characterSpriteSheet,
   imageUrls,
@@ -195,10 +421,33 @@ export const createPixiTiledMapView = async ({
   onRequestSceneChange
 }: CreatePixiTiledMapViewInput): Promise<{ destroy: () => void }> => {
   const app = new Application()
-  const [messagePanelTexture, tinyDungeonWeaponImageTexture] = await Promise.all([
+  const sceneScale = Math.max(
+    1,
+    Math.ceil(
+      Math.min(window.innerWidth / map.pixelWidth, window.innerHeight / map.pixelHeight)
+    )
+  )
+  const scaledMapPixelWidth = map.pixelWidth * sceneScale
+  const scaledMapPixelHeight = map.pixelHeight * sceneScale
+  const [
+    messagePanelTexture,
+    tinyDungeonWeaponImageTexture,
+    monsterPigAnimationTextures,
+    monsterSlimeAnimationTextures
+  ] = await Promise.all([
     loadMessagePanelTexture(),
-    Assets.load<Texture>(TINY_DUNGEON_TILESET_IMAGE_URL)
+    Assets.load<Texture>(TINY_DUNGEON_TILESET_IMAGE_URL),
+    loadMonsterPigAnimationTextures(),
+    loadMonsterSlimeAnimationTextures()
   ])
+
+  const monsterAnimationTexturesByAppearanceType: Record<
+    MonsterAppearanceType,
+    MonsterAnimationTextures
+  > = {
+    [MONSTER_PIG_APPEARANCE_TYPE]: monsterPigAnimationTextures,
+    [MONSTER_SLIME_APPEARANCE_TYPE]: monsterSlimeAnimationTextures
+  }
 
   tinyDungeonWeaponImageTexture.source.scaleMode = 'nearest'
   tinyDungeonWeaponImageTexture.source.addressMode = 'clamp-to-edge'
@@ -208,20 +457,23 @@ export const createPixiTiledMapView = async ({
     antialias: false,
     autoDensity: true,
     backgroundColor: 0x171311,
-    height: map.pixelHeight,
+    height: scaledMapPixelHeight,
     preference: 'webgl',
     roundPixels: true,
     resolution: window.devicePixelRatio || 1,
-    width: map.pixelWidth
+    width: scaledMapPixelWidth
   })
   app.ticker.maxFPS = 60
 
   const sceneElement = document.createElement('div')
   const runtimeWarningBannerElement = document.createElement('div')
+  const sceneIntroBannerElement = document.createElement('div')
+  const sceneIntroPanelElement = document.createElement('div')
+  const sceneIntroTextElement = document.createElement('div')
 
   sceneElement.className = 'game-scene'
-  sceneElement.style.width = `${map.pixelWidth}px`
-  sceneElement.style.height = `${map.pixelHeight}px`
+  sceneElement.style.width = `${scaledMapPixelWidth}px`
+  sceneElement.style.height = `${scaledMapPixelHeight}px`
   sceneElement.append(app.canvas)
   mountElement.replaceChildren(sceneElement)
   app.canvas.classList.add('game-canvas')
@@ -246,7 +498,17 @@ export const createPixiTiledMapView = async ({
   runtimeWarningBannerElement.style.pointerEvents = 'none'
   document.body.append(runtimeWarningBannerElement)
 
+  sceneIntroBannerElement.className = 'scene-intro-overlay'
+  sceneIntroBannerElement.setAttribute('aria-hidden', 'true')
+  sceneIntroPanelElement.className = 'scene-intro-overlay__panel'
+  sceneIntroTextElement.className = 'scene-intro-overlay__message'
+  sceneIntroTextElement.textContent = sceneIntroMessage
+  sceneIntroPanelElement.append(sceneIntroTextElement)
+  sceneIntroBannerElement.append(sceneIntroPanelElement)
+  mountElement.append(sceneIntroBannerElement)
+
   const world = new Container()
+  world.scale.set(sceneScale)
   const messageLayer = new Container()
   const tilesetResources = new Map<string, TilesetRenderResources>()
   const wallTiles = createWallTileLookup(map)
@@ -256,6 +518,11 @@ export const createPixiTiledMapView = async ({
   const gameEventQueue = createGameEventQueue()
   const interactionLockUntilByCharacterPair = new Map<string, number>()
   const activeCharacterMessages = new Map<string, ActiveCharacterMessage>()
+  const activeCharacterDamageTexts = new Map<
+    string,
+    ActiveCharacterDamageText
+  >()
+  const monsterGoldDrops = new Map<string, MonsterGoldDrop>()
   const renderedCharacters = new Map<string, RenderedCharacterNode>()
   const renderedPortals = new Map<string, RenderedPortalNode>()
   const characterPixelWidth =
@@ -268,7 +535,7 @@ export const createPixiTiledMapView = async ({
   let playerAttackStartedAtMilliseconds: number | undefined
   let playerWeaponTrailSprites: Sprite[] = []
   let playerWeaponSprite: Sprite | undefined
-  let syncPlayerCharacterVisual = () => {}
+  let syncPlayerCharacterVisual: (nowMilliseconds?: number) => void = () => {}
   let isSceneTransitionPending = false
   let isDestroyed = false
   const clearPressedInputState = () => {
@@ -299,6 +566,20 @@ export const createPixiTiledMapView = async ({
     syncFrame: () => {},
     destroy: () => {}
   }
+  const monsterPatrolStates = new Map<string, MonsterPatrolState>()
+  const monsterSpawnStates = new Map<string, CharacterState>()
+  const monsterPigAnimatedSprites = new Map<string, AnimatedSprite>()
+  const monsterPigAnimationModes = new Map<string, MonsterPigAnimationMode>()
+  const monsterPigBehaviorStates = new Map<string, MonsterPigBehaviorState>()
+  const monsterCombatStates = new Map<string, MonsterCombatState>()
+  const monsterContactDamageLockedUntilById = new Map<string, number>()
+  const monsterRespawnAtById = new Map<string, number>()
+  let monsterGoldDropSequence = 0
+  let sceneIntroHideTimeoutId: number | undefined
+  let playerRespawnAtMilliseconds: number | undefined
+  let playerHitReactionState: PlayerHitReactionState | undefined
+  let playerAttackResolvedStartedAtMilliseconds: number | undefined
+  let playerAttackReadyAtMilliseconds = 0
   let lastRuntimeErrorMessage: string | undefined
   let depthSortedLayer: Container | undefined
   let characterStates = characters.map((character) => ({
@@ -306,12 +587,27 @@ export const createPixiTiledMapView = async ({
     position: { ...character.position },
     collisionSize: { ...character.collisionSize }
   }))
+  const initialPlayerCharacter = characterStates.find(
+    (character) => character.id === PLAYER_CHARACTER_ID
+  )
+
+  if (!initialPlayerCharacter) {
+    throw new Error('Missing player character in scene')
+  }
+
+  const playerRespawnState = {
+    position: {
+      ...initialPlayerCharacter.position
+    },
+    facing: initialPlayerCharacter.facing
+  }
   const mapPortals = createMapPortalsFromEventLayers({ map })
   const mapOverlay = createMapOverlay({
     mountElement,
     sourceCanvas: app.canvas,
     mapPixelWidth: map.pixelWidth,
     mapPixelHeight: map.pixelHeight,
+    sceneScale,
     getFocusPoint: () => {
       const focusCharacter = characterStates.find(
         (candidateCharacter) => candidateCharacter.id === cameraTargetCharacterId
@@ -337,10 +633,28 @@ export const createPixiTiledMapView = async ({
     playerInventoryOverlay.syncFrame()
     playerShopOverlay.syncFrame()
   }
+  const showSceneIntroBanner = () => {
+    if (!sceneIntroMessage) {
+      return
+    }
+
+    window.clearTimeout(sceneIntroHideTimeoutId)
+    sceneIntroBannerElement.classList.add('scene-intro-overlay--visible')
+    sceneIntroHideTimeoutId = window.setTimeout(() => {
+      sceneIntroBannerElement.classList.remove('scene-intro-overlay--visible')
+    }, SCENE_INTRO_VISIBLE_DURATION_MILLISECONDS)
+  }
   const isAttackKey = (event: KeyboardEvent): boolean =>
     event.code === 'KeyA' || event.key.toLowerCase() === 'a'
   const triggerPlayerAttack = (now: number) => {
+    if (now < playerAttackReadyAtMilliseconds) {
+      return
+    }
+
     playerAttackStartedAtMilliseconds = now
+    playerAttackResolvedStartedAtMilliseconds = undefined
+    playerAttackReadyAtMilliseconds =
+      now + PLAYER_ATTACK_COOLDOWN_MILLISECONDS
   }
   const setPlayerUiOpen = (nextIsOpen: boolean) => {
     if (isPlayerUiOpen === nextIsOpen) {
@@ -618,22 +932,72 @@ export const createPixiTiledMapView = async ({
 
   for (const character of characterStates) {
     const container = new Container()
-    const sprite = new Sprite(
-      resolveCharacterTexture(
-        characterTilesetResources.tileTextures,
-        characterSpriteSheet.tileset,
-        character.appearanceType
-      )
-    )
+    const isMonsterCharacter = character.appearanceType.startsWith('monster_')
+    const monsterAnimationTextures = isMonsterCharacter
+      ? monsterAnimationTexturesByAppearanceType[
+          character.appearanceType as MonsterAppearanceType
+        ]
+      : undefined
+    const monsterBehaviorConfig = isMonsterCharacter
+      ? getMonsterBehaviorConfig(character)
+      : undefined
+    const sprite = monsterAnimationTextures
+      ? new AnimatedSprite(monsterAnimationTextures.idleLeft)
+      : new Sprite(
+          resolveCharacterTexture(
+            characterTilesetResources.tileTextures,
+            characterSpriteSheet.tileset,
+            character.appearanceType
+          )
+        )
+    const renderScale = monsterBehaviorConfig
+      ? monsterBehaviorConfig.renderScale
+      : characterSpriteSheet.scale
     const isPlayer = character.id === PLAYER_CHARACTER_ID
-
+    const monsterHealthBar = isMonsterCharacter
+      ? createMonsterHealthBar()
+      : undefined
+    const levelBadge =
+      character.level === undefined
+        ? undefined
+        : new Text({
+            style: MONSTER_LEVEL_BADGE_STYLE,
+            text: `Lv ${character.level}`
+          })
     container.label = `character:${character.id}:container`
     container.sortableChildren = true
     sprite.label = `character:${character.id}`
-    sprite.scale.set(characterSpriteSheet.scale)
+    sprite.scale.set(renderScale)
     sprite.roundPixels = true
-    sprite.zIndex = 0
+    sprite.zIndex = 10
     container.addChild(sprite)
+    if (monsterHealthBar) {
+      monsterHealthBar.container.label = `character:${character.id}:monster-health-bar`
+      monsterHealthBar.container.zIndex = 15
+      container.addChild(monsterHealthBar.container)
+    }
+    if (levelBadge) {
+      levelBadge.label = `character:${character.id}:level`
+      levelBadge.roundPixels = true
+      levelBadge.zIndex = 20
+      container.addChild(levelBadge)
+    }
+
+    if (isMonsterCharacter) {
+      monsterCombatStates.set(
+        character.id,
+        createMonsterCombatState(character.level ?? 1)
+      )
+      monsterSpawnStates.set(character.id, {
+        ...character,
+        position: {
+          ...character.position
+        },
+        collisionSize: {
+          ...character.collisionSize
+        }
+      })
+    }
 
     if (isPlayer) {
       playerWeaponTrailSprites = Array.from(
@@ -657,13 +1021,20 @@ export const createPixiTiledMapView = async ({
       playerWeaponSprite.visible = false
       playerWeaponSprite.roundPixels = true
       playerWeaponSprite.zIndex = PLAYER_ATTACK_TRAIL_SPRITE_COUNT + 1
-      container.addChild(playerWeaponSprite)
+        container.addChild(playerWeaponSprite)
     }
 
     renderedCharacters.set(character.id, {
       container,
-      sprite
+      sprite,
+      levelBadge,
+      monsterHealthBar
     })
+    if (monsterAnimationTextures) {
+      monsterPigAnimatedSprites.set(character.id, sprite as AnimatedSprite)
+      monsterPigBehaviorStates.set(character.id, createMonsterPigBehaviorState())
+      syncMonsterAnimation(character.id, 'idle')
+    }
     depthSortedLayer.addChild(container)
   }
 
@@ -694,7 +1065,7 @@ export const createPixiTiledMapView = async ({
   depthSortedLayer.sortChildren()
   world.addChild(messageLayer)
 
-  const getCharacterStateById = (characterId: string): CharacterState => {
+  function getCharacterStateById(characterId: string): CharacterState {
     const character = characterStates.find(
       (candidateCharacter) => candidateCharacter.id === characterId
     )
@@ -706,31 +1077,443 @@ export const createPixiTiledMapView = async ({
     return character
   }
 
-  syncPlayerCharacterVisual = () => {
-    syncCharacterSprite(getCharacterStateById(PLAYER_CHARACTER_ID))
+  syncPlayerCharacterVisual = (now = performance.now()) => {
+    syncCharacterSprite(getCharacterStateById(PLAYER_CHARACTER_ID), now)
   }
 
-  const syncCharacterSprite = (character: CharacterState) => {
+  const syncCharacterSprite = (
+    character: CharacterState,
+    now = performance.now()
+  ) => {
     const renderNode = renderedCharacters.get(character.id)
 
     if (!renderNode) {
       throw new Error(`Missing rendered sprite for character ${character.id}`)
     }
 
+    const combatState = monsterCombatStates.get(character.id)
+
+    if (combatState && isMonsterDefeated(combatState)) {
+      renderNode.container.visible = false
+      return
+    }
+
+    if (
+      character.id === PLAYER_CHARACTER_ID &&
+      playerProfile.hp.current === 0
+    ) {
+      playerHitReactionState = undefined
+      renderNode.container.visible = false
+      syncPlayerWeaponSprite(character)
+      return
+    }
+
+    let playerHitReactionOffsetX = 0
+    let playerHitReactionOffsetY = 0
+    let monsterRunMotionOffsetX = 0
+    let monsterRunMotionOffsetY = 0
+
+    if (character.id === PLAYER_CHARACTER_ID && playerHitReactionState) {
+      if (playerHitReactionState.expiresAtMilliseconds <= now) {
+        playerHitReactionState = undefined
+      } else {
+        const elapsedMilliseconds = now - playerHitReactionState.startedAtMilliseconds
+        const progress = Math.min(
+          1,
+          Math.max(0, elapsedMilliseconds / PLAYER_HIT_REACTION_DURATION_MILLISECONDS)
+        )
+        const recoilStrength =
+          PLAYER_HIT_REACTION_MAX_OFFSET_PIXELS * Math.pow(1 - progress, 2)
+
+        playerHitReactionOffsetX = Math.round(
+          playerHitReactionState.directionX * recoilStrength
+        )
+        playerHitReactionOffsetY = Math.round(
+          playerHitReactionState.directionY * recoilStrength
+        )
+      }
+    }
+
+    const isMonsterCharacter = character.appearanceType.startsWith('monster_')
+    const monsterBehaviorConfig = isMonsterCharacter
+      ? getMonsterBehaviorConfig(character)
+      : undefined
+    const monsterAnimationMode = isMonsterCharacter
+      ? monsterPigAnimationModes.get(character.id)
+      : undefined
+
+    if (
+      monsterBehaviorConfig &&
+      monsterAnimationMode === 'run' &&
+      monsterBehaviorConfig.usesRunAnimation &&
+      (monsterBehaviorConfig.runMotionBobPixels > 0 ||
+        monsterBehaviorConfig.runMotionSwayPixels > 0)
+    ) {
+      const runMotionPhase =
+        now / 110 +
+        character.position.x * 0.31 +
+        character.position.y * 0.53
+      const facingMultiplier = character.facing === 'left' ? -1 : 1
+
+      monsterRunMotionOffsetX = Math.round(
+        Math.sin(runMotionPhase * 0.5) *
+          monsterBehaviorConfig.runMotionSwayPixels *
+          facingMultiplier
+      )
+      monsterRunMotionOffsetY = Math.round(
+        -Math.abs(Math.sin(runMotionPhase)) *
+          monsterBehaviorConfig.runMotionBobPixels
+      )
+    }
+
+    renderNode.container.visible = true
     renderNode.container.position.set(
-      character.position.x * map.tileWidth,
-      character.position.y * map.tileHeight
+      character.position.x * map.tileWidth +
+        playerHitReactionOffsetX +
+        monsterRunMotionOffsetX,
+      character.position.y * map.tileHeight +
+        playerHitReactionOffsetY +
+        monsterRunMotionOffsetY
     )
     renderNode.container.zIndex = getCharacterDepthSortValue(
       character.position.y,
-      characterPixelHeight,
+      renderNode.sprite.height,
       map.tileHeight
     )
+    syncCharacterLevelBadge(renderNode, character)
     depthSortedLayer?.sortChildren()
 
     if (character.id === PLAYER_CHARACTER_ID) {
       syncPlayerWeaponSprite(character)
     }
+  }
+
+  const syncCharacterLevelBadge = (
+    renderNode: RenderedCharacterNode,
+    character: CharacterState
+  ) => {
+    if (!renderNode.levelBadge) {
+      return
+    }
+
+    if (character.level === undefined) {
+      renderNode.levelBadge.visible = false
+      renderNode.levelBadge.text = ''
+      if (renderNode.monsterHealthBar) {
+        renderNode.monsterHealthBar.container.visible = false
+      }
+      return
+    }
+
+    renderNode.levelBadge.visible = true
+    renderNode.levelBadge.text = `Lv ${character.level}`
+
+    if (renderNode.monsterHealthBar && character.appearanceType.startsWith('monster_')) {
+      const combatState = monsterCombatStates.get(character.id)
+
+      syncMonsterHealthBar(renderNode.monsterHealthBar, combatState)
+      renderNode.levelBadge.position.set(
+        Math.round((renderNode.sprite.width - renderNode.levelBadge.width) / 2),
+        -Math.round(
+          renderNode.levelBadge.height +
+            MONSTER_HEALTH_BAR_HEIGHT +
+            MONSTER_HEALTH_BAR_GAP +
+            6
+        )
+      )
+      renderNode.monsterHealthBar.container.position.set(
+        Math.round((renderNode.sprite.width - MONSTER_HEALTH_BAR_WIDTH) / 2),
+        -Math.round(MONSTER_HEALTH_BAR_HEIGHT + 4)
+      )
+      return
+    }
+
+    renderNode.levelBadge.position.set(
+      Math.round((renderNode.sprite.width - renderNode.levelBadge.width) / 2),
+      -Math.round(renderNode.levelBadge.height + 4)
+    )
+  }
+
+  const syncMonsterHealthBar = (
+    monsterHealthBar: NonNullable<RenderedCharacterNode['monsterHealthBar']>,
+    combatState: MonsterCombatState | undefined
+  ) => {
+    if (!combatState) {
+      monsterHealthBar.container.visible = false
+      return
+    }
+
+    const ratio =
+      combatState.maxHp === 0
+        ? 0
+        : Math.min(1, Math.max(0, combatState.currentHp / combatState.maxHp))
+    const innerWidth = MONSTER_HEALTH_BAR_WIDTH - 2
+    const innerHeight = MONSTER_HEALTH_BAR_HEIGHT - 2
+    const filledWidth = Math.max(0, Math.round(innerWidth * ratio))
+
+    monsterHealthBar.container.visible = true
+    monsterHealthBar.track.clear()
+    monsterHealthBar.track
+      .rect(0, 0, MONSTER_HEALTH_BAR_WIDTH, MONSTER_HEALTH_BAR_HEIGHT)
+      .fill({ color: MONSTER_HEALTH_BAR_TRACK_COLOR })
+      .stroke({ color: MONSTER_HEALTH_BAR_BORDER_COLOR, width: 1 })
+    monsterHealthBar.fill.clear()
+
+    if (filledWidth > 0) {
+      monsterHealthBar.fill
+        .rect(1, 1, filledWidth, innerHeight)
+        .fill({ color: MONSTER_HEALTH_BAR_FILL_COLOR })
+    }
+  }
+
+  function syncMonsterAnimation(
+    characterId: string,
+    mode: MonsterPigAnimationMode,
+    options: {
+      forceRestart?: boolean
+    } = {}
+  ) {
+    const sprite = monsterPigAnimatedSprites.get(characterId)
+    const combatState = monsterCombatStates.get(characterId)
+    const character = getCharacterStateById(characterId)
+    const monsterAnimationTextures =
+      monsterAnimationTexturesByAppearanceType[
+        character.appearanceType as MonsterAppearanceType
+      ]
+    const behaviorConfig = getMonsterBehaviorConfig(character)
+
+    if (
+      !sprite ||
+      !monsterAnimationTextures ||
+      (combatState && isMonsterDefeated(combatState))
+    ) {
+      return
+    }
+
+    const facingKey = character.facing === 'right' ? 'right' : 'left'
+    const isRunAnimationEnabled = behaviorConfig.usesRunAnimation
+    const resolvedMode =
+      mode === 'run' && !isRunAnimationEnabled ? 'idle' : mode
+    const nextTextures =
+      resolvedMode === 'run'
+        ? facingKey === 'right'
+          ? monsterAnimationTextures.runRight
+          : monsterAnimationTextures.runLeft
+        : resolvedMode === 'hit'
+          ? facingKey === 'right'
+            ? monsterAnimationTextures.hitRight
+            : monsterAnimationTextures.hitLeft
+          : resolvedMode === 'attack'
+            ? facingKey === 'right'
+              ? monsterAnimationTextures.attackRight
+              : monsterAnimationTextures.attackLeft
+            : facingKey === 'right'
+              ? monsterAnimationTextures.idleRight
+            : monsterAnimationTextures.idleLeft
+    const previousMode = monsterPigAnimationModes.get(characterId)
+    const currentFrame = sprite.currentFrame
+
+    if (
+      !options.forceRestart &&
+      previousMode === mode &&
+      sprite.textures === nextTextures
+    ) {
+      return
+    }
+
+    monsterPigAnimationModes.set(characterId, mode)
+    sprite.textures = nextTextures
+    sprite.animationSpeed =
+      resolvedMode === 'run'
+        ? behaviorConfig.runAnimationSpeed
+        : resolvedMode === 'hit'
+          ? behaviorConfig.hitAnimationSpeed
+          : resolvedMode === 'attack'
+            ? behaviorConfig.attackAnimationSpeed
+            : behaviorConfig.idleAnimationSpeed
+    sprite.loop = resolvedMode === 'idle' || resolvedMode === 'run'
+    const shouldPreserveRunPhase =
+      resolvedMode === 'run' &&
+      isRunAnimationEnabled &&
+      previousMode === mode &&
+      !options.forceRestart
+
+    sprite.gotoAndPlay(
+      shouldPreserveRunPhase
+        ? currentFrame % nextTextures.length
+        : 0
+    )
+
+  }
+
+  function createMonsterPigBehaviorState(): MonsterPigBehaviorState {
+    return {
+      isAggroed: false,
+      nextAttackAtMilliseconds: 0,
+      attackUntilMilliseconds: 0,
+      hitReactionUntilMilliseconds: 0
+    }
+  }
+
+  function getMonsterPigBehaviorState(
+    characterId: string
+  ): MonsterPigBehaviorState {
+    const currentBehaviorState = monsterPigBehaviorStates.get(characterId)
+
+    if (currentBehaviorState) {
+      return currentBehaviorState
+    }
+
+    const nextBehaviorState = createMonsterPigBehaviorState()
+
+    monsterPigBehaviorStates.set(characterId, nextBehaviorState)
+    return nextBehaviorState
+  }
+
+  function setMonsterPigAggro(
+    characterId: string,
+    now: number,
+    behaviorConfig: MonsterBehaviorConfig
+  ): void {
+    const currentBehaviorState = getMonsterPigBehaviorState(characterId)
+
+    if (currentBehaviorState.isAggroed) {
+      return
+    }
+
+    monsterPigBehaviorStates.set(characterId, {
+      ...currentBehaviorState,
+      isAggroed: true,
+      nextAttackAtMilliseconds:
+        now + behaviorConfig.attackIntervalMilliseconds
+    })
+    syncCharacterSprite(getCharacterStateById(characterId), now)
+  }
+
+  function setMonsterPigHitReaction(
+    characterId: string,
+    now: number,
+    behaviorConfig: MonsterBehaviorConfig
+  ): void {
+    const currentBehaviorState = getMonsterPigBehaviorState(characterId)
+
+    monsterPigBehaviorStates.set(characterId, {
+      ...currentBehaviorState,
+      isAggroed: true,
+      nextAttackAtMilliseconds: Math.max(
+        currentBehaviorState.nextAttackAtMilliseconds,
+        now + behaviorConfig.attackIntervalMilliseconds
+      ),
+      attackUntilMilliseconds: 0,
+      hitReactionUntilMilliseconds:
+        now + behaviorConfig.hitReactionDurationMilliseconds
+    })
+    syncCharacterSprite(getCharacterStateById(characterId), now)
+  }
+
+  function setMonsterPigAttackState(
+    characterId: string,
+    now: number,
+    behaviorConfig: MonsterBehaviorConfig
+  ): void {
+    const currentBehaviorState = getMonsterPigBehaviorState(characterId)
+
+    monsterPigBehaviorStates.set(characterId, {
+      ...currentBehaviorState,
+      isAggroed: true,
+      attackUntilMilliseconds:
+        now + behaviorConfig.attackDurationMilliseconds,
+      hitReactionUntilMilliseconds: 0,
+      nextAttackAtMilliseconds:
+        now + behaviorConfig.attackIntervalMilliseconds
+    })
+    syncCharacterSprite(getCharacterStateById(characterId), now)
+  }
+
+  function getKnockbackDirection(
+    targetCharacter: CharacterState,
+    sourceCharacter: CharacterState
+  ): {
+    x: number
+    y: number
+  } {
+    const targetCenterX =
+      targetCharacter.position.x + targetCharacter.collisionSize.width / 2
+    const targetCenterY =
+      targetCharacter.position.y + targetCharacter.collisionSize.height / 2
+    const sourceCenterX =
+      sourceCharacter.position.x + sourceCharacter.collisionSize.width / 2
+    const sourceCenterY =
+      sourceCharacter.position.y + sourceCharacter.collisionSize.height / 2
+    let deltaX = targetCenterX - sourceCenterX
+    let deltaY = targetCenterY - sourceCenterY
+
+    if (deltaX === 0 && deltaY === 0) {
+      switch (sourceCharacter.facing) {
+        case 'up':
+          deltaY = -1
+          break
+        case 'down':
+          deltaY = 1
+          break
+        case 'left':
+          deltaX = -1
+          break
+        case 'right':
+          deltaX = 1
+          break
+      }
+    }
+
+    const distance = Math.hypot(deltaX, deltaY) || 1
+
+    return {
+      x: deltaX / distance,
+      y: deltaY / distance
+    }
+  }
+
+  function setPlayerHitReaction(
+    sourceCharacter: CharacterState,
+    now: number
+  ): void {
+    const playerCharacter = getCharacterStateById(PLAYER_CHARACTER_ID)
+    const direction = getKnockbackDirection(playerCharacter, sourceCharacter)
+
+    playerHitReactionState = {
+      directionX: direction.x,
+      directionY: direction.y,
+      startedAtMilliseconds: now,
+      expiresAtMilliseconds: now + PLAYER_HIT_REACTION_DURATION_MILLISECONDS
+    }
+  }
+
+  function knockbackCharacterAwayFromCharacter(
+    targetCharacterId: string,
+    sourceCharacter: CharacterState,
+    distanceInTiles: number
+  ): void {
+    const targetCharacter = getCharacterStateById(targetCharacterId)
+    const direction = getKnockbackDirection(targetCharacter, sourceCharacter)
+
+    tryMoveCharacter(
+      targetCharacterId,
+      direction.x * distanceInTiles,
+      direction.y * distanceInTiles,
+      { preserveFacing: true }
+    )
+  }
+
+  function knockbackMonsterAwayFromCharacter(
+    characterId: string,
+    sourceCharacter: CharacterState,
+    distanceInTiles: number
+  ): void {
+    knockbackCharacterAwayFromCharacter(
+      characterId,
+      sourceCharacter,
+      distanceInTiles
+    )
   }
 
   const syncAllCharacterSprites = () => {
@@ -739,8 +1522,469 @@ export const createPixiTiledMapView = async ({
     }
   }
 
+  function isMonsterCharacter(character: CharacterState): boolean {
+    return character.appearanceType.startsWith('monster_')
+  }
+
+  function isMonsterCombatStateDefeated(characterId: string): boolean {
+    const combatState = monsterCombatStates.get(characterId)
+
+    return combatState ? isMonsterDefeated(combatState) : false
+  }
+
+  function maybeRespawnMonster(characterId: string, now: number): boolean {
+    const respawnAt = monsterRespawnAtById.get(characterId)
+
+    if (respawnAt === undefined || respawnAt > now) {
+      return false
+    }
+
+    const spawnCharacter = monsterSpawnStates.get(characterId)
+
+    if (!spawnCharacter) {
+      return false
+    }
+
+    const nextCharacter: CharacterState = {
+      ...spawnCharacter,
+      position: {
+        ...spawnCharacter.position
+      },
+      collisionSize: {
+        ...spawnCharacter.collisionSize
+      }
+    }
+
+    characterStates = characterStates.map((character) =>
+      character.id === characterId ? nextCharacter : character
+    )
+    monsterCombatStates.set(
+      characterId,
+      createMonsterCombatState(nextCharacter.level ?? 1)
+    )
+    monsterPatrolStates.delete(characterId)
+    monsterContactDamageLockedUntilById.delete(characterId)
+    monsterPigBehaviorStates.set(
+      characterId,
+      createMonsterPigBehaviorState()
+    )
+    monsterPigAnimationModes.delete(characterId)
+    monsterRespawnAtById.delete(characterId)
+    syncCharacterSprite(nextCharacter)
+    syncMonsterAnimation(characterId, 'idle')
+
+    return true
+  }
+
+  function spawnMonsterGoldDrop(
+    characterId: string,
+    amount: number,
+    position: {
+      x: number
+      y: number
+    },
+    now: number
+  ): void {
+    const dropId = `${characterId}:${++monsterGoldDropSequence}`
+    const container = new Container()
+    const coin = new Graphics()
+    const coinHighlight = new Graphics()
+    const amountText = new Text({
+      style: MONSTER_GOLD_DROP_AMOUNT_TEXT_STYLE,
+      text: `${amount}원`
+    })
+
+    container.label = `monster-gold-drop:${dropId}`
+    container.sortableChildren = true
+    coin.roundPixels = true
+    coinHighlight.roundPixels = true
+    amountText.roundPixels = true
+    coin.circle(0, 0, MONSTER_GOLD_DROP_ICON_RADIUS)
+    coin.fill({ color: 0xf0c24b })
+    coin.stroke({ color: 0x8b5a00, width: 2 })
+    coinHighlight.circle(
+      -MONSTER_GOLD_DROP_ICON_RADIUS * 0.28,
+      -MONSTER_GOLD_DROP_ICON_RADIUS * 0.28,
+      MONSTER_GOLD_DROP_ICON_SHINE_RADIUS
+    )
+    coinHighlight.fill({ color: 0xfff1b0 })
+    coinHighlight.alpha = 0.9
+    amountText.position.set(
+      -Math.round(amountText.width / 2),
+      MONSTER_GOLD_DROP_ICON_RADIUS + 4
+    )
+    coin.zIndex = 0
+    coinHighlight.zIndex = 1
+    amountText.zIndex = 2
+    container.addChild(coin, coinHighlight, amountText)
+    container.position.set(position.x, position.y)
+    container.zIndex = Math.round(position.y + map.tileHeight)
+    depthSortedLayer?.addChild(container)
+    monsterGoldDrops.set(dropId, {
+      id: dropId,
+      container,
+      coin,
+      amountText,
+      amount,
+      position: {
+        x: position.x,
+        y: position.y
+      },
+      createdAt: now
+    })
+  }
+
+  const syncMonsterGoldDropElement = (
+    drop: MonsterGoldDrop,
+    now: number
+  ) => {
+    const bobOffset = Math.sin((now - drop.createdAt) / 220) * 1.5
+
+    drop.container.position.set(drop.position.x, drop.position.y + bobOffset)
+    drop.container.zIndex = Math.round(drop.position.y + map.tileHeight)
+    drop.amountText.text = `${drop.amount}원`
+    drop.amountText.position.set(
+      -Math.round(drop.amountText.width / 2),
+      MONSTER_GOLD_DROP_ICON_RADIUS + 4
+    )
+  }
+
+  const syncActiveMonsterGoldDrops = (now: number) => {
+    for (const drop of monsterGoldDrops.values()) {
+      syncMonsterGoldDropElement(drop, now)
+    }
+
+    depthSortedLayer?.sortChildren()
+  }
+
+  const resolveMonsterGoldDropPickups = () => {
+    const playerCharacter = getCharacterStateById(PLAYER_CHARACTER_ID)
+    const playerRect = {
+      x: playerCharacter.position.x * map.tileWidth,
+      y: playerCharacter.position.y * map.tileHeight,
+      width: playerCharacter.collisionSize.width * map.tileWidth,
+      height: playerCharacter.collisionSize.height * map.tileHeight
+    }
+
+    for (const [dropId, drop] of monsterGoldDrops) {
+      const dropRect = {
+        x: drop.position.x - MONSTER_GOLD_DROP_PICKUP_WIDTH / 2,
+        y: drop.position.y - MONSTER_GOLD_DROP_PICKUP_HEIGHT / 2,
+        width: MONSTER_GOLD_DROP_PICKUP_WIDTH,
+        height: MONSTER_GOLD_DROP_PICKUP_HEIGHT
+      }
+
+      if (!doCollisionRectsIntersect(playerRect, dropRect)) {
+        continue
+      }
+
+      currentPlayerInventory = {
+        ...currentPlayerInventory,
+        gold: currentPlayerInventory.gold + drop.amount
+      }
+      onPlayerInventoryChange(currentPlayerInventory)
+      syncPlayerUiOverlays()
+      drop.container.removeFromParent()
+      drop.container.destroy({ children: true })
+      monsterGoldDrops.delete(dropId)
+    }
+  }
+
+  function getMonsterDistanceToPlayer(character: CharacterState): number {
+    const playerCharacter = getCharacterStateById(PLAYER_CHARACTER_ID)
+    const monsterCenterX = character.position.x + character.collisionSize.width / 2
+    const monsterCenterY = character.position.y + character.collisionSize.height / 2
+    const playerCenterX =
+      playerCharacter.position.x + playerCharacter.collisionSize.width / 2
+    const playerCenterY =
+      playerCharacter.position.y + playerCharacter.collisionSize.height / 2
+
+    return Math.hypot(
+      playerCenterX - monsterCenterX,
+      playerCenterY - monsterCenterY
+    )
+  }
+
+  function isMonsterWithinRange(
+    character: CharacterState,
+    tiles: number
+  ): boolean {
+    return getMonsterDistanceToPlayer(character) <= tiles
+  }
+
+  function isMonsterWithinAttackRange(
+    monsterCharacter: CharacterState,
+    playerCharacter: CharacterState,
+    behaviorConfig: MonsterBehaviorConfig
+  ): boolean {
+    const monsterCenterX =
+      monsterCharacter.position.x + monsterCharacter.collisionSize.width / 2
+    const monsterCenterY =
+      monsterCharacter.position.y + monsterCharacter.collisionSize.height / 2
+    const playerCenterX =
+      playerCharacter.position.x + playerCharacter.collisionSize.width / 2
+    const playerCenterY =
+      playerCharacter.position.y + playerCharacter.collisionSize.height / 2
+
+    return (
+      Math.hypot(
+        playerCenterX - monsterCenterX,
+        playerCenterY - monsterCenterY
+      ) <=
+      behaviorConfig.attackRangeTiles +
+        MONSTER_ATTACK_RANGE_TOUCH_TOLERANCE_TILES
+    )
+  }
+
+  function beginPlayerDeath(now: number): void {
+    if (playerRespawnAtMilliseconds !== undefined) {
+      return
+    }
+
+    playerRespawnAtMilliseconds =
+      now + PLAYER_RESPAWN_DELAY_MILLISECONDS
+    playerHitReactionState = undefined
+    clearPressedInputState()
+    playerAttackStartedAtMilliseconds = undefined
+    playerAttackResolvedStartedAtMilliseconds = undefined
+    playerAttackReadyAtMilliseconds = now + PLAYER_RESPAWN_DELAY_MILLISECONDS
+    syncCharacterSprite(getCharacterStateById(PLAYER_CHARACTER_ID), now)
+  }
+
+  function maybeRespawnPlayer(now: number): boolean {
+    if (playerProfile.hp.current > 0) {
+      return false
+    }
+
+    const respawnAt = playerRespawnAtMilliseconds
+
+    if (respawnAt === undefined || respawnAt > now) {
+      return false
+    }
+
+    const playerCharacter = getCharacterStateById(PLAYER_CHARACTER_ID)
+
+    playerCharacter.position = {
+      ...playerRespawnState.position
+    }
+    playerCharacter.facing = playerRespawnState.facing
+    playerProfile.hp.current = playerProfile.hp.max
+    playerRespawnAtMilliseconds = undefined
+    playerHitReactionState = undefined
+    clearPressedInputState()
+    playerAttackStartedAtMilliseconds = undefined
+    playerAttackResolvedStartedAtMilliseconds = undefined
+    playerAttackReadyAtMilliseconds = now
+    syncCharacterSprite(playerCharacter, now)
+    syncPlayerUiOverlays()
+    showCharacterDamageText(
+      PLAYER_CHARACTER_ID,
+      '부활했다!',
+      DAMAGE_TEXT_DURATION_MILLISECONDS
+    )
+
+    return true
+  }
+
+  function applyDamageToPlayer(
+    damage: number,
+    now: number,
+    sourceCharacter?: CharacterState
+  ): void {
+    const nextDamage = Math.max(0, Math.floor(damage))
+
+    if (nextDamage === 0 || playerProfile.hp.current === 0) {
+      return
+    }
+
+    const nextHp = Math.max(0, playerProfile.hp.current - nextDamage)
+    const damageMessage =
+      nextHp === 0 ? `-${nextDamage}\n쓰러졌다!` : `-${nextDamage}`
+
+    playerProfile.hp.current = nextHp
+    showCharacterDamageText(
+      PLAYER_CHARACTER_ID,
+      damageMessage,
+      DAMAGE_TEXT_DURATION_MILLISECONDS
+    )
+    if (sourceCharacter && nextHp > 0) {
+      setPlayerHitReaction(sourceCharacter, now)
+    }
+    syncPlayerUiOverlays()
+
+    if (nextHp === 0) {
+      playerHitReactionState = undefined
+      beginPlayerDeath(now)
+    }
+  }
+
+  function applyDamageToMonster(
+    characterId: string,
+    damage: number,
+    now: number
+  ): void {
+    const character = getCharacterStateById(characterId)
+    const combatState = monsterCombatStates.get(characterId)
+    const monsterBehaviorConfig = getMonsterBehaviorConfig(character)
+
+    if (!combatState) {
+      return
+    }
+
+    const nextCombatState = applyMonsterDamage(combatState, damage)
+
+    if (nextCombatState === combatState) {
+      return
+    }
+
+    monsterCombatStates.set(characterId, nextCombatState)
+    const nextDamage = Math.max(0, Math.floor(damage))
+    const damageMessage =
+      nextCombatState.currentHp === 0
+        ? `-${nextDamage}\n쓰러졌다!`
+        : `-${nextDamage}`
+
+    showCharacterDamageText(
+      characterId,
+      damageMessage,
+      DAMAGE_TEXT_DURATION_MILLISECONDS
+    )
+
+    if (isMonsterDefeated(nextCombatState)) {
+      character.blocksMovement = false
+      monsterPatrolStates.delete(characterId)
+      monsterContactDamageLockedUntilById.delete(characterId)
+      monsterPigAnimationModes.delete(characterId)
+      monsterPigBehaviorStates.delete(characterId)
+      spawnMonsterGoldDrop(
+        characterId,
+        getMonsterGoldDropAmount(character.level ?? 1),
+        {
+          x:
+            character.position.x * map.tileWidth +
+            (character.collisionSize.width * map.tileWidth) / 2,
+          y:
+            character.position.y * map.tileHeight +
+            (character.collisionSize.height * map.tileHeight) / 2
+        },
+        now
+      )
+      monsterRespawnAtById.set(
+        characterId,
+        now + MONSTER_PIG_RESPAWN_DELAY_MILLISECONDS
+      )
+      const renderNode = renderedCharacters.get(characterId)
+
+      if (renderNode) {
+        renderNode.container.visible = false
+      }
+      return
+    }
+
+    const playerCharacter = getCharacterStateById(PLAYER_CHARACTER_ID)
+
+    monsterContactDamageLockedUntilById.set(
+      characterId,
+      now + monsterBehaviorConfig.hitReactionDurationMilliseconds
+    )
+    setMonsterPigHitReaction(characterId, now, monsterBehaviorConfig)
+    knockbackMonsterAwayFromCharacter(characterId, playerCharacter, 0.45)
+    monsterPigAnimationModes.delete(characterId)
+    syncMonsterAnimation(characterId, 'hit', { forceRestart: true })
+    syncCharacterSprite(getCharacterStateById(characterId), now)
+  }
+
+  function resolvePlayerAttackDamage(now: number): void {
+    if (playerProfile.hp.current === 0) {
+      return
+    }
+
+    if (
+      playerAttackStartedAtMilliseconds === undefined ||
+      playerAttackResolvedStartedAtMilliseconds ===
+        playerAttackStartedAtMilliseconds
+    ) {
+      return
+    }
+
+    const playerCharacter = getCharacterStateById(PLAYER_CHARACTER_ID)
+    const targetCharacter = resolveCharacterInteractionTarget({
+      sourceCharacter: playerCharacter,
+      targetCharacters: characterStates,
+      canReceiveInteraction: (character) =>
+        isMonsterCharacter(character) &&
+        !isMonsterCombatStateDefeated(character.id),
+      interactionProbeDistanceInTiles: PLAYER_ATTACK_PROBE_DISTANCE_IN_TILES
+    })
+
+    if (targetCharacter) {
+      applyDamageToMonster(targetCharacter.id, playerProfile.stats.attack, now)
+    }
+
+    playerAttackResolvedStartedAtMilliseconds = playerAttackStartedAtMilliseconds
+  }
+
+  function resolveMonsterContactDamage(now: number): void {
+    if (playerProfile.hp.current === 0) {
+      return
+    }
+
+    const playerCharacter = getCharacterStateById(PLAYER_CHARACTER_ID)
+    const playerRect = createCollisionRectFromCharacter(playerCharacter)
+    const expandedPlayerRect = {
+      x: playerRect.x - MONSTER_CONTACT_DAMAGE_TOUCH_TOLERANCE_TILES,
+      y: playerRect.y - MONSTER_CONTACT_DAMAGE_TOUCH_TOLERANCE_TILES,
+      width: playerRect.width + MONSTER_CONTACT_DAMAGE_TOUCH_TOLERANCE_TILES * 2,
+      height:
+        playerRect.height + MONSTER_CONTACT_DAMAGE_TOUCH_TOLERANCE_TILES * 2
+    }
+
+    for (const monsterCharacter of characterStates) {
+      if (!isMonsterCharacter(monsterCharacter)) {
+        continue
+      }
+
+      const combatState = monsterCombatStates.get(monsterCharacter.id)
+
+      if (!combatState || isMonsterDefeated(combatState)) {
+        continue
+      }
+
+      if (
+        !doCollisionRectsIntersect(
+          expandedPlayerRect,
+          createCollisionRectFromCharacter(monsterCharacter)
+        )
+      ) {
+        continue
+      }
+
+      const lockedUntil =
+        monsterContactDamageLockedUntilById.get(monsterCharacter.id) ?? 0
+
+      if (lockedUntil > now) {
+        continue
+      }
+
+      monsterContactDamageLockedUntilById.set(
+        monsterCharacter.id,
+        now + MONSTER_CONTACT_DAMAGE_COOLDOWN_MILLISECONDS
+      )
+      applyDamageToPlayer(combatState.contactDamage, now, monsterCharacter)
+      knockbackCharacterAwayFromCharacter(PLAYER_CHARACTER_ID, monsterCharacter, 0.18)
+    }
+  }
+
   const syncPlayerWeaponSprite = (character: CharacterState) => {
     if (!playerWeaponSprite) {
+      return
+    }
+
+    if (playerProfile.hp.current === 0) {
+      playerWeaponSprite.visible = false
+      for (const trailSprite of playerWeaponTrailSprites) {
+        trailSprite.visible = false
+      }
       return
     }
 
@@ -945,18 +2189,127 @@ export const createPixiTiledMapView = async ({
     }
   }
 
+  const syncCharacterDamageTextElement = (
+    characterId: string,
+    now: number
+  ) => {
+    const activeDamageText = activeCharacterDamageTexts.get(characterId)
+
+    if (!activeDamageText) {
+      return
+    }
+
+    const character = characterStates.find(
+      (candidateCharacter) => candidateCharacter.id === characterId
+    )
+
+    if (!character) {
+      activeDamageText.container.removeFromParent()
+      activeDamageText.container.destroy({ children: true })
+      activeCharacterDamageTexts.delete(characterId)
+      return
+    }
+
+    const elapsedMilliseconds = now - activeDamageText.startedAt
+    const progress = Math.min(
+      1,
+      Math.max(
+        0,
+        elapsedMilliseconds / activeDamageText.durationMilliseconds
+      )
+    )
+    const floatOffset = Math.round(progress * DAMAGE_TEXT_FLOAT_DISTANCE)
+
+    activeDamageText.container.position.set(
+      Math.round(
+        character.position.x * map.tileWidth +
+          characterPixelWidth / 2 -
+          activeDamageText.text.width / 2
+      ),
+      Math.round(
+        character.position.y * map.tileHeight -
+          activeDamageText.text.height -
+          DAMAGE_TEXT_OFFSET_Y -
+          floatOffset
+      )
+    )
+    activeDamageText.container.alpha = 1 - progress
+    activeDamageText.container.zIndex = getCharacterDepthSortValue(
+      character.position.y,
+      characterPixelHeight,
+      map.tileHeight
+    )
+    messageLayer.sortChildren()
+  }
+
+  const syncActiveCharacterDamageTexts = (now: number) => {
+    for (const characterId of activeCharacterDamageTexts.keys()) {
+      syncCharacterDamageTextElement(characterId, now)
+    }
+  }
+
+  const showCharacterDamageText = (
+    characterId: string,
+    message: string,
+    durationMilliseconds: number
+  ) => {
+    let activeDamageText = activeCharacterDamageTexts.get(characterId)
+
+    if (!activeDamageText) {
+      const container = new Container()
+      const text = new Text({
+        style: DAMAGE_TEXT_STYLE,
+        text: ''
+      })
+
+      text.roundPixels = true
+      container.addChild(text)
+      messageLayer.addChild(container)
+      activeDamageText = {
+        container,
+        text,
+        startedAt: 0,
+        durationMilliseconds,
+        expiresAt: 0
+      }
+      activeCharacterDamageTexts.set(characterId, activeDamageText)
+    }
+
+    activeDamageText.text.text = message
+    activeDamageText.startedAt = performance.now()
+    activeDamageText.durationMilliseconds = durationMilliseconds
+    activeDamageText.expiresAt =
+      activeDamageText.startedAt + durationMilliseconds
+    activeDamageText.container.alpha = 1
+    syncCharacterDamageTextElement(characterId, activeDamageText.startedAt)
+  }
+
+  const pruneExpiredCharacterDamageTexts = (now: number) => {
+    for (const [characterId, activeDamageText] of activeCharacterDamageTexts) {
+      if (activeDamageText.expiresAt > now) {
+        continue
+      }
+
+      activeDamageText.container.removeFromParent()
+      activeDamageText.container.destroy({ children: true })
+      activeCharacterDamageTexts.delete(characterId)
+    }
+  }
+
   const centerViewportOnCharacter = (character: CharacterState) => {
     const characterCenterX =
-      character.position.x * map.tileWidth + characterPixelWidth / 2
+      (character.position.x * map.tileWidth + characterPixelWidth / 2) *
+      sceneScale
     const characterCenterY =
-      character.position.y * map.tileHeight + characterPixelHeight / 2
+      (character.position.y * map.tileHeight + characterPixelHeight / 2) *
+      sceneScale
     const nextScrollLeft = clampScrollOffset(
       characterCenterX - mountElement.clientWidth / 2,
-      map.pixelWidth - mountElement.clientWidth
+      scaledMapPixelWidth - mountElement.clientWidth
     )
     const nextScrollTop = clampScrollOffset(
       characterCenterY - mountElement.clientHeight / 2,
-      map.pixelHeight - mountElement.clientHeight
+      scaledMapPixelHeight - mountElement.clientHeight
     )
 
     mountElement.scrollTo({
@@ -966,10 +2319,10 @@ export const createPixiTiledMapView = async ({
   }
 
   const keepCharacterVisible = (character: CharacterState) => {
-    const characterLeft = character.position.x * map.tileWidth
-    const characterTop = character.position.y * map.tileHeight
-    const characterRight = characterLeft + characterPixelWidth
-    const characterBottom = characterTop + characterPixelHeight
+    const characterLeft = character.position.x * map.tileWidth * sceneScale
+    const characterTop = character.position.y * map.tileHeight * sceneScale
+    const characterRight = characterLeft + characterPixelWidth * sceneScale
+    const characterBottom = characterTop + characterPixelHeight * sceneScale
     const viewportLeft = mountElement.scrollLeft
     const viewportTop = mountElement.scrollTop
     const viewportWidth = mountElement.clientWidth
@@ -988,24 +2341,24 @@ export const createPixiTiledMapView = async ({
     if (characterLeft < deadZoneLeft) {
       nextScrollLeft = clampScrollOffset(
         characterLeft - horizontalMargin,
-        map.pixelWidth - viewportWidth
+        scaledMapPixelWidth - viewportWidth
       )
     } else if (characterRight > deadZoneRight) {
       nextScrollLeft = clampScrollOffset(
         characterRight + horizontalMargin - viewportWidth,
-        map.pixelWidth - viewportWidth
+        scaledMapPixelWidth - viewportWidth
       )
     }
 
     if (characterTop < deadZoneTop) {
       nextScrollTop = clampScrollOffset(
         characterTop - verticalMargin,
-        map.pixelHeight - viewportHeight
+        scaledMapPixelHeight - viewportHeight
       )
     } else if (characterBottom > deadZoneBottom) {
       nextScrollTop = clampScrollOffset(
         characterBottom + verticalMargin - viewportHeight,
-        map.pixelHeight - viewportHeight
+        scaledMapPixelHeight - viewportHeight
       )
     }
 
@@ -1030,7 +2383,10 @@ export const createPixiTiledMapView = async ({
   const tryMoveCharacter = (
     characterId: string,
     deltaX: number,
-    deltaY: number
+    deltaY: number,
+    options: {
+      preserveFacing?: boolean
+    } = {}
   ) => {
     const currentCharacter = getCharacterStateById(characterId)
     const desiredFacing = moveCharacterState({
@@ -1042,13 +2398,16 @@ export const createPixiTiledMapView = async ({
       mapWidth: map.width,
       mapHeight: map.height
     }).facing
+    const nextFacing = options.preserveFacing
+      ? currentCharacter.facing
+      : desiredFacing
     const blockingRects = getBlockingCollisionRects(characterId)
     let nextCharacter =
-      desiredFacing === currentCharacter.facing
+      nextFacing === currentCharacter.facing
         ? currentCharacter
         : {
             ...currentCharacter,
-            facing: desiredFacing
+            facing: nextFacing
           }
 
     if (deltaX !== 0) {
@@ -1101,7 +2460,12 @@ export const createPixiTiledMapView = async ({
       }
     }
 
-    if (nextCharacter.facing !== desiredFacing) {
+    if (options.preserveFacing) {
+      nextCharacter = {
+        ...nextCharacter,
+        facing: currentCharacter.facing
+      }
+    } else if (nextCharacter.facing !== desiredFacing) {
       nextCharacter = {
         ...nextCharacter,
         facing: desiredFacing
@@ -1155,7 +2519,13 @@ export const createPixiTiledMapView = async ({
       drainControllerRuntimeEventsIntoQueue()
       const now = performance.now()
 
+      maybeRespawnPlayer(now)
+
       for (const character of [...characterStates]) {
+        if (character.id === PLAYER_CHARACTER_ID && playerProfile.hp.current === 0) {
+          continue
+        }
+
         const intent = controllerRuntime.getIntent({
           character,
           deltaMilliseconds: app.ticker.deltaMS,
@@ -1163,34 +2533,193 @@ export const createPixiTiledMapView = async ({
           triggeredActions
         })
 
-        if (!intent) {
-          continue
-        }
+        if (intent) {
+          if (intent.movement) {
+            tryMoveCharacter(character.id, intent.movement.x, intent.movement.y)
+          }
 
-        if (intent.movement) {
-          tryMoveCharacter(character.id, intent.movement.x, intent.movement.y)
-        }
+          if (isSceneTransitionPending) {
+            return
+          }
 
-        if (isSceneTransitionPending) {
-          return
-        }
+          drainControllerRuntimeEventsIntoQueue()
 
-        drainControllerRuntimeEventsIntoQueue()
+          if (intent.actions?.includes('interact')) {
+            gameEventQueue.enqueue({
+              kind: 'interaction-requested',
+              sourceCharacterId: character.id
+            })
+          }
 
-        if (intent.actions?.includes('interact')) {
-          gameEventQueue.enqueue({
-            kind: 'interaction-requested',
-            sourceCharacterId: character.id
-          })
+          if (
+            intent.actions?.includes('attack') &&
+            character.id === PLAYER_CHARACTER_ID
+          ) {
+            triggerPlayerAttack(now)
+          }
         }
 
         if (
-          intent.actions?.includes('attack') &&
-          character.id === PLAYER_CHARACTER_ID
+          character.appearanceType.startsWith('monster_') &&
+          monsterAnimationTexturesByAppearanceType[
+            character.appearanceType as MonsterAppearanceType
+          ]
         ) {
-          triggerPlayerAttack(now)
+          if (maybeRespawnMonster(character.id, now)) {
+            continue
+          }
+
+          if (isMonsterCombatStateDefeated(character.id)) {
+            continue
+          }
+
+          const monsterCharacter = getCharacterStateById(character.id)
+          const monsterBehaviorConfig =
+            getMonsterBehaviorConfig(monsterCharacter)
+          let behaviorState = getMonsterPigBehaviorState(character.id)
+          const monsterDistanceToPlayer =
+            getMonsterDistanceToPlayer(monsterCharacter)
+
+          if (
+            behaviorState.isAggroed &&
+            monsterDistanceToPlayer > monsterBehaviorConfig.deAggroRangeTiles
+          ) {
+            monsterPigBehaviorStates.set(character.id, {
+              ...behaviorState,
+              isAggroed: false,
+              nextAttackAtMilliseconds: 0,
+              attackUntilMilliseconds: 0,
+              hitReactionUntilMilliseconds: 0
+            })
+            behaviorState = getMonsterPigBehaviorState(character.id)
+            syncMonsterAnimation(character.id, 'idle', {
+              forceRestart: true
+            })
+          }
+
+          if (behaviorState.hitReactionUntilMilliseconds > now) {
+            syncMonsterAnimation(character.id, 'hit')
+            continue
+          }
+
+          if (behaviorState.attackUntilMilliseconds > now) {
+            syncMonsterAnimation(character.id, 'attack')
+            continue
+          }
+
+          if (
+            !behaviorState.isAggroed &&
+            isMonsterWithinRange(
+              monsterCharacter,
+              monsterBehaviorConfig.aggroRangeTiles
+            )
+          ) {
+            setMonsterPigAggro(character.id, now, monsterBehaviorConfig)
+            behaviorState = getMonsterPigBehaviorState(character.id)
+          }
+
+          if (behaviorState.isAggroed) {
+            const playerCharacter = getCharacterStateById(PLAYER_CHARACTER_ID)
+            const monsterCenterX =
+              monsterCharacter.position.x +
+              monsterCharacter.collisionSize.width / 2
+            const monsterCenterY =
+              monsterCharacter.position.y +
+              monsterCharacter.collisionSize.height / 2
+            const playerCenterX =
+              playerCharacter.position.x +
+              playerCharacter.collisionSize.width / 2
+            const playerCenterY =
+              playerCharacter.position.y + playerCharacter.collisionSize.height / 2
+            const deltaX = playerCenterX - monsterCenterX
+            const deltaY = playerCenterY - monsterCenterY
+            const distance = Math.hypot(deltaX, deltaY)
+
+            if (
+              behaviorState.nextAttackAtMilliseconds <= now &&
+              isMonsterWithinAttackRange(
+                monsterCharacter,
+                playerCharacter,
+                monsterBehaviorConfig
+              )
+            ) {
+              const combatState = monsterCombatStates.get(character.id)
+
+              if (combatState) {
+                setMonsterPigAttackState(
+                  character.id,
+                  now,
+                  monsterBehaviorConfig
+                )
+                monsterContactDamageLockedUntilById.set(
+                  character.id,
+                  now + monsterBehaviorConfig.attackDurationMilliseconds
+                )
+                applyDamageToPlayer(
+                  Math.max(1, combatState.contactDamage + 1),
+                  now,
+                  monsterCharacter
+                )
+                knockbackCharacterAwayFromCharacter(
+                  PLAYER_CHARACTER_ID,
+                  monsterCharacter,
+                  0.12
+                )
+                syncMonsterAnimation(character.id, 'attack')
+                continue
+              }
+            }
+
+            if (distance > 0) {
+              const stepDistance =
+                (monsterBehaviorConfig.chaseSpeedTilesPerSecond *
+                  app.ticker.deltaMS) /
+                1000
+
+              tryMoveCharacter(
+                character.id,
+                (deltaX / distance) * stepDistance,
+                (deltaY / distance) * stepDistance
+              )
+            }
+
+            syncMonsterAnimation(character.id, 'run')
+            continue
+          }
+
+          const patrolState =
+            monsterPatrolStates.get(character.id) ??
+            createMonsterPatrolState(monsterCharacter)
+          const nextPatrolStep = stepMonsterPatrol({
+            character: monsterCharacter,
+            patrolState,
+            deltaMilliseconds: app.ticker.deltaMS,
+            nowMilliseconds: now,
+            mapWidth: map.width,
+            mapHeight: map.height,
+            speedTilesPerSecond: monsterBehaviorConfig.patrolSpeedTilesPerSecond,
+            random: Math.random
+          })
+
+          monsterPatrolStates.set(character.id, nextPatrolStep.patrolState)
+
+          if (nextPatrolStep.movement) {
+            tryMoveCharacter(
+              character.id,
+              nextPatrolStep.movement.x,
+              nextPatrolStep.movement.y
+            )
+            syncMonsterAnimation(character.id, 'run')
+          } else {
+            syncMonsterAnimation(character.id, 'idle')
+          }
         }
       }
+
+      resolvePlayerAttackDamage(now)
+      resolveMonsterContactDamage(now)
+      resolveMonsterGoldDropPickups()
+      syncActiveMonsterGoldDrops(now)
 
       const emittedEvents = processInteractionEvents({
         events: gameEventQueue.drain(),
@@ -1211,14 +2740,29 @@ export const createPixiTiledMapView = async ({
           event.durationMilliseconds
         )
 
+        if (
+          event.message === '!' &&
+          getCharacterStateById(event.characterId).appearanceType.startsWith(
+            'monster_'
+          )
+        ) {
+          setMonsterPigAggro(
+            event.characterId,
+            now,
+            getMonsterBehaviorConfig(getCharacterStateById(event.characterId))
+          )
+        }
+
         if (event.characterId === BLACKSMITH_SHOP_NPC_ID) {
           setBlacksmithShopOpen(true)
         }
       }
 
       pruneExpiredCharacterMessages(now)
+      pruneExpiredCharacterDamageTexts(now)
       syncActiveCharacterMessages()
-      syncPlayerWeaponSprite(getCharacterStateById(PLAYER_CHARACTER_ID))
+      syncActiveCharacterDamageTexts(now)
+      syncPlayerCharacterVisual(now)
       triggeredActions.clear()
       lastRuntimeErrorMessage = undefined
     } catch (error) {
@@ -1246,6 +2790,10 @@ export const createPixiTiledMapView = async ({
         setPlayerUiOpen(!isPlayerUiOpen)
       }
 
+      return
+    }
+
+    if (playerProfile.hp.current === 0) {
       return
     }
 
@@ -1340,6 +2888,7 @@ export const createPixiTiledMapView = async ({
   app.ticker.add(playerShopOverlay.syncFrame, undefined, UPDATE_PRIORITY.UTILITY)
   syncAllCharacterSprites()
   centerViewportOnCharacter(getCharacterStateById(cameraTargetCharacterId))
+  showSceneIntroBanner()
   mapOverlay.syncFrame()
   playerHudOverlay.syncFrame()
   playerInventoryOverlay.syncFrame()
@@ -1362,11 +2911,29 @@ export const createPixiTiledMapView = async ({
     app.ticker.remove(playerInventoryOverlay.syncFrame)
     app.ticker.remove(playerShopOverlay.syncFrame)
     gameEventQueue.clear()
+    monsterPatrolStates.clear()
+    monsterSpawnStates.clear()
+    monsterCombatStates.clear()
+    monsterContactDamageLockedUntilById.clear()
+    monsterRespawnAtById.clear()
+    for (const monsterGoldDrop of monsterGoldDrops.values()) {
+      monsterGoldDrop.container.destroy({ children: true })
+    }
+    monsterGoldDrops.clear()
+    monsterPigAnimatedSprites.clear()
+    monsterPigAnimationModes.clear()
+    monsterPigBehaviorStates.clear()
+    for (const activeDamageText of activeCharacterDamageTexts.values()) {
+      activeDamageText.container.destroy({ children: true })
+    }
+    activeCharacterDamageTexts.clear()
+    window.clearTimeout(sceneIntroHideTimeoutId)
     for (const activeMessage of activeCharacterMessages.values()) {
       activeMessage.container.destroy({ children: true })
     }
     activeCharacterMessages.clear()
     runtimeWarningBannerElement.remove()
+    sceneIntroBannerElement.remove()
     mapOverlay.destroy()
     playerHudOverlay.destroy()
     playerInventoryOverlay.destroy()

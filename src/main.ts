@@ -21,6 +21,7 @@ import { parseTiledMap, parseTiledTileset } from './game/tiled/parseTiledMap'
 import { createInitialPlayerEquipment } from './game/playerEquipment'
 import { createInitialPlayerInventory } from './game/playerInventory'
 import { createInitialPlayerProfile } from './game/playerProfile'
+import { getSceneIntroMessage } from './game/sceneIntro'
 import { createPixiTiledMapView } from './rendering/createPixiTiledMapView'
 import type {
   SceneTransitionRequest
@@ -127,6 +128,7 @@ const bootstrapScene = async (
     playerEquipment,
     playerInventory,
     merchantInventory,
+    sceneIntroMessage: getSceneIntroMessage(sceneId),
     cameraTargetCharacterId: PLAYER_CHARACTER_ID,
     characterSpriteSheet: {
       tileset: tinyDungeonTileset,

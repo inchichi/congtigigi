@@ -25,9 +25,12 @@ export type PlayerProfile = {
   skills: PlayerSkillSlot[]
 }
 
+export const PLAYER_JOB_PROMOTION_LEVEL = 10
+export const PLAYER_STARTING_JOB = '초보자'
+
 export const createInitialPlayerProfile = (): PlayerProfile => ({
-  name: '아린',
-  job: '방랑자',
+  name: '준수',
+  job: PLAYER_STARTING_JOB,
   level: 1,
   hp: {
     current: 24,
@@ -65,3 +68,14 @@ export const createInitialPlayerProfile = (): PlayerProfile => ({
     }
   ]
 })
+
+export const getPlayerJobDisplayName = ({
+  job,
+  level
+}: Pick<PlayerProfile, 'job' | 'level'>): string =>
+  level >= PLAYER_JOB_PROMOTION_LEVEL ? `${job} · 전직 가능` : job
+
+export const isPlayerJobPromotionAvailable = ({
+  level
+}: Pick<PlayerProfile, 'level'>): boolean =>
+  level >= PLAYER_JOB_PROMOTION_LEVEL

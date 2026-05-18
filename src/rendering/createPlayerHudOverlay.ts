@@ -1,4 +1,8 @@
-import type { PlayerProfile } from '../game/playerProfile'
+import {
+  getPlayerJobDisplayName,
+  type PlayerProfile
+} from '../game/playerProfile'
+import { getResponsiveUiScale } from './getResponsiveUiScale'
 
 type CreatePlayerHudOverlayInput = {
   mountElement: HTMLElement
@@ -78,7 +82,7 @@ export const createPlayerHudOverlay = ({
   nameElement.className = 'player-hud-overlay__name'
   nameElement.textContent = profile.name
   jobElement.className = 'player-hud-overlay__job'
-  jobElement.textContent = profile.job
+  jobElement.textContent = getPlayerJobDisplayName(profile)
   levelBadge.className = 'player-hud-overlay__level'
   levelBadge.textContent = `레벨 ${profile.level}`
   attackBadge.className = 'player-hud-overlay__attack-badge'
@@ -199,6 +203,7 @@ export const createPlayerHudOverlay = ({
   }
 
   const syncLayout = () => {
+    const uiScale = getResponsiveUiScale()
     const panelWidth = clamp(
       window.innerWidth - HUD_MARGIN * 2,
       HUD_PANEL_MIN_WIDTH,
@@ -219,8 +224,9 @@ export const createPlayerHudOverlay = ({
     panel.style.width = `${panelWidth}px`
     panel.style.height = `${panelHeight}px`
     panel.style.left = '50%'
-    panel.style.bottom = `${HUD_MARGIN}px`
-    panel.style.transform = 'translateX(-50%)'
+    panel.style.bottom = `${Math.round(HUD_MARGIN * uiScale)}px`
+    panel.style.transformOrigin = 'center bottom'
+    panel.style.transform = `translateX(-50%) scale(${uiScale})`
 
     setSpriteFrame(bagButton, BUTTON_SQUARE_FRAME)
     bagButton.classList.toggle(

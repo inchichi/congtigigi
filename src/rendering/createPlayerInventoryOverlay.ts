@@ -15,6 +15,8 @@ import {
   equipPlayerInventorySlot,
   unequipPlayerEquipmentSlot
 } from '../game/playerLoadout'
+import { getPlayerJobDisplayName } from '../game/playerProfile'
+import { getResponsiveUiScale } from './getResponsiveUiScale'
 
 type CreatePlayerInventoryOverlayInput = {
   mountElement: HTMLElement
@@ -294,7 +296,7 @@ export const createPlayerInventoryOverlay = ({
   equipmentCenterName.className = 'player-inventory-overlay__equipment-center-name'
   equipmentCenterName.textContent = profile.name
   equipmentCenterJob.className = 'player-inventory-overlay__equipment-center-job'
-  equipmentCenterJob.textContent = profile.job
+  equipmentCenterJob.textContent = getPlayerJobDisplayName(profile)
   equipmentCenterLevel.className =
     'player-inventory-overlay__equipment-center-level'
   equipmentCenterLevel.textContent = `레벨 ${profile.level}`
@@ -556,6 +558,7 @@ export const createPlayerInventoryOverlay = ({
 
   const syncLayout = () => {
     const isOpen = getIsOpen()
+    const uiScale = getResponsiveUiScale()
 
     overlayRoot.hidden = !isOpen
     overlayRoot.style.display = isOpen ? '' : 'none'
@@ -591,6 +594,8 @@ export const createPlayerInventoryOverlay = ({
 
     backdropButton.hidden = false
     panel.hidden = false
+    panel.style.transformOrigin = 'center center'
+    panel.style.transform = `translate(-50%, -50%) scale(${uiScale})`
 
     const inventory = getInventory()
     const equipment = getEquipment()
@@ -636,7 +641,7 @@ export const createPlayerInventoryOverlay = ({
 
     equipmentSectionSummary.textContent = `${equipment.setName} • 레벨 ${equipment.level}`
     equipmentCenterName.textContent = profile.name
-    equipmentCenterJob.textContent = profile.job
+    equipmentCenterJob.textContent = getPlayerJobDisplayName(profile)
     equipmentCenterLevel.textContent = `레벨 ${profile.level}`
     equipmentCenterSet.textContent = equipment.setName
 

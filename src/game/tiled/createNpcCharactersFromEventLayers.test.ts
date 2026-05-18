@@ -43,7 +43,14 @@ describe('createNpcCharactersFromEventLayers', () => {
         <property name="controller.moveSpeedTilesPerSecond" type="float" value="1.5"/>
       </properties>
     </object>
-    <object id="9" name="signpost" type="trigger" x="32" y="32"/>
+    <object id="9" name="꿀꿀이" type="character" x="176" y="160" width="32" height="32">
+      <properties>
+        <property name="type" value="monster_pig"/>
+        <property name="blocksMovement" type="bool" value="true"/>
+        <property name="monster.level" type="int" value="3"/>
+      </properties>
+    </object>
+    <object id="10" name="signpost" type="trigger" x="32" y="32"/>
   </objectgroup>
 </map>`,
       externalTilesets: {
@@ -101,6 +108,26 @@ describe('createNpcCharactersFromEventLayers', () => {
           radiusInTiles: 3,
           moveSpeedTilesPerSecond: 1.5,
           config: {}
+        }
+      },
+      {
+        id: '꿀꿀이',
+        appearanceType: 'monster_pig',
+        level: 3,
+        position: {
+          x: 5,
+          y: 4
+        },
+        facing: 'down',
+        collisionSize: {
+          width: 1,
+          height: 1
+        },
+        blocksMovement: true,
+        controller: {
+          kind: 'npc',
+          behavior: 'idle',
+          moveSpeedTilesPerSecond: 8
         }
       }
     ])

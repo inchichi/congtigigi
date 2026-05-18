@@ -16,6 +16,7 @@ export type CharacterControllerIntent = {
 export type CharacterState = {
   id: string
   appearanceType: string
+  level?: number
   position: {
     x: number
     y: number
@@ -74,6 +75,7 @@ type CreateInitialPlayerCharacterInput = {
 type CreateNpcCharacterInput = {
   id: string
   appearanceType: string
+  level?: number
   position: {
     x: number
     y: number
@@ -163,20 +165,29 @@ export const createInitialPlayerCharacter = ({
 export const createNpcCharacter = ({
   id,
   appearanceType,
+  level,
   position,
   facing = 'down',
   collisionSize,
   blocksMovement = true,
   controller = createIdleNpcCharacterController()
-}: CreateNpcCharacterInput): CharacterState => ({
-  id,
-  appearanceType,
-  position,
-  facing,
-  collisionSize,
-  blocksMovement,
-  controller
-})
+}: CreateNpcCharacterInput): CharacterState => {
+  const character: CharacterState = {
+    id,
+    appearanceType,
+    position,
+    facing,
+    collisionSize,
+    blocksMovement,
+    controller
+  }
+
+  if (level !== undefined) {
+    character.level = level
+  }
+
+  return character
+}
 
 export const getCharacterMoveDirectionFromKey = (
   key: string

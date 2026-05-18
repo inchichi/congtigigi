@@ -60,11 +60,15 @@ const createNpcCharacterFromEvent = ({
     typeof event.properties.blocksMovement === 'boolean'
       ? event.properties.blocksMovement
       : true
+  const level =
+    getNumberProperty(event.properties, 'monster.level') ??
+    getNumberProperty(event.properties, 'level')
   const controller = createControllerFromEvent(event)
 
   return createNpcCharacter({
     id: event.name || `character-${event.id}`,
     appearanceType: event.appearanceType ?? '',
+    level,
     position: {
       x: (event.x - characterPixelWidth / 2) / tileWidth,
       y: (event.y - characterPixelHeight) / tileHeight

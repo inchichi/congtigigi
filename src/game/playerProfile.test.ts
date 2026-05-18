@@ -1,12 +1,16 @@
 import { describe, expect, it } from 'vitest'
 
-import { createInitialPlayerProfile } from './playerProfile'
+import {
+  createInitialPlayerProfile,
+  getPlayerJobDisplayName,
+  isPlayerJobPromotionAvailable
+} from './playerProfile'
 
 describe('createInitialPlayerProfile', () => {
   it('creates the default player HUD profile', () => {
     expect(createInitialPlayerProfile()).toEqual({
-      name: '아린',
-      job: '방랑자',
+      name: '준수',
+      job: '초보자',
       level: 1,
       hp: {
         current: 24,
@@ -44,5 +48,25 @@ describe('createInitialPlayerProfile', () => {
         }
       ]
     })
+  })
+
+  it('shows promotion availability at level 10', () => {
+    expect(
+      getPlayerJobDisplayName({
+        job: '초보자',
+        level: 9
+      })
+    ).toBe('초보자')
+    expect(
+      getPlayerJobDisplayName({
+        job: '초보자',
+        level: 10
+      })
+    ).toBe('초보자 · 전직 가능')
+    expect(
+      isPlayerJobPromotionAvailable({
+        level: 10
+      })
+    ).toBe(true)
   })
 })

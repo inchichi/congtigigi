@@ -161,17 +161,17 @@ describe('parseTiledMap', () => {
       }
     })
 
-    expect(map.width).toBe(32)
-    expect(map.height).toBe(20)
-    expect(map.pixelWidth).toBe(1024)
-    expect(map.pixelHeight).toBe(640)
+    expect(map.width).toBe(50)
+    expect(map.height).toBe(50)
+    expect(map.pixelWidth).toBe(1600)
+    expect(map.pixelHeight).toBe(1600)
     expect(map.layers).toHaveLength(1)
     expect(map.layers[0].name).toBe('ground')
     expect(map.layers[0].tiles[0]).toMatchObject({
       x: 0,
       y: 0,
-      gid: 308,
-      localId: 307,
+      gid: 517,
+      localId: 516,
       flipHorizontally: false,
       flipVertically: false,
       flipDiagonally: false
@@ -180,7 +180,73 @@ describe('parseTiledMap', () => {
       'characters',
       'portals'
     ])
-    expect(map.eventLayers[0].events).toHaveLength(0)
+    expect(map.eventLayers[0].events).toHaveLength(4)
+    expect(map.eventLayers[0].events).toMatchObject([
+      {
+        id: 5,
+        name: '꿀꿀이-1',
+        className: 'character',
+        x: 224,
+        y: 160,
+        width: 32,
+        height: 32,
+        visible: true,
+        properties: {
+          blocksMovement: true,
+          'monster.level': 3,
+          type: 'monster_pig'
+        },
+        appearanceType: 'monster_pig'
+      },
+      {
+        id: 6,
+        name: '말캉이-1',
+        className: 'character',
+        x: 416,
+        y: 224,
+        width: 32,
+        height: 32,
+        visible: true,
+        properties: {
+          blocksMovement: true,
+          'monster.level': 1,
+          type: 'monster_slime'
+        },
+        appearanceType: 'monster_slime'
+      },
+      {
+        id: 8,
+        name: '꿀꿀이-2',
+        className: 'character',
+        x: 832,
+        y: 160,
+        width: 32,
+        height: 32,
+        visible: true,
+        properties: {
+          blocksMovement: true,
+          'monster.level': 3,
+          type: 'monster_pig'
+        },
+        appearanceType: 'monster_pig'
+      },
+      {
+        id: 9,
+        name: '말캉이-2',
+        className: 'character',
+        x: 512,
+        y: 512,
+        width: 32,
+        height: 32,
+        visible: true,
+        properties: {
+          blocksMovement: true,
+          'monster.level': 1,
+          type: 'monster_slime'
+        },
+        appearanceType: 'monster_slime'
+      }
+    ])
     expect(map.eventLayers[1].events[0]).toMatchObject({
       id: 4,
       name: 'return_gate',

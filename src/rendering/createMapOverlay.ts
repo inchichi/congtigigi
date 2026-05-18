@@ -1,8 +1,11 @@
+import { getResponsiveUiScale } from './getResponsiveUiScale'
+
 type CreateMapOverlayInput = {
   mountElement: HTMLElement
   sourceCanvas: HTMLCanvasElement
   mapPixelWidth: number
   mapPixelHeight: number
+  sceneScale: number
   getFocusPoint: () => {
     x: number
     y: number
@@ -25,6 +28,7 @@ export const createMapOverlay = ({
   sourceCanvas,
   mapPixelWidth,
   mapPixelHeight,
+  sceneScale,
   getFocusPoint
 }: CreateMapOverlayInput): MapOverlay => {
   const overlayRoot = document.createElement('div')
@@ -78,15 +82,27 @@ export const createMapOverlay = ({
     }
 
     const focusPoint = getFocusPoint()
+    const sourceScaleX = sourceCanvas.width / mapPixelWidth
+    const sourceScaleY = sourceCanvas.height / mapPixelHeight
     previewContext.setTransform(1, 0, 0, 1, 0, 0)
     previewContext.clearRect(0, 0, backingWidth, backingHeight)
     previewContext.imageSmoothingEnabled = false
 
     if (isExpanded) {
-      previewContext.drawImage(sourceCanvas, 0, 0, backingWidth, backingHeight)
+      previewContext.drawImage(
+        sourceCanvas,
+        0,
+        0,
+        sourceCanvas.width,
+        sourceCanvas.height,
+        0,
+        0,
+        backingWidth,
+        backingHeight
+      )
 
-      const scaleX = displayWidth / mapPixelWidth
-      const scaleY = displayHeight / mapPixelHeight
+      const scaleX = displayWidth / (mapPixelWidth * sceneScale)
+      const scaleY = displayHeight / (mapPixelHeight * sceneScale)
       const viewportWidth = Math.max(
         1,
         Math.min(displayWidth, Math.round(mountElement.clientWidth * scaleX))
@@ -137,10 +153,10 @@ export const createMapOverlay = ({
 
     previewContext.drawImage(
       sourceCanvas,
-      sourceLeft,
-      sourceTop,
-      focusWindowSize,
-      focusWindowSize,
+      sourceLeft * sourceScaleX,
+      sourceTop * sourceScaleY,
+      focusWindowSize * sourceScaleX,
+      focusWindowSize * sourceScaleY,
       0,
       0,
       backingWidth,
@@ -177,20 +193,28 @@ export const createMapOverlay = ({
   }
 
   const syncLayout = () => {
+    const uiScale = getResponsiveUiScale()
     const availableWidth = isExpanded
       ? Math.max(1, window.innerWidth - OVERLAY_MARGIN * 2)
-      : Math.max(1, Math.min(COLLAPSED_MAX_SIZE, window.innerWidth - OVERLAY_MARGIN * 2))
+      : Math.max(
+          1,
+          Math.min(COLLAPSED_MAX_SIZE, window.innerWidth - OVERLAY_MARGIN * 2)
+        )
     const availableHeight = isExpanded
       ? Math.max(1, window.innerHeight - OVERLAY_MARGIN * 2)
-      : Math.max(1, Math.min(COLLAPSED_MAX_SIZE, window.innerHeight - OVERLAY_MARGIN * 2))
+      : Math.max(
+          1,
+          Math.min(COLLAPSED_MAX_SIZE, window.innerHeight - OVERLAY_MARGIN * 2)
+        )
     const scale = isExpanded
       ? Math.min(availableWidth / mapPixelWidth, availableHeight / mapPixelHeight)
-      : Math.min(
-          1,
-          Math.min(availableWidth / mapPixelWidth, availableHeight / mapPixelHeight)
-        )
-    const nextDisplayWidth = Math.max(1, Math.round(mapPixelWidth * scale))
-    const nextDisplayHeight = Math.max(1, Math.round(mapPixelHeight * scale))
+      : Math.min(1, Math.min(availableWidth, availableHeight) / COLLAPSED_MAX_SIZE)
+    const nextDisplayWidth = isExpanded
+      ? Math.max(1, Math.round(mapPixelWidth * scale))
+      : Math.max(1, Math.round(COLLAPSED_MAX_SIZE * scale))
+    const nextDisplayHeight = isExpanded
+      ? Math.max(1, Math.round(mapPixelHeight * scale))
+      : Math.max(1, Math.round(COLLAPSED_MAX_SIZE * scale))
     const nextBackingWidth = Math.max(
       1,
       Math.round(nextDisplayWidth * (window.devicePixelRatio || 1))
@@ -213,9 +237,13 @@ export const createMapOverlay = ({
       'world-map-overlay__panel--collapsed',
       !isExpanded
     )
-    panelButton.style.left = isExpanded ? '50%' : `${OVERLAY_MARGIN}px`
-    panelButton.style.top = isExpanded ? '50%' : `${OVERLAY_MARGIN}px`
-    panelButton.style.transform = isExpanded ? 'translate(-50%, -50%)' : 'none'
+    const scaledMargin = Math.round(OVERLAY_MARGIN * uiScale)
+    panelButton.style.left = isExpanded ? '50%' : `${scaledMargin}px`
+    panelButton.style.top = isExpanded ? '50%' : `${scaledMargin}px`
+    panelButton.style.transformOrigin = isExpanded ? 'center center' : 'top left'
+    panelButton.style.transform = isExpanded
+      ? `translate(-50%, -50%) scale(${uiScale})`
+      : `scale(${uiScale})`
     panelButton.style.width = `${displayWidth}px`
     panelButton.style.height = `${displayHeight}px`
     panelButton.style.cursor = isExpanded ? 'zoom-out' : 'zoom-in'
