@@ -2,6 +2,7 @@ import { CompositeTilemap } from '@pixi/tilemap'
 import {
   Application,
   Assets,
+  AnimatedSprite,
   Container,
   NineSliceSprite,
   Rectangle,
@@ -13,6 +14,7 @@ import {
 } from 'pixi.js'
 
 import {
+  PLAYER_CHARACTER_ID,
   getCharacterActionFromKey,
   getCharacterMoveDirectionFromKey,
   moveCharacterState
@@ -57,6 +59,11 @@ type TilesetRenderResources = {
   tileTextures: Texture[]
 }
 
+type SmearVfxRenderResources = {
+  horizontalTextures: Texture[]
+  verticalTextures: Texture[]
+}
+
 type TileTextureFrameSource = {
   columns: number
   margin: number
@@ -84,6 +91,42 @@ const UI_SPRITESHEET_URL = new URL(
   '../assets/spritesheets/uipack_rpg_sheet.json',
   import.meta.url
 ).href
+const PLAYER_WEAPON_TILE_LOCAL_ID = 117
+const PLAYER_WEAPON_TILE_FRAME_SOURCE: TileTextureFrameSource = {
+  columns: 12,
+  margin: 0,
+  spacing: 0,
+  tileWidth: 16,
+  tileHeight: 16
+}
+const SMEAR_VFX_HORIZONTAL_SPRITESHEET_URL = new URL(
+  '../assets/vfx/smear-vfx-01/smear-vfx-01-horizontal-1.png',
+  import.meta.url
+).href
+const SMEAR_VFX_VERTICAL_SPRITESHEET_URL = new URL(
+  '../assets/vfx/smear-vfx-01/smear-vfx-01-vertical-1.png',
+  import.meta.url
+).href
+const SMEAR_VFX_FRAME_SIZE = 48
+const PLAYER_WEAPON_WORLD_SCALE = 1.35
+const PLAYER_ATTACK_DURATION_MILLISECONDS = 220
+const PLAYER_ATTACK_TRAIL_PROGRESS_STEP = 0.12
+const PLAYER_ATTACK_TRAIL_ALPHA = [0.42, 0.28, 0.18, 0.1]
+const PLAYER_ATTACK_TRAIL_SPRITE_COUNT = PLAYER_ATTACK_TRAIL_ALPHA.length
+const PLAYER_ATTACK_SWING_X_OFFSET = 4
+const PLAYER_ATTACK_LIFT_Y_OFFSET = 3
+const PLAYER_ATTACK_ROTATION_OFFSET = 1.15
+const PLAYER_ATTACK_SCALE_BOOST = 0.06
+const PLAYER_WEAPON_PLACEMENT_RIGHT = {
+  x: 23,
+  y: 21,
+  rotation: 0.75
+}
+const PLAYER_WEAPON_PLACEMENT_LEFT = {
+  x: 9,
+  y: 21,
+  rotation: -0.75
+}
 const MESSAGE_PANEL_TEXTURE_NAME = 'panelInset_beige.png'
 const MESSAGE_PANEL_BORDER_SIZE = 8
 const MESSAGE_PANEL_PADDING_X = 12
@@ -103,6 +146,10 @@ const MESSAGE_TEXT_STYLE = new TextStyle({
   wordWrap: true,
   wordWrapWidth: MESSAGE_TEXT_MAX_WIDTH
 })
+const PLAYER_ATTACK_SLASH_EFFECT_SCALE_X = 1.55
+const PLAYER_ATTACK_SLASH_EFFECT_SCALE_Y = 1.35
+const PLAYER_ATTACK_SLASH_EFFECT_WIDE_FRAME_INDEX = 1
+const PLAYER_ATTACK_SLASH_EFFECT_WIDE_FRAME_X_MULTIPLIER = 1.2
 let messageFontsReadyPromise: Promise<void> | undefined
 
 export const createPixiTiledMapView = async ({
@@ -115,10 +162,12 @@ export const createPixiTiledMapView = async ({
   controllerRuntime
 }: CreatePixiTiledMapViewInput): Promise<Application> => {
   const app = new Application()
-  const [messagePanelTexture] = await Promise.all([
+  const [messagePanelTexture, smearVfxTextures] = await Promise.all([
     loadMessagePanelTexture(),
-    ensureMessageFontsLoaded()
+    loadSmearVfxTextures()
   ])
+
+  await ensureMessageFontsLoaded()
 
   await app.init({
     antialias: false,
@@ -177,6 +226,11 @@ export const createPixiTiledMapView = async ({
     characterSpriteSheet.tileset.tileWidth * characterSpriteSheet.scale
   const characterPixelHeight =
     characterSpriteSheet.tileset.tileHeight * characterSpriteSheet.scale
+  let playerAttackStartedAtMilliseconds: number | undefined
+  let playerAttackFacing: CharacterMoveDirection | undefined
+  let playerWeaponTrailSprites: Sprite[] = []
+  let playerWeaponSprite: Sprite | undefined
+  let playerSlashEffectSprite: AnimatedSprite | undefined
   let lastRuntimeErrorMessage: string | undefined
   let depthSortedLayer: Container | undefined
   let characterStates = characters.map((character) => ({
@@ -249,6 +303,11 @@ export const createPixiTiledMapView = async ({
     characterSpriteSheet.tileset,
     imageUrls,
     'nearest'
+  )
+  const playerWeaponTexture = createTileTexture(
+    characterTilesetResources.imageTexture,
+    PLAYER_WEAPON_TILE_FRAME_SOURCE,
+    PLAYER_WEAPON_TILE_LOCAL_ID
   )
 
   for (const layer of map.layers) {
@@ -346,6 +405,31 @@ export const createPixiTiledMapView = async ({
     sprite.roundPixels = true
     renderedCharacters.set(character.id, sprite)
     depthSortedLayer.addChild(sprite)
+
+    if (character.id === PLAYER_CHARACTER_ID) {
+      playerWeaponTrailSprites = Array.from(
+        { length: PLAYER_ATTACK_TRAIL_SPRITE_COUNT },
+        (_, index) => {
+          const trailSprite = new Sprite(playerWeaponTexture)
+
+          trailSprite.label = `character:player:weapon-trail:${index}`
+          trailSprite.anchor.set(0.5, 1)
+          trailSprite.visible = false
+          trailSprite.roundPixels = true
+          trailSprite.zIndex = index + 1
+          depthSortedLayer.addChild(trailSprite)
+
+          return trailSprite
+        }
+      )
+      playerWeaponSprite = new Sprite(playerWeaponTexture)
+      playerWeaponSprite.label = 'character:player:weapon'
+      playerWeaponSprite.anchor.set(0.5, 1)
+      playerWeaponSprite.visible = false
+      playerWeaponSprite.roundPixels = true
+      playerWeaponSprite.zIndex = PLAYER_ATTACK_TRAIL_SPRITE_COUNT + 1
+      depthSortedLayer.addChild(playerWeaponSprite)
+    }
   }
   world.addChild(messageLayer)
 
@@ -384,6 +468,112 @@ export const createPixiTiledMapView = async ({
     for (const character of characterStates) {
       syncCharacterSprite(character)
     }
+  }
+
+  const clearPlayerAttackSprites = () => {
+    playerAttackStartedAtMilliseconds = undefined
+    playerAttackFacing = undefined
+
+    if (playerWeaponSprite) {
+      playerWeaponSprite.visible = false
+    }
+
+    for (const trailSprite of playerWeaponTrailSprites) {
+      trailSprite.visible = false
+    }
+  }
+
+  const syncPlayerWeaponSprite = (character: CharacterState, now: number) => {
+    if (!playerWeaponSprite) {
+      return
+    }
+
+    const attackElapsedMilliseconds =
+      playerAttackStartedAtMilliseconds === undefined
+        ? undefined
+        : now - playerAttackStartedAtMilliseconds
+    const attackProgress =
+      attackElapsedMilliseconds === undefined ||
+      attackElapsedMilliseconds < 0 ||
+      attackElapsedMilliseconds >= PLAYER_ATTACK_DURATION_MILLISECONDS
+        ? undefined
+        : attackElapsedMilliseconds / PLAYER_ATTACK_DURATION_MILLISECONDS
+
+    if (attackProgress === undefined) {
+      clearPlayerAttackSprites()
+      return
+    }
+
+    const attackFacing = playerAttackFacing ?? character.facing
+    const placement =
+      attackFacing === 'left'
+        ? PLAYER_WEAPON_PLACEMENT_LEFT
+        : PLAYER_WEAPON_PLACEMENT_RIGHT
+    const facingMultiplier = attackFacing === 'left' ? -1 : 1
+    const createPose = (progress: number | undefined) => {
+      if (progress === undefined) {
+        return {
+          x: placement.x,
+          y: placement.y,
+          rotation: placement.rotation,
+          scale: PLAYER_WEAPON_WORLD_SCALE
+        }
+      }
+
+      const swingAmount = Math.sin(progress * Math.PI)
+      const liftAmount = Math.sin(progress * Math.PI * 0.5)
+
+      return {
+        x:
+          placement.x +
+          facingMultiplier * PLAYER_ATTACK_SWING_X_OFFSET * swingAmount,
+        y: placement.y - PLAYER_ATTACK_LIFT_Y_OFFSET * liftAmount,
+        rotation:
+          placement.rotation +
+          facingMultiplier * PLAYER_ATTACK_ROTATION_OFFSET * swingAmount,
+        scale: PLAYER_WEAPON_WORLD_SCALE + PLAYER_ATTACK_SCALE_BOOST * swingAmount
+      }
+    }
+    const applyPose = (
+      sprite: Sprite,
+      pose: {
+        x: number
+        y: number
+        rotation: number
+        scale: number
+      },
+      alpha: number
+    ) => {
+      sprite.visible = true
+      sprite.position.set(
+        character.position.x * map.tileWidth + pose.x,
+        character.position.y * map.tileHeight + pose.y
+      )
+      sprite.rotation = pose.rotation
+      sprite.scale.set(pose.scale)
+      sprite.alpha = alpha
+    }
+
+    applyPose(playerWeaponSprite, createPose(attackProgress), 1)
+
+    for (let index = 0; index < playerWeaponTrailSprites.length; index += 1) {
+      const trailSprite = playerWeaponTrailSprites[index]
+      const trailProgress =
+        attackProgress - (index + 1) * PLAYER_ATTACK_TRAIL_PROGRESS_STEP
+
+      if (trailProgress <= 0) {
+        trailSprite.visible = false
+        continue
+      }
+
+      applyPose(
+        trailSprite,
+        createPose(trailProgress),
+        PLAYER_ATTACK_TRAIL_ALPHA[index] ?? 0.1
+      )
+    }
+
+    depthSortedLayer?.sortChildren()
   }
 
   const syncCharacterMessageElement = (characterId: string) => {
@@ -746,6 +936,7 @@ export const createPixiTiledMapView = async ({
 
       pruneExpiredCharacterMessages(now)
       syncActiveCharacterMessages()
+      syncPlayerWeaponSprite(getCharacterStateById(PLAYER_CHARACTER_ID), now)
       triggeredActions.clear()
       lastRuntimeErrorMessage = undefined
     } catch (error) {
@@ -763,7 +954,94 @@ export const createPixiTiledMapView = async ({
     }
   }
 
+  const isAttackKey = (event: KeyboardEvent): boolean =>
+    event.code === 'KeyA' || event.key.toLowerCase() === 'a'
+  const triggerPlayerAttack = (character: CharacterState, now: number) => {
+    playerAttackStartedAtMilliseconds = now
+    playerAttackFacing = character.facing
+  }
+  const clearPlayerSlashEffectSprite = () => {
+    if (!playerSlashEffectSprite) {
+      return
+    }
+
+    const sprite = playerSlashEffectSprite
+
+    playerSlashEffectSprite = undefined
+    sprite.removeFromParent()
+    sprite.destroy()
+  }
+  const playPlayerSlashEffect = (character: CharacterState) => {
+    clearPlayerSlashEffectSprite()
+
+    const isHorizontalSlash =
+      character.facing !== 'up' && character.facing !== 'down'
+    const slashTextures = isHorizontalSlash
+      ? smearVfxTextures.horizontalTextures
+      : smearVfxTextures.verticalTextures
+    const slashSprite = new AnimatedSprite(slashTextures)
+    const slashBaseScaleX =
+      character.facing === 'left'
+        ? -PLAYER_ATTACK_SLASH_EFFECT_SCALE_X
+        : PLAYER_ATTACK_SLASH_EFFECT_SCALE_X
+    const applySlashFrameScale = (frameIndex: number) => {
+      const frameScaleX =
+        isHorizontalSlash &&
+        frameIndex === PLAYER_ATTACK_SLASH_EFFECT_WIDE_FRAME_INDEX
+          ? PLAYER_ATTACK_SLASH_EFFECT_WIDE_FRAME_X_MULTIPLIER
+          : 1
+
+      slashSprite.scale.set(
+        slashBaseScaleX * frameScaleX,
+        PLAYER_ATTACK_SLASH_EFFECT_SCALE_Y
+      )
+    }
+
+    slashSprite.label = 'character:player:slash-effect'
+    slashSprite.anchor.set(0.5)
+    slashSprite.animationSpeed = 0.8
+    slashSprite.loop = false
+    slashSprite.roundPixels = true
+    slashSprite.position.set(
+      character.position.x * map.tileWidth + characterPixelWidth / 2,
+      character.position.y * map.tileHeight + characterPixelHeight / 2 - 1
+    )
+    applySlashFrameScale(0)
+    slashSprite.onFrameChange = (currentFrame) => {
+      applySlashFrameScale(currentFrame)
+    }
+    slashSprite.zIndex =
+      getCharacterDepthSortValue(
+        character.position.y,
+        characterPixelHeight,
+        map.tileHeight
+      ) + 1
+    slashSprite.onComplete = () => {
+      if (playerSlashEffectSprite === slashSprite) {
+        playerSlashEffectSprite = undefined
+      }
+      slashSprite.removeFromParent()
+      slashSprite.destroy()
+    }
+
+    playerSlashEffectSprite = slashSprite
+    depthSortedLayer?.addChild(slashSprite)
+    depthSortedLayer?.sortChildren()
+    slashSprite.play()
+  }
   const handleKeyDown = (event: KeyboardEvent) => {
+    if (isAttackKey(event)) {
+      event.preventDefault()
+      if (!event.repeat) {
+        triggerPlayerAttack(
+          getCharacterStateById(PLAYER_CHARACTER_ID),
+          performance.now()
+        )
+        playPlayerSlashEffect(getCharacterStateById(PLAYER_CHARACTER_ID))
+      }
+      return
+    }
+
     const action = getCharacterActionFromKey(event.key)
 
     if (action) {
@@ -788,6 +1066,10 @@ export const createPixiTiledMapView = async ({
   }
 
   const handleKeyUp = (event: KeyboardEvent) => {
+    if (isAttackKey(event)) {
+      return
+    }
+
     const action = getCharacterActionFromKey(event.key)
 
     if (action) {
@@ -808,6 +1090,8 @@ export const createPixiTiledMapView = async ({
     pressedDirections.clear()
     pressedActions.clear()
     triggeredActions.clear()
+    clearPlayerAttackSprites()
+    clearPlayerSlashEffectSprite()
   }
 
   const handleVisibilityChange = () => {
@@ -881,6 +1165,46 @@ const ensureMessageFontsLoaded = async (): Promise<void> => {
   ]).then(() => undefined)
 
   return messageFontsReadyPromise
+}
+
+const loadSmearVfxTextures = async (): Promise<SmearVfxRenderResources> => {
+  const horizontalSpritesheet = await Assets.load<Texture>(
+    SMEAR_VFX_HORIZONTAL_SPRITESHEET_URL
+  )
+  const verticalSpritesheet = await Assets.load<Texture>(
+    SMEAR_VFX_VERTICAL_SPRITESHEET_URL
+  )
+
+  horizontalSpritesheet.source.scaleMode = 'nearest'
+  verticalSpritesheet.source.scaleMode = 'nearest'
+
+  return {
+    horizontalTextures: createSmearVfxFrameTextures(horizontalSpritesheet),
+    verticalTextures: createSmearVfxFrameTextures(verticalSpritesheet)
+  }
+}
+
+const createSmearVfxFrameTextures = (imageTexture: Texture): Texture[] => {
+  const frameCount = Math.floor(imageTexture.source.pixelWidth / SMEAR_VFX_FRAME_SIZE)
+
+  if (frameCount < 1) {
+    throw new Error(
+      `Expected at least one smear VFX frame in ${imageTexture.source.label ?? 'texture'}`
+    )
+  }
+
+  return Array.from({ length: frameCount }, (_, frameIndex) =>
+    new Texture({
+      source: imageTexture.source,
+      frame: new Rectangle(
+        frameIndex * SMEAR_VFX_FRAME_SIZE,
+        0,
+        SMEAR_VFX_FRAME_SIZE,
+        SMEAR_VFX_FRAME_SIZE
+      ),
+      orig: new Rectangle(0, 0, SMEAR_VFX_FRAME_SIZE, SMEAR_VFX_FRAME_SIZE)
+    })
+  )
 }
 
 const loadTilesetRenderResources = async (
