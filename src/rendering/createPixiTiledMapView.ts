@@ -33,6 +33,12 @@ import type { PlayerEquipment } from '../game/playerEquipment'
 import type { PlayerInventory } from '../game/playerInventory'
 import type { PlayerProfile } from '../game/playerProfile'
 import {
+  getPlayerMovementSpeedTilesPerSecond,
+  getPlayerPhysicalAttackPower,
+  shouldPlayerEvadeDamage
+} from '../game/playerStatEffects'
+import { grantPlayerExperience } from '../game/playerExperience'
+import {
   createMonsterPatrolState,
   stepMonsterPatrol,
   type MonsterPatrolState
@@ -43,7 +49,10 @@ import {
   isMonsterDefeated,
   type MonsterCombatState
 } from '../game/monsterCombat'
-import { getMonsterGoldDropAmount } from '../game/monsterRewards'
+import {
+  getMonsterExperienceDropAmount,
+  getMonsterGoldDropAmount
+} from '../game/monsterRewards'
 import { resolveCharacterInteractionTarget } from '../game/interaction/resolveCharacterInteractionTarget'
 import {
   createMapPortalsFromEventLayers,
@@ -66,6 +75,8 @@ import { createMapOverlay } from './createMapOverlay'
 import { createBlacksmithShopOverlay } from './createBlacksmithShopOverlay'
 import { createPlayerHudOverlay } from './createPlayerHudOverlay'
 import { createPlayerInventoryOverlay } from './createPlayerInventoryOverlay'
+import { createPlayerStatOverlay } from './createPlayerStatOverlay'
+import { createPlayerSkillOverlay } from './createPlayerSkillOverlay'
 import type { MonsterAnimationTextures } from './monsterAnimationTextures'
 import { loadMonsterPigAnimationTextures } from './loadMonsterPigAnimationTextures'
 import { loadMonsterSlimeAnimationTextures } from './loadMonsterSlimeAnimationTextures'
@@ -152,6 +163,7 @@ type MonsterGoldDrop = {
 type RenderedCharacterNode = {
   container: Container
   sprite: Sprite
+  displayLabel?: Text
   levelBadge?: Text
   monsterHealthBar?: {
     container: Container
@@ -239,6 +251,28 @@ const DAMAGE_TEXT_STYLE = new TextStyle({
     width: 3
   }
 })
+const EVADE_TEXT_STYLE = new TextStyle({
+  align: 'center',
+  fill: 0xe6f79c,
+  fontFamily: '"Jersey 25", NeoDunggeunmo, monospace',
+  fontSize: 16,
+  lineHeight: 18,
+  stroke: {
+    color: 0x324b12,
+    width: 3
+  }
+})
+const LEVEL_UP_TEXT_STYLE = new TextStyle({
+  align: 'center',
+  fill: 0xffdf7a,
+  fontFamily: '"Jersey 25", NeoDunggeunmo, monospace',
+  fontSize: 16,
+  lineHeight: 18,
+  stroke: {
+    color: 0x3b2600,
+    width: 3
+  }
+})
 const BLACKSMITH_SHOP_NPC_ID = 'blacksmith'
 const MONSTER_PIG_APPEARANCE_TYPE = 'monster_pig'
 const MONSTER_SLIME_APPEARANCE_TYPE = 'monster_slime'
@@ -260,6 +294,7 @@ const MONSTER_CONTACT_DAMAGE_COOLDOWN_MILLISECONDS = 900
 const PLAYER_ATTACK_PROBE_DISTANCE_IN_TILES = 1.2
 const DAMAGE_TEXT_FLOAT_DISTANCE = 16
 const DAMAGE_TEXT_DURATION_MILLISECONDS = 1000
+const EVADE_TEXT_DURATION_MILLISECONDS = 700
 const DAMAGE_TEXT_OFFSET_Y = 8
 const MONSTER_CONTACT_DAMAGE_TOUCH_TOLERANCE_TILES = 0.14
 const MONSTER_ATTACK_RANGE_TOUCH_TOLERANCE_TILES = 0.14
@@ -290,6 +325,21 @@ const MONSTER_LEVEL_BADGE_STYLE = new TextStyle({
     color: 0x2e2313,
     width: 3
   }
+})
+const SIGN_POST_LABEL_STYLE = new TextStyle({
+  align: 'center',
+  breakWords: true,
+  fill: 0xf4e7c5,
+  fontFamily: '"Jersey 25", NeoDunggeunmo, monospace',
+  fontSize: 11,
+  lineHeight: 13,
+  padding: 2,
+  stroke: {
+    color: 0x2e2313,
+    width: 3
+  },
+  wordWrap: true,
+  wordWrapWidth: 96
 })
 const MONSTER_HEALTH_BAR_WIDTH = 34
 const MONSTER_HEALTH_BAR_HEIGHT = 5
@@ -544,6 +594,8 @@ export const createPixiTiledMapView = async ({
     triggeredActions.clear()
   }
   let isPlayerUiOpen = false
+  let isPlayerStatOpen = false
+  let isPlayerSkillOpen = false
   let isBlacksmithShopOpen = false
   let playerHudOverlay: {
     syncFrame: () => void
@@ -553,6 +605,20 @@ export const createPixiTiledMapView = async ({
     destroy: () => {}
   }
   let playerInventoryOverlay: {
+    syncFrame: () => void
+    destroy: () => void
+  } = {
+    syncFrame: () => {},
+    destroy: () => {}
+  }
+  let playerStatOverlay: {
+    syncFrame: () => void
+    destroy: () => void
+  } = {
+    syncFrame: () => {},
+    destroy: () => {}
+  }
+  let playerSkillOverlay: {
     syncFrame: () => void
     destroy: () => void
   } = {
@@ -629,9 +695,25 @@ export const createPixiTiledMapView = async ({
     }
   })
   const syncPlayerUiOverlays = () => {
+    syncPlayerDerivedCharacterStats()
     playerHudOverlay.syncFrame()
     playerInventoryOverlay.syncFrame()
+    playerStatOverlay.syncFrame()
+    playerSkillOverlay.syncFrame()
     playerShopOverlay.syncFrame()
+  }
+  const syncPlayerDerivedCharacterStats = () => {
+    const playerCharacter = getCharacterStateById(PLAYER_CHARACTER_ID)
+
+    if (playerCharacter.controller.kind !== 'keyboard') {
+      return
+    }
+
+    playerCharacter.controller = {
+      ...playerCharacter.controller,
+      moveSpeedTilesPerSecond:
+        getPlayerMovementSpeedTilesPerSecond(playerProfile)
+    }
   }
   const showSceneIntroBanner = () => {
     if (!sceneIntroMessage) {
@@ -663,6 +745,36 @@ export const createPixiTiledMapView = async ({
 
     isPlayerUiOpen = nextIsOpen
     if (nextIsOpen) {
+      isPlayerStatOpen = false
+      isPlayerSkillOpen = false
+      isBlacksmithShopOpen = false
+    }
+    clearPressedInputState()
+    syncPlayerUiOverlays()
+  }
+  const setPlayerStatOpen = (nextIsOpen: boolean) => {
+    if (isPlayerStatOpen === nextIsOpen) {
+      return
+    }
+
+    isPlayerStatOpen = nextIsOpen
+    if (nextIsOpen) {
+      isPlayerUiOpen = false
+      isPlayerSkillOpen = false
+      isBlacksmithShopOpen = false
+    }
+    clearPressedInputState()
+    syncPlayerUiOverlays()
+  }
+  const setPlayerSkillOpen = (nextIsOpen: boolean) => {
+    if (isPlayerSkillOpen === nextIsOpen) {
+      return
+    }
+
+    isPlayerSkillOpen = nextIsOpen
+    if (nextIsOpen) {
+      isPlayerUiOpen = false
+      isPlayerStatOpen = false
       isBlacksmithShopOpen = false
     }
     clearPressedInputState()
@@ -676,16 +788,25 @@ export const createPixiTiledMapView = async ({
     isBlacksmithShopOpen = nextIsOpen
     if (nextIsOpen) {
       isPlayerUiOpen = false
+      isPlayerStatOpen = false
+      isPlayerSkillOpen = false
     }
     clearPressedInputState()
     syncPlayerUiOverlays()
   }
   const closeAllOverlays = () => {
-    if (!isPlayerUiOpen && !isBlacksmithShopOpen) {
+    if (
+      !isPlayerUiOpen &&
+      !isPlayerStatOpen &&
+      !isPlayerSkillOpen &&
+      !isBlacksmithShopOpen
+    ) {
       return
     }
 
     isPlayerUiOpen = false
+    isPlayerStatOpen = false
+    isPlayerSkillOpen = false
     isBlacksmithShopOpen = false
     clearPressedInputState()
     syncPlayerUiOverlays()
@@ -738,6 +859,26 @@ export const createPixiTiledMapView = async ({
       currentPlayerEquipment = nextEquipment
       onPlayerEquipmentChange(nextEquipment)
       syncPlayerCharacterVisual()
+      syncPlayerUiOverlays()
+    }
+  })
+  playerStatOverlay = createPlayerStatOverlay({
+    mountElement,
+    profile: playerProfile,
+    getIsOpen: () => isPlayerStatOpen,
+    onRequestOpenChange: setPlayerStatOpen,
+    onRequestProfileChange: (nextProfile) => {
+      Object.assign(playerProfile, nextProfile)
+      syncPlayerUiOverlays()
+    }
+  })
+  playerSkillOverlay = createPlayerSkillOverlay({
+    mountElement,
+    profile: playerProfile,
+    getIsOpen: () => isPlayerSkillOpen,
+    onRequestOpenChange: setPlayerSkillOpen,
+    onRequestProfileChange: (nextProfile) => {
+      Object.assign(playerProfile, nextProfile)
       syncPlayerUiOverlays()
     }
   })
@@ -957,6 +1098,13 @@ export const createPixiTiledMapView = async ({
     const monsterHealthBar = isMonsterCharacter
       ? createMonsterHealthBar()
       : undefined
+    const displayLabel =
+      character.displayText === undefined
+        ? undefined
+        : new Text({
+            style: SIGN_POST_LABEL_STYLE,
+            text: character.displayText
+          })
     const levelBadge =
       character.level === undefined
         ? undefined
@@ -971,6 +1119,12 @@ export const createPixiTiledMapView = async ({
     sprite.roundPixels = true
     sprite.zIndex = 10
     container.addChild(sprite)
+    if (displayLabel) {
+      displayLabel.label = `character:${character.id}:display-label`
+      displayLabel.roundPixels = true
+      displayLabel.zIndex = 16
+      container.addChild(displayLabel)
+    }
     if (monsterHealthBar) {
       monsterHealthBar.container.label = `character:${character.id}:monster-health-bar`
       monsterHealthBar.container.zIndex = 15
@@ -1027,6 +1181,7 @@ export const createPixiTiledMapView = async ({
     renderedCharacters.set(character.id, {
       container,
       sprite,
+      displayLabel,
       levelBadge,
       monsterHealthBar
     })
@@ -1180,6 +1335,7 @@ export const createPixiTiledMapView = async ({
       renderNode.sprite.height,
       map.tileHeight
     )
+    syncCharacterDisplayLabel(renderNode)
     syncCharacterLevelBadge(renderNode, character)
     depthSortedLayer?.sortChildren()
 
@@ -1231,6 +1387,20 @@ export const createPixiTiledMapView = async ({
     renderNode.levelBadge.position.set(
       Math.round((renderNode.sprite.width - renderNode.levelBadge.width) / 2),
       -Math.round(renderNode.levelBadge.height + 4)
+    )
+  }
+
+  const syncCharacterDisplayLabel = (
+    renderNode: RenderedCharacterNode
+  ) => {
+    if (!renderNode.displayLabel) {
+      return
+    }
+
+    renderNode.displayLabel.visible = true
+    renderNode.displayLabel.position.set(
+      Math.round((renderNode.sprite.width - renderNode.displayLabel.width) / 2),
+      -Math.round(renderNode.displayLabel.height + 4)
     )
   }
 
@@ -1797,6 +1967,19 @@ export const createPixiTiledMapView = async ({
       return
     }
 
+    if (
+      sourceCharacter &&
+      shouldPlayerEvadeDamage(playerProfile)
+    ) {
+      showCharacterDamageText(
+        PLAYER_CHARACTER_ID,
+        '회피!',
+        EVADE_TEXT_DURATION_MILLISECONDS,
+        EVADE_TEXT_STYLE
+      )
+      return
+    }
+
     const nextHp = Math.max(0, playerProfile.hp.current - nextDamage)
     const damageMessage =
       nextHp === 0 ? `-${nextDamage}\n쓰러졌다!` : `-${nextDamage}`
@@ -1856,6 +2039,29 @@ export const createPixiTiledMapView = async ({
       monsterContactDamageLockedUntilById.delete(characterId)
       monsterPigAnimationModes.delete(characterId)
       monsterPigBehaviorStates.delete(characterId)
+      const experienceReward = getMonsterExperienceDropAmount(
+        character.level ?? 1
+      )
+      const nextPlayerProgress = grantPlayerExperience(
+        playerProfile,
+        experienceReward
+      )
+
+      if (nextPlayerProgress.nextProfile !== playerProfile) {
+        Object.assign(playerProfile, nextPlayerProgress.nextProfile)
+        syncPlayerUiOverlays()
+        if (nextPlayerProgress.levelsGained > 0) {
+          showCharacterDamageText(
+            PLAYER_CHARACTER_ID,
+            nextPlayerProgress.levelsGained > 1
+              ? `레벨 업 x${nextPlayerProgress.levelsGained}!`
+              : '레벨 업!',
+            DAMAGE_TEXT_DURATION_MILLISECONDS,
+            LEVEL_UP_TEXT_STYLE
+          )
+        }
+      }
+
       spawnMonsterGoldDrop(
         characterId,
         getMonsterGoldDropAmount(character.level ?? 1),
@@ -1918,7 +2124,11 @@ export const createPixiTiledMapView = async ({
     })
 
     if (targetCharacter) {
-      applyDamageToMonster(targetCharacter.id, playerProfile.stats.attack, now)
+      applyDamageToMonster(
+        targetCharacter.id,
+        getPlayerPhysicalAttackPower(playerProfile),
+        now
+      )
     }
 
     playerAttackResolvedStartedAtMilliseconds = playerAttackStartedAtMilliseconds
@@ -2251,7 +2461,8 @@ export const createPixiTiledMapView = async ({
   const showCharacterDamageText = (
     characterId: string,
     message: string,
-    durationMilliseconds: number
+    durationMilliseconds: number,
+    style: TextStyle = DAMAGE_TEXT_STYLE
   ) => {
     let activeDamageText = activeCharacterDamageTexts.get(characterId)
 
@@ -2275,6 +2486,7 @@ export const createPixiTiledMapView = async ({
       activeCharacterDamageTexts.set(characterId, activeDamageText)
     }
 
+    activeDamageText.text.style = style
     activeDamageText.text.text = message
     activeDamageText.startedAt = performance.now()
     activeDamageText.durationMilliseconds = durationMilliseconds
@@ -2783,6 +2995,10 @@ export const createPixiTiledMapView = async ({
   const handleKeyDown = (event: KeyboardEvent) => {
     const isInventoryToggleKey =
       event.code === 'KeyI' || event.key.toLowerCase() === 'i'
+    const isStatToggleKey =
+      event.code === 'KeyS' || event.key.toLowerCase() === 's'
+    const isSkillToggleKey =
+      event.code === 'KeyK' || event.key.toLowerCase() === 'k'
 
     if (isInventoryToggleKey) {
       if (!event.repeat) {
@@ -2793,11 +3009,34 @@ export const createPixiTiledMapView = async ({
       return
     }
 
+    if (isStatToggleKey) {
+      if (!event.repeat) {
+        event.preventDefault()
+        setPlayerStatOpen(!isPlayerStatOpen)
+      }
+
+      return
+    }
+
+    if (isSkillToggleKey) {
+      if (!event.repeat) {
+        event.preventDefault()
+        setPlayerSkillOpen(!isPlayerSkillOpen)
+      }
+
+      return
+    }
+
     if (playerProfile.hp.current === 0) {
       return
     }
 
-    if (isPlayerUiOpen || isBlacksmithShopOpen) {
+    if (
+      isPlayerUiOpen ||
+      isPlayerStatOpen ||
+      isPlayerSkillOpen ||
+      isBlacksmithShopOpen
+    ) {
       const action = getCharacterActionFromKey(event.key)
       const direction = getCharacterMoveDirectionFromKey(event.key)
 
@@ -2885,6 +3124,12 @@ export const createPixiTiledMapView = async ({
     undefined,
     UPDATE_PRIORITY.UTILITY
   )
+  app.ticker.add(playerStatOverlay.syncFrame, undefined, UPDATE_PRIORITY.UTILITY)
+  app.ticker.add(
+    playerSkillOverlay.syncFrame,
+    undefined,
+    UPDATE_PRIORITY.UTILITY
+  )
   app.ticker.add(playerShopOverlay.syncFrame, undefined, UPDATE_PRIORITY.UTILITY)
   syncAllCharacterSprites()
   centerViewportOnCharacter(getCharacterStateById(cameraTargetCharacterId))
@@ -2892,6 +3137,8 @@ export const createPixiTiledMapView = async ({
   mapOverlay.syncFrame()
   playerHudOverlay.syncFrame()
   playerInventoryOverlay.syncFrame()
+  playerStatOverlay.syncFrame()
+  playerSkillOverlay.syncFrame()
   playerShopOverlay.syncFrame()
   handleVisibilityChange()
 
@@ -2909,6 +3156,8 @@ export const createPixiTiledMapView = async ({
     app.ticker.remove(mapOverlay.syncFrame)
     app.ticker.remove(playerHudOverlay.syncFrame)
     app.ticker.remove(playerInventoryOverlay.syncFrame)
+    app.ticker.remove(playerStatOverlay.syncFrame)
+    app.ticker.remove(playerSkillOverlay.syncFrame)
     app.ticker.remove(playerShopOverlay.syncFrame)
     gameEventQueue.clear()
     monsterPatrolStates.clear()
@@ -2937,6 +3186,8 @@ export const createPixiTiledMapView = async ({
     mapOverlay.destroy()
     playerHudOverlay.destroy()
     playerInventoryOverlay.destroy()
+    playerStatOverlay.destroy()
+    playerSkillOverlay.destroy()
     playerShopOverlay.destroy()
     controllerRuntime.destroy()
     app.destroy({ removeView: true }, { children: true })
