@@ -2,6 +2,8 @@ import huntingGroundMapXml from './assets/maps/hunting-ground.tmx?raw'
 import townMapXml from './assets/maps/town.tmx?raw'
 import replyWithMessageControllerLua from './assets/lua/reply-with-message.lua?raw'
 import wanderNearHomeControllerLua from './assets/lua/wander-near-home.lua?raw'
+import huntingGroundMusicUrl from './assets/sounds/전투브금.mp3'
+import townMusicUrl from './assets/sounds/브금5.mp3'
 import townTilesetXml from './assets/tilesets/town-32.tsx?raw'
 import townTilesetUrl from './assets/tilesets/town-32.png'
 import tinyDungeonTilesetXml from './assets/tilesets/tiny-dungeon-16.tsx?raw'
@@ -78,6 +80,10 @@ const sceneMaps: Record<SceneId, typeof parsedTownMap> = {
   town: parsedTownMap,
   'hunting-ground': parsedHuntingGroundMap
 }
+const sceneMusicUrls: Record<SceneId, string> = {
+  town: townMusicUrl,
+  'hunting-ground': huntingGroundMusicUrl
+}
 const playerProfile = createInitialPlayerProfile()
 let playerEquipment = createInitialPlayerEquipment()
 let playerInventory = createInitialPlayerInventory()
@@ -86,6 +92,9 @@ let activeControllerRuntime:
   | ReturnType<typeof createCharacterControllerRuntime>
   | undefined
 let activeSceneRenderer: SceneRenderer | undefined
+let activeSceneMusic: HTMLAudioElement | undefined
+let activeSceneMusicUrl = ''
+let isSceneMusicRetryQueued = false
 let pendingSceneTransition: SceneTransitionRequest | undefined
 let isSceneTransitionScheduled = false
 
@@ -102,6 +111,7 @@ const bootstrapScene = async (
   }
 
   destroyActiveScene()
+  playSceneMusic(sceneId)
 
   const characters = createSceneCharacters({
     map: sceneMap,
@@ -216,6 +226,47 @@ const destroyActiveScene = () => {
   activeControllerRuntime = undefined
   activeSceneRenderer?.destroy()
   activeSceneRenderer = undefined
+}
+
+const playSceneMusic = (sceneId: SceneId) => {
+  const musicUrl = sceneMusicUrls[sceneId]
+
+  if (activeSceneMusic && activeSceneMusicUrl === musicUrl) {
+    playActiveSceneMusic()
+    return
+  }
+
+  activeSceneMusic?.pause()
+
+  activeSceneMusic = new Audio(musicUrl)
+  activeSceneMusic.loop = true
+  activeSceneMusicUrl = musicUrl
+
+  playActiveSceneMusic()
+}
+
+const playActiveSceneMusic = () => {
+  if (!activeSceneMusic) {
+    return
+  }
+
+  void activeSceneMusic.play().catch(queueSceneMusicRetry)
+}
+
+const queueSceneMusicRetry = () => {
+  if (isSceneMusicRetryQueued) {
+    return
+  }
+
+  isSceneMusicRetryQueued = true
+
+  const retrySceneMusic = () => {
+    isSceneMusicRetryQueued = false
+    playActiveSceneMusic()
+  }
+
+  window.addEventListener('pointerdown', retrySceneMusic, { once: true })
+  window.addEventListener('keydown', retrySceneMusic, { once: true })
 }
 
 const scheduleSceneTransition = (request: SceneTransitionRequest) => {
