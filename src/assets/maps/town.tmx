@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<map version="1.10" tiledversion="1.12.1" orientation="orthogonal" renderorder="right-down" width="50" height="50" tilewidth="32" tileheight="32" infinite="0" nextlayerid="10" nextobjectid="9">
+<map version="1.10" tiledversion="1.12.1" orientation="orthogonal" renderorder="right-down" width="50" height="50" tilewidth="32" tileheight="32" infinite="0" nextlayerid="10" nextobjectid="10">
  <tileset firstgid="1" source="../tilesets/town-32.tsx"/>
  <layer id="1" name="ground" width="50" height="50">
   <data encoding="csv">
@@ -202,6 +202,13 @@
   <object id="7" name="villager_4" type="character" x="880.362" y="1388.81">
    <properties>
     <property name="type" value="character_commoner_tan_tunic"/>
+   </properties>
+  </object>
+  <object id="9" name="hunting_path_sign" type="character" x="1488" y="608" width="32" height="32">
+   <properties>
+    <property name="type" value="sign_inn"/>
+    <property name="blocksMovement" type="bool" value="false"/>
+    <property name="displayText" value="사냥터로 가는 길"/>
    </properties>
   </object>
  </objectgroup>

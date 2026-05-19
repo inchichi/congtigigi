@@ -15,7 +15,10 @@ import {
   equipPlayerInventorySlot,
   unequipPlayerEquipmentSlot
 } from '../game/playerLoadout'
-import { getPlayerJobDisplayName } from '../game/playerProfile'
+import {
+  PLAYER_MAX_LEVEL,
+  getPlayerJobDisplayName
+} from '../game/playerProfile'
 import { getResponsiveUiScale } from './getResponsiveUiScale'
 
 type CreatePlayerInventoryOverlayInput = {
@@ -299,7 +302,10 @@ export const createPlayerInventoryOverlay = ({
   equipmentCenterJob.textContent = getPlayerJobDisplayName(profile)
   equipmentCenterLevel.className =
     'player-inventory-overlay__equipment-center-level'
-  equipmentCenterLevel.textContent = `레벨 ${profile.level}`
+  equipmentCenterLevel.textContent =
+    profile.level >= PLAYER_MAX_LEVEL
+      ? `레벨 ${profile.level} · MAX`
+      : `레벨 ${profile.level}`
   equipmentCenterSet.className = 'player-inventory-overlay__equipment-center-set'
   equipmentCenterSet.textContent = initialEquipment.setName
 
@@ -642,7 +648,10 @@ export const createPlayerInventoryOverlay = ({
     equipmentSectionSummary.textContent = `${equipment.setName} • 레벨 ${equipment.level}`
     equipmentCenterName.textContent = profile.name
     equipmentCenterJob.textContent = getPlayerJobDisplayName(profile)
-    equipmentCenterLevel.textContent = `레벨 ${profile.level}`
+    equipmentCenterLevel.textContent =
+      profile.level >= PLAYER_MAX_LEVEL
+        ? `레벨 ${profile.level} · MAX`
+        : `레벨 ${profile.level}`
     equipmentCenterSet.textContent = equipment.setName
 
     for (let index = 0; index < equipmentSlotCards.length; index += 1) {

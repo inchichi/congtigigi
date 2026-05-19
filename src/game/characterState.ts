@@ -17,6 +17,7 @@ export type CharacterState = {
   id: string
   appearanceType: string
   level?: number
+  displayText?: string
   position: {
     x: number
     y: number
@@ -76,6 +77,7 @@ type CreateNpcCharacterInput = {
   id: string
   appearanceType: string
   level?: number
+  displayText?: string
   position: {
     x: number
     y: number
@@ -166,6 +168,7 @@ export const createNpcCharacter = ({
   id,
   appearanceType,
   level,
+  displayText,
   position,
   facing = 'down',
   collisionSize,
@@ -184,6 +187,10 @@ export const createNpcCharacter = ({
 
   if (level !== undefined) {
     character.level = level
+  }
+
+  if (displayText !== undefined) {
+    character.displayText = displayText
   }
 
   return character

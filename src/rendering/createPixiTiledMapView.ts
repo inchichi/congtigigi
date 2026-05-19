@@ -117,6 +117,16 @@ type TilesetRenderResources = {
   tileTextures: Texture[]
 }
 
+type SmearVfxRenderResources = {
+  horizontalTextures: Texture[]
+  verticalTextures: Texture[]
+}
+
+type ResolvedCharacterAppearanceTexture = {
+  texture: Texture
+  renderScale: number
+}
+
 type TileTextureFrameSource = {
   columns: number
   margin: number
@@ -163,6 +173,7 @@ type MonsterGoldDrop = {
 type RenderedCharacterNode = {
   container: Container
   sprite: Sprite
+  displayLabelPanel?: NineSliceSprite
   displayLabel?: Text
   levelBadge?: Text
   monsterHealthBar?: {
@@ -274,8 +285,10 @@ const LEVEL_UP_TEXT_STYLE = new TextStyle({
   }
 })
 const BLACKSMITH_SHOP_NPC_ID = 'blacksmith'
+const SIGN_POST_APPEARANCE_TYPE = 'sign_inn'
 const MONSTER_PIG_APPEARANCE_TYPE = 'monster_pig'
 const MONSTER_SLIME_APPEARANCE_TYPE = 'monster_slime'
+const WORLD_DEFAULT_ZOOM_MULTIPLIER = 1.2
 const MONSTER_PIG_WORLD_SCALE = 0.315
 const MONSTER_SLIME_WORLD_SCALE = 0.287
 const MONSTER_PIG_CHASE_SPEED_TILES_PER_SECOND = 4.4
@@ -331,15 +344,15 @@ const SIGN_POST_LABEL_STYLE = new TextStyle({
   breakWords: true,
   fill: 0xf4e7c5,
   fontFamily: '"Jersey 25", NeoDunggeunmo, monospace',
-  fontSize: 11,
-  lineHeight: 13,
-  padding: 2,
+  fontSize: 9,
+  lineHeight: 10,
+  padding: 0,
   stroke: {
     color: 0x2e2313,
-    width: 3
+    width: 2
   },
   wordWrap: true,
-  wordWrapWidth: 96
+  wordWrapWidth: 128
 })
 const MONSTER_HEALTH_BAR_WIDTH = 34
 const MONSTER_HEALTH_BAR_HEIGHT = 5
@@ -355,6 +368,15 @@ const PLAYER_WEAPON_TILE_FRAME_SOURCE: TileTextureFrameSource = {
   tileWidth: 16,
   tileHeight: 16
 }
+const SMEAR_VFX_HORIZONTAL_SPRITESHEET_URL = new URL(
+  '../assets/vfx/smear-vfx-01/smear-vfx-01-horizontal-1.png',
+  import.meta.url
+).href
+const SMEAR_VFX_VERTICAL_SPRITESHEET_URL = new URL(
+  '../assets/vfx/smear-vfx-01/smear-vfx-01-vertical-1.png',
+  import.meta.url
+).href
+const SMEAR_VFX_FRAME_SIZE = 48
 const PLAYER_WEAPON_WORLD_SCALE = 1.35
 const PLAYER_ATTACK_TRAIL_PROGRESS_STEP = 0.12
 const PLAYER_ATTACK_TRAIL_ALPHA = [0.42, 0.28, 0.18, 0.1]
@@ -363,6 +385,10 @@ const PLAYER_ATTACK_SWING_X_OFFSET = 4
 const PLAYER_ATTACK_LIFT_Y_OFFSET = 3
 const PLAYER_ATTACK_ROTATION_OFFSET = 1.15
 const PLAYER_ATTACK_SCALE_BOOST = 0.06
+const PLAYER_ATTACK_SLASH_EFFECT_SCALE_X = 1.55
+const PLAYER_ATTACK_SLASH_EFFECT_SCALE_Y = 1.35
+const PLAYER_ATTACK_SLASH_EFFECT_WIDE_FRAME_INDEX = 1
+const PLAYER_ATTACK_SLASH_EFFECT_WIDE_FRAME_X_MULTIPLIER = 1.2
 const PLAYER_WEAPON_PLACEMENT_RIGHT = {
   x: 23,
   y: 21,
@@ -373,6 +399,11 @@ const PLAYER_WEAPON_PLACEMENT_LEFT = {
   y: 21,
   rotation: -0.75
 }
+const PORTAL_INSIDE_IMAGE_URL = new URL(
+  '../assets/tilesets/portal_inside.png',
+  import.meta.url
+).href
+const PORTAL_INSIDE_WORLD_SCALE = 0.08
 const SCENE_INTRO_VISIBLE_DURATION_MILLISECONDS = 3000
 const PLAYER_ATTACK_DURATION_MILLISECONDS = 320
 const PLAYER_ATTACK_COOLDOWN_MILLISECONDS = 420
@@ -471,22 +502,27 @@ export const createPixiTiledMapView = async ({
   onRequestSceneChange
 }: CreatePixiTiledMapViewInput): Promise<{ destroy: () => void }> => {
   const app = new Application()
-  const sceneScale = Math.max(
+  const viewportFitScale = Math.max(
     1,
     Math.ceil(
       Math.min(window.innerWidth / map.pixelWidth, window.innerHeight / map.pixelHeight)
     )
   )
-  const scaledMapPixelWidth = map.pixelWidth * sceneScale
-  const scaledMapPixelHeight = map.pixelHeight * sceneScale
+  const sceneScale = viewportFitScale * WORLD_DEFAULT_ZOOM_MULTIPLIER
+  const scaledMapPixelWidth = Math.round(map.pixelWidth * sceneScale)
+  const scaledMapPixelHeight = Math.round(map.pixelHeight * sceneScale)
   const [
     messagePanelTexture,
+    portalInsideTexture,
     tinyDungeonWeaponImageTexture,
+    smearVfxTextures,
     monsterPigAnimationTextures,
     monsterSlimeAnimationTextures
   ] = await Promise.all([
     loadMessagePanelTexture(),
+    Assets.load<Texture>(PORTAL_INSIDE_IMAGE_URL),
     Assets.load<Texture>(TINY_DUNGEON_TILESET_IMAGE_URL),
+    loadSmearVfxTextures(),
     loadMonsterPigAnimationTextures(),
     loadMonsterSlimeAnimationTextures()
   ])
@@ -501,6 +537,8 @@ export const createPixiTiledMapView = async ({
 
   tinyDungeonWeaponImageTexture.source.scaleMode = 'nearest'
   tinyDungeonWeaponImageTexture.source.addressMode = 'clamp-to-edge'
+  portalInsideTexture.source.scaleMode = 'nearest'
+  portalInsideTexture.source.addressMode = 'clamp-to-edge'
   await ensureMessageFontsLoaded()
 
   await app.init({
@@ -583,8 +621,10 @@ export const createPixiTiledMapView = async ({
   let currentPlayerInventory = playerInventory
   let currentBlacksmithInventory = merchantInventory
   let playerAttackStartedAtMilliseconds: number | undefined
+  let playerAttackFacing: CharacterMoveDirection | undefined
   let playerWeaponTrailSprites: Sprite[] = []
   let playerWeaponSprite: Sprite | undefined
+  let playerSlashEffectSprite: AnimatedSprite | undefined
   let syncPlayerCharacterVisual: (nowMilliseconds?: number) => void = () => {}
   let isSceneTransitionPending = false
   let isDestroyed = false
@@ -733,10 +773,82 @@ export const createPixiTiledMapView = async ({
       return
     }
 
+    const playerCharacter = getCharacterStateById(PLAYER_CHARACTER_ID)
     playerAttackStartedAtMilliseconds = now
     playerAttackResolvedStartedAtMilliseconds = undefined
     playerAttackReadyAtMilliseconds =
       now + PLAYER_ATTACK_COOLDOWN_MILLISECONDS
+    playerAttackFacing = playerCharacter.facing
+    playPlayerSlashEffect(playerCharacter)
+  }
+  const clearPlayerSlashEffectSprite = () => {
+    if (!playerSlashEffectSprite) {
+      return
+    }
+
+    const sprite = playerSlashEffectSprite
+
+    playerSlashEffectSprite = undefined
+    sprite.removeFromParent()
+    sprite.destroy()
+  }
+  const playPlayerSlashEffect = (character: CharacterState) => {
+    clearPlayerSlashEffectSprite()
+
+    const isHorizontalSlash =
+      character.facing !== 'up' && character.facing !== 'down'
+    const slashTextures = isHorizontalSlash
+      ? smearVfxTextures.horizontalTextures
+      : smearVfxTextures.verticalTextures
+    const slashSprite = new AnimatedSprite(slashTextures)
+    const slashBaseScaleX =
+      character.facing === 'left'
+        ? -PLAYER_ATTACK_SLASH_EFFECT_SCALE_X
+        : PLAYER_ATTACK_SLASH_EFFECT_SCALE_X
+    const applySlashFrameScale = (frameIndex: number) => {
+      const frameScaleX =
+        isHorizontalSlash &&
+        frameIndex === PLAYER_ATTACK_SLASH_EFFECT_WIDE_FRAME_INDEX
+          ? PLAYER_ATTACK_SLASH_EFFECT_WIDE_FRAME_X_MULTIPLIER
+          : 1
+
+      slashSprite.scale.set(
+        slashBaseScaleX * frameScaleX,
+        PLAYER_ATTACK_SLASH_EFFECT_SCALE_Y
+      )
+    }
+
+    slashSprite.label = 'character:player:slash-effect'
+    slashSprite.anchor.set(0.5)
+    slashSprite.animationSpeed = 0.8
+    slashSprite.loop = false
+    slashSprite.roundPixels = true
+    slashSprite.position.set(
+      character.position.x * map.tileWidth + characterPixelWidth / 2,
+      character.position.y * map.tileHeight + characterPixelHeight / 2 - 1
+    )
+    applySlashFrameScale(0)
+    slashSprite.onFrameChange = (currentFrame) => {
+      applySlashFrameScale(currentFrame)
+    }
+    slashSprite.zIndex =
+      getCharacterDepthSortValue(
+        character.position.y,
+        characterPixelHeight,
+        map.tileHeight
+      ) + 1
+    slashSprite.onComplete = () => {
+      if (playerSlashEffectSprite === slashSprite) {
+        playerSlashEffectSprite = undefined
+      }
+      slashSprite.removeFromParent()
+      slashSprite.destroy()
+    }
+
+    playerSlashEffectSprite = slashSprite
+    depthSortedLayer?.addChild(slashSprite)
+    depthSortedLayer?.sortChildren()
+    slashSprite.play()
   }
   const setPlayerUiOpen = (nextIsOpen: boolean) => {
     if (isPlayerUiOpen === nextIsOpen) {
@@ -1074,6 +1186,8 @@ export const createPixiTiledMapView = async ({
   for (const character of characterStates) {
     const container = new Container()
     const isMonsterCharacter = character.appearanceType.startsWith('monster_')
+    const isSignPostCharacter =
+      character.appearanceType === SIGN_POST_APPEARANCE_TYPE
     const monsterAnimationTextures = isMonsterCharacter
       ? monsterAnimationTexturesByAppearanceType[
           character.appearanceType as MonsterAppearanceType
@@ -1082,18 +1196,23 @@ export const createPixiTiledMapView = async ({
     const monsterBehaviorConfig = isMonsterCharacter
       ? getMonsterBehaviorConfig(character)
       : undefined
-    const sprite = monsterAnimationTextures
-      ? new AnimatedSprite(monsterAnimationTextures.idleLeft)
-      : new Sprite(
-          resolveCharacterTexture(
+    const resolvedCharacterAppearanceTexture =
+      monsterAnimationTextures === undefined
+        ? resolveCharacterTexture(
+            isSignPostCharacter ? 'post_tall_base_00' : character.appearanceType,
             characterTilesetResources.tileTextures,
             characterSpriteSheet.tileset,
-            character.appearanceType
+            map.tilesets,
+            tilesetResources,
+            map.tileWidth
           )
-        )
+        : undefined
+    const sprite = monsterAnimationTextures
+      ? new AnimatedSprite(monsterAnimationTextures.idleLeft)
+      : new Sprite(resolvedCharacterAppearanceTexture!.texture)
     const renderScale = monsterBehaviorConfig
       ? monsterBehaviorConfig.renderScale
-      : characterSpriteSheet.scale
+      : resolvedCharacterAppearanceTexture!.renderScale
     const isPlayer = character.id === PLAYER_CHARACTER_ID
     const monsterHealthBar = isMonsterCharacter
       ? createMonsterHealthBar()
@@ -1105,6 +1224,23 @@ export const createPixiTiledMapView = async ({
             style: SIGN_POST_LABEL_STYLE,
             text: character.displayText
           })
+    const displayLabelPanel =
+      displayLabel && isSignPostCharacter
+        ? new NineSliceSprite({
+            texture: messagePanelTexture,
+            bottomHeight: MESSAGE_PANEL_BORDER_SIZE,
+            leftWidth: MESSAGE_PANEL_BORDER_SIZE,
+            rightWidth: MESSAGE_PANEL_BORDER_SIZE,
+            topHeight: MESSAGE_PANEL_BORDER_SIZE
+          })
+        : undefined
+    if (displayLabelPanel && displayLabel) {
+      displayLabelPanel.roundPixels = true
+      displayLabelPanel.setSize(
+        Math.max(112, Math.ceil(displayLabel.width) + 18),
+        Math.max(28, Math.ceil(displayLabel.height) + 8)
+      )
+    }
     const levelBadge =
       character.level === undefined
         ? undefined
@@ -1119,10 +1255,15 @@ export const createPixiTiledMapView = async ({
     sprite.roundPixels = true
     sprite.zIndex = 10
     container.addChild(sprite)
+    if (displayLabelPanel) {
+      displayLabelPanel.label = `character:${character.id}:display-label-panel`
+      displayLabelPanel.zIndex = 16
+      container.addChild(displayLabelPanel)
+    }
     if (displayLabel) {
       displayLabel.label = `character:${character.id}:display-label`
       displayLabel.roundPixels = true
-      displayLabel.zIndex = 16
+      displayLabel.zIndex = displayLabelPanel ? 17 : 16
       container.addChild(displayLabel)
     }
     if (monsterHealthBar) {
@@ -1181,6 +1322,7 @@ export const createPixiTiledMapView = async ({
     renderedCharacters.set(character.id, {
       container,
       sprite,
+      displayLabelPanel,
       displayLabel,
       levelBadge,
       monsterHealthBar
@@ -1195,25 +1337,44 @@ export const createPixiTiledMapView = async ({
 
   for (const portal of mapPortals) {
     const container = new Container()
-    const sprite = new Sprite(resolveMapPortalTexture(portal.appearanceType))
+    const baseSprite = new Sprite(resolveMapPortalTexture(portal.appearanceType))
+    const coreSprite = new Sprite(portalInsideTexture)
 
     container.label = `portal:${portal.id}:container`
     container.sortableChildren = true
-    sprite.label = `portal:${portal.id}`
-    sprite.scale.set(portal.collisionSize.width, portal.collisionSize.height)
-    sprite.roundPixels = true
-    sprite.zIndex = 0
-    container.position.set(
-      portal.position.x * map.tileWidth,
-      portal.position.y * map.tileHeight
-    )
+    baseSprite.label = `portal:${portal.id}:base`
+    baseSprite.roundPixels = true
+    baseSprite.zIndex = 0
+    coreSprite.label = `portal:${portal.id}:core`
+    coreSprite.anchor.set(0.5, 0.5)
+    coreSprite.scale.set(PORTAL_INSIDE_WORLD_SCALE)
+    coreSprite.roundPixels = true
+    coreSprite.zIndex = 1
+    if (portal.appearanceType === 'stairs_stone_step_base_00') {
+      container.position.set(
+        portal.position.x * map.tileWidth,
+        portal.position.y * map.tileHeight
+      )
+      baseSprite.scale.set(portal.collisionSize.width, portal.collisionSize.height)
+      coreSprite.position.set(
+        (portal.collisionSize.width * map.tileWidth) / 2,
+        (portal.collisionSize.height * map.tileHeight) / 2
+      )
+      container.addChild(baseSprite, coreSprite)
+    } else {
+      baseSprite.scale.set(portal.collisionSize.width, portal.collisionSize.height)
+      container.position.set(
+        portal.position.x * map.tileWidth,
+        portal.position.y * map.tileHeight
+      )
+      container.addChild(baseSprite)
+    }
     container.zIndex = Math.round(
       (portal.position.y + portal.collisionSize.height) * map.tileHeight
     )
-    container.addChild(sprite)
     renderedPortals.set(portal.id, {
       container,
-      sprite
+      sprite: baseSprite
     })
     depthSortedLayer.addChild(container)
   }
@@ -1334,7 +1495,7 @@ export const createPixiTiledMapView = async ({
       character.position.y,
       renderNode.sprite.height,
       map.tileHeight
-    )
+    ) + (character.appearanceType === SIGN_POST_APPEARANCE_TYPE ? 1 : 0)
     syncCharacterDisplayLabel(renderNode)
     syncCharacterLevelBadge(renderNode, character)
     depthSortedLayer?.sortChildren()
@@ -1397,11 +1558,29 @@ export const createPixiTiledMapView = async ({
       return
     }
 
+    if (renderNode.displayLabelPanel) {
+      renderNode.displayLabelPanel.visible = true
+      renderNode.displayLabelPanel.position.set(
+        Math.round(
+          (renderNode.sprite.width - renderNode.displayLabelPanel.width) / 2
+        ),
+        -Math.round(renderNode.displayLabelPanel.height - 6)
+      )
+      renderNode.displayLabel.anchor.set(0.5)
+      renderNode.displayLabel.visible = true
+      renderNode.displayLabel.position.set(
+        Math.round(renderNode.sprite.width / 2),
+        Math.round(
+          renderNode.displayLabelPanel.position.y +
+            renderNode.displayLabelPanel.height / 2
+        )
+      )
+      return
+    }
+
+    renderNode.displayLabel.anchor.set(0.5, 1)
     renderNode.displayLabel.visible = true
-    renderNode.displayLabel.position.set(
-      Math.round((renderNode.sprite.width - renderNode.displayLabel.width) / 2),
-      -Math.round(renderNode.displayLabel.height + 4)
-    )
+    renderNode.displayLabel.position.set(Math.round(renderNode.sprite.width / 2), -4)
   }
 
   const syncMonsterHealthBar = (
@@ -1917,6 +2096,8 @@ export const createPixiTiledMapView = async ({
     clearPressedInputState()
     playerAttackStartedAtMilliseconds = undefined
     playerAttackResolvedStartedAtMilliseconds = undefined
+    playerAttackFacing = undefined
+    clearPlayerSlashEffectSprite()
     playerAttackReadyAtMilliseconds = now + PLAYER_RESPAWN_DELAY_MILLISECONDS
     syncCharacterSprite(getCharacterStateById(PLAYER_CHARACTER_ID), now)
   }
@@ -1944,6 +2125,8 @@ export const createPixiTiledMapView = async ({
     clearPressedInputState()
     playerAttackStartedAtMilliseconds = undefined
     playerAttackResolvedStartedAtMilliseconds = undefined
+    playerAttackFacing = undefined
+    clearPlayerSlashEffectSprite()
     playerAttackReadyAtMilliseconds = now
     syncCharacterSprite(playerCharacter, now)
     syncPlayerUiOverlays()
@@ -2211,8 +2394,9 @@ export const createPixiTiledMapView = async ({
       return
     }
 
+    const attackFacing = playerAttackFacing ?? character.facing
     const placement =
-      character.facing === 'left'
+      attackFacing === 'left'
         ? PLAYER_WEAPON_PLACEMENT_LEFT
         : PLAYER_WEAPON_PLACEMENT_RIGHT
     const now = performance.now()
@@ -2226,7 +2410,7 @@ export const createPixiTiledMapView = async ({
       attackElapsedMilliseconds >= PLAYER_ATTACK_DURATION_MILLISECONDS
         ? undefined
         : attackElapsedMilliseconds / PLAYER_ATTACK_DURATION_MILLISECONDS
-    const facingMultiplier = character.facing === 'left' ? -1 : 1
+    const facingMultiplier = attackFacing === 'left' ? -1 : 1
     const createPose = (progress: number | undefined) => {
       if (progress === undefined) {
         return {
@@ -2269,6 +2453,15 @@ export const createPixiTiledMapView = async ({
     }
 
     applyPose(playerWeaponSprite, createPose(attackProgress), 1)
+
+    if (
+      attackProgress === undefined &&
+      playerAttackStartedAtMilliseconds !== undefined
+    ) {
+      playerAttackStartedAtMilliseconds = undefined
+      playerAttackResolvedStartedAtMilliseconds = undefined
+      playerAttackFacing = undefined
+    }
 
     for (let index = 0; index < playerWeaponTrailSprites.length; index += 1) {
       const trailSprite = playerWeaponTrailSprites[index]
@@ -3219,6 +3412,48 @@ const loadMessagePanelTexture = async (): Promise<Texture> => {
   return panelTexture
 }
 
+const loadSmearVfxTextures = async (): Promise<SmearVfxRenderResources> => {
+  const horizontalSpritesheet = await Assets.load<Texture>(
+    SMEAR_VFX_HORIZONTAL_SPRITESHEET_URL
+  )
+  const verticalSpritesheet = await Assets.load<Texture>(
+    SMEAR_VFX_VERTICAL_SPRITESHEET_URL
+  )
+
+  horizontalSpritesheet.source.scaleMode = 'nearest'
+  verticalSpritesheet.source.scaleMode = 'nearest'
+
+  return {
+    horizontalTextures: createSmearVfxFrameTextures(horizontalSpritesheet),
+    verticalTextures: createSmearVfxFrameTextures(verticalSpritesheet)
+  }
+}
+
+const createSmearVfxFrameTextures = (imageTexture: Texture): Texture[] => {
+  const frameCount = Math.floor(
+    imageTexture.source.pixelWidth / SMEAR_VFX_FRAME_SIZE
+  )
+
+  if (frameCount < 1) {
+    throw new Error(
+      `Expected at least one smear VFX frame in ${imageTexture.source.label ?? 'texture'}`
+    )
+  }
+
+  return Array.from({ length: frameCount }, (_, frameIndex) =>
+    new Texture({
+      source: imageTexture.source,
+      frame: new Rectangle(
+        frameIndex * SMEAR_VFX_FRAME_SIZE,
+        0,
+        SMEAR_VFX_FRAME_SIZE,
+        SMEAR_VFX_FRAME_SIZE
+      ),
+      orig: new Rectangle(0, 0, SMEAR_VFX_FRAME_SIZE, SMEAR_VFX_FRAME_SIZE)
+    })
+  )
+}
+
 const ensureMessageFontsLoaded = async (): Promise<void> => {
   if (messageFontsReadyPromise) {
     return messageFontsReadyPromise
@@ -3376,10 +3611,67 @@ const doCollisionRectsIntersect = (
   left.y + left.height > right.y
 
 const resolveCharacterTexture = (
+  appearanceType: string,
   tileTextures: Texture[],
   tileset: ParsedTiledTileset,
-  appearanceType: string
-): Texture => tileTextures[resolveTilesetLocalIdByType(tileset, appearanceType)]
+  fallbackTilesets: ParsedTiledTileset[],
+  fallbackTileTextureResources: Map<string, TilesetRenderResources>,
+  mapTileWidth: number
+): ResolvedCharacterAppearanceTexture => {
+  const characterTexture = resolveTextureByAppearanceType(
+    appearanceType,
+    tileTextures,
+    tileset
+  )
+
+  if (characterTexture) {
+    return {
+      texture: characterTexture,
+      renderScale: mapTileWidth / tileset.tileWidth
+    }
+  }
+
+  for (const fallbackTileset of fallbackTilesets) {
+    const fallbackTileTextureResource = fallbackTileTextureResources.get(
+      fallbackTileset.source
+    )
+
+    if (!fallbackTileTextureResource) {
+      throw new Error(
+        `Missing render resources for tileset ${fallbackTileset.source}`
+      )
+    }
+
+    const fallbackTexture = resolveTextureByAppearanceType(
+      appearanceType,
+      fallbackTileTextureResource.tileTextures,
+      fallbackTileset
+    )
+
+    if (fallbackTexture) {
+      return {
+        texture: fallbackTexture,
+        renderScale: mapTileWidth / fallbackTileset.tileWidth
+      }
+    }
+  }
+
+  throw new Error(`Could not resolve tileset tile type ${appearanceType}`)
+}
+
+const resolveTextureByAppearanceType = (
+  appearanceType: string,
+  tileTextures: Texture[],
+  tileset: ParsedTiledTileset
+): Texture | undefined => {
+  try {
+    const localId = resolveTilesetLocalIdByType(tileset, appearanceType)
+
+    return tileTextures[localId]
+  } catch {
+    return undefined
+  }
+}
 
 const resolveTilesetLocalIdByType = (
   tileset: ParsedTiledTileset,

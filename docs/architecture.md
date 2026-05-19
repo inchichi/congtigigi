@@ -8,7 +8,7 @@ This document is a short guide for module boundaries and code placement.
 - `src/assets/`: runtime assets that are imported by the web client.
 - `src/assets/lua/`: project Lua controller scripts that are loaded by the web client at runtime.
 - `src/game/`: pure game or engine logic that should stay easy to test with Vitest.
-- `src/game/characterState.ts`: shared character state, optional monster level metadata, controller decisions, and movement rules for both the player and NPCs.
+- `src/game/characterState.ts`: shared character state, optional monster level metadata, optional fixed sign text, controller decisions, and movement rules for both the player and NPCs.
 - `src/game/createCharacterControllerRuntime.ts`: controller attachment lifecycle, shared movement dispatch, and Lua script hot-update coordination.
 - `src/game/events/`: small central queue models for frame-level game events.
 - `src/game/interaction/`: target resolution and event processing for interaction flow.
@@ -16,23 +16,28 @@ This document is a short guide for module boundaries and code placement.
 - `src/game/lua/luaControllerApi.ts`: source of truth for the Lua-visible controller contract.
 - `src/game/blacksmithShop.ts`: blacksmith merchant inventory, buy/sell trade rules, and stock initialization for the shop NPC.
 - `src/game/monsterCombat.ts`: monster HP, contact damage, and defeat-state rules shared by combat scenes.
-- `src/game/monsterRewards.ts`: monster reward amounts such as beginner gold drops.
+- `src/game/monsterRewards.ts`: monster reward amounts such as beginner gold and experience drops.
+- `src/game/playerExperience.ts`: player experience gain, level-up application, and the level 100 cap.
 - `src/game/playerEquipment.ts`: player-facing equipment state, starter gear data, blacksmith gear data, item price metadata, and item icon metadata used by the combined player panel.
-- `src/game/playerProfile.ts`: player-facing name, starter beginner class, 10-level promotion check, resource, stat, and skill data used by the HUD.
+- `src/game/playerProfile.ts`: player-facing name, starter beginner class, 10-level promotion check, level 100 cap, future job-to-primary-stat mapping, resource, exp, stat, and skill data used by the HUD.
 - `src/game/playerInventory.ts`: shared gold-and-slot inventory shape, including the player backpack and NPC trade inventories, plus slot mutation helpers.
 - `src/game/playerLoadout.ts`: pure equip and unequip transitions between the backpack and the starter gear slots.
+- `src/game/playerProgression.ts`: level-up rewards, stat-point spending, and skill-point spending for the player profile.
+- `src/game/playerStatEffects.ts`: derived player stat effects for physical attack, movement speed, and evade chance.
 - `src/game/sceneIntro.ts`: scene-id to localized intro text mapping for the temporary map transition banner.
 - `src/game/tiled/`: TMX/TSX parsing, tile metadata, and event-layer data extraction.
-- `src/game/tiled/createNpcCharactersFromEventLayers.ts`: translate `character` object-layer events plus `controller.*` and `monster.level` TMX properties into shared NPC character state.
+- `src/game/tiled/createNpcCharactersFromEventLayers.ts`: translate `character` object-layer events plus `controller.*`, `monster.level`, and optional `displayText` TMX properties into shared NPC character state.
 - `src/game/tiled/createMapPortalsFromEventLayers.ts`: translate `portal` object-layer events into scene transition data for map exits and entrances.
 - `src/rendering/`: PixiJS rendering code and asset-to-view adaptation.
 - `src/rendering/`: map tile rendering, depth sorting, event character presentation, and fixed-screen HUD overlays.
 - `src/rendering/loadMonsterSheetTextures.ts`: shared sheet slicing and background-keying helper for monster sprite sheets.
 - `src/rendering/loadMonsterPigAnimationTextures.ts`, `src/rendering/loadMonsterSlimeAnimationTextures.ts`: sprite-sheet slicing for the beginner monster appearances.
-- `src/rendering/getResponsiveUiScale.ts`: shared viewport-based UI scale used by the map overlay, HUD, and inventory panel so they shrink together on smaller screens.
-- `src/rendering/createPixiTiledMapView.ts`: owns the live world scene, character sprite placement, the viewport-driven world zoom, the player weapon sprite attached to the player render node, the basic attack swing and afterimage trail state, the player hit recoil motion, the blacksmith shop open state, the temporary scene intro banner, the beginner monster appearance-specific animation hookup for pigs and slimes, the monster level text and HP bar rendering, and portal-triggered scene transition requests.
-- `src/rendering/createPlayerHudOverlay.ts`: fixed-screen character status panel with bag icon and skill slots. The bag icon opens the combined player panel.
+- `src/rendering/getResponsiveUiScale.ts`: shared viewport-based UI scale used by all fixed-screen overlays so they scale together across viewport sizes, with the current default tuned to 1.2x.
+- `src/rendering/createPixiTiledMapView.ts`: owns the live world scene, character sprite placement, fixed sign posts and labels, the viewport-driven world zoom, the player weapon sprite attached to the player render node, the basic attack swing and afterimage trail state, the player hit recoil motion, the blacksmith shop open state, the temporary scene intro banner, the beginner monster appearance-specific animation hookup for pigs and slimes, the monster level text and HP bar rendering, the player stat effect application for damage, movement speed, and evade chance, the monster gold and experience reward flow, and portal-triggered scene transition requests.
+- `src/rendering/createPlayerHudOverlay.ts`: compact fixed-screen character status bar anchored near the bottom center with bag icon, skill slots, and the experience bar. The bag icon opens the combined player panel.
 - `src/rendering/createPlayerInventoryOverlay.ts`: combined fixed-screen player panel that shows the equipment layout, a centered player portrait preview, the backpack grid, and current gold, with click-to-equip and click-to-unequip behavior.
+- `src/rendering/createPlayerStatOverlay.ts`: compact fixed-screen player stat side panel opened with `S` that spends stat points on strength, agility, intelligence, and luck, and highlights the matching job primary stat without covering the world center as much.
+- `src/rendering/createPlayerSkillOverlay.ts`: fixed-screen player skill window opened with `K` that spends skill points on individual skill levels.
 - `src/rendering/createBlacksmithShopOverlay.ts`: fixed-screen blacksmith service overlay that starts with a service menu and then shows the blacksmith trade modal with portrait headers, category tabs, and side-by-side purchase/sale lists for buy/sell clicks.
 - `src/rendering/createPixiTiledMapView.ts`: also resolves basic player-versus-monster combat, including player attack hits, monster contact damage, player death and respawn timing, monster aggro, auto-aggro at close range, monster attack timing, hit recoil, respawn timing, defeat visibility, floating damage text, and gold drops.
 - `scripts/`: project automation scripts such as third-party fetch/build steps.

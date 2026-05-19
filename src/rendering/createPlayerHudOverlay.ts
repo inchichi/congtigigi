@@ -1,7 +1,9 @@
 import {
+  PLAYER_MAX_LEVEL,
   getPlayerJobDisplayName,
   type PlayerProfile
 } from '../game/playerProfile'
+import { getPlayerExperienceToNextLevel } from '../game/playerExperience'
 import { getResponsiveUiScale } from './getResponsiveUiScale'
 
 type CreatePlayerHudOverlayInput = {
@@ -33,10 +35,11 @@ const BUTTON_SQUARE_FRAME = {
   height: 49
 }
 const HUD_MARGIN = 16
-const HUD_PANEL_MIN_WIDTH = 420
-const HUD_PANEL_MAX_WIDTH = 560
-const HUD_PANEL_MIN_HEIGHT = 208
-const HUD_PANEL_HEIGHT = 236
+const HUD_PANEL_MIN_WIDTH = 360
+const HUD_PANEL_MAX_WIDTH = 500
+const HUD_PANEL_MIN_HEIGHT = 188
+const HUD_PANEL_HEIGHT = 220
+const HUD_PANEL_SCALE_MULTIPLIER = 0.88
 const HEALTH_BAR_COLOR = '#d06b5d'
 const MANA_BAR_COLOR = '#5b86d6'
 
@@ -55,11 +58,13 @@ export const createPlayerHudOverlay = ({
   const jobElement = document.createElement('div')
   const levelBadge = document.createElement('div')
   const attackBadge = document.createElement('div')
+  const progressionBadge = document.createElement('div')
   const bagButton = document.createElement('button')
   const bagIcon = createBagIconSvg()
   const resourceGrid = document.createElement('div')
   const hpRow = createResourceRow('체력')
   const mpRow = createResourceRow('마나')
+  const expRow = createResourceRow('경험치')
   const statGrid = document.createElement('div')
   const skillSection = document.createElement('div')
   const skillSectionTitle = document.createElement('div')
@@ -84,9 +89,14 @@ export const createPlayerHudOverlay = ({
   jobElement.className = 'player-hud-overlay__job'
   jobElement.textContent = getPlayerJobDisplayName(profile)
   levelBadge.className = 'player-hud-overlay__level'
-  levelBadge.textContent = `레벨 ${profile.level}`
+  levelBadge.textContent =
+    profile.level >= PLAYER_MAX_LEVEL
+      ? `레벨 ${profile.level} · MAX`
+      : `레벨 ${profile.level}`
   attackBadge.className = 'player-hud-overlay__attack-badge'
   attackBadge.textContent = '공격 A'
+  progressionBadge.className = 'player-hud-overlay__progression-badge'
+  progressionBadge.textContent = '스텟 S · 스킬 K'
 
   bagButton.type = 'button'
   bagButton.className = 'player-hud-overlay__bag-button'
@@ -108,9 +118,10 @@ export const createPlayerHudOverlay = ({
   skillGrid.className = 'player-hud-overlay__skill-grid'
 
   for (const stat of [
-    ['공격', profile.stats.attack],
-    ['방어', profile.stats.defense],
-    ['민첩', profile.stats.agility]
+    ['힘', profile.stats.strength],
+    ['민첩', profile.stats.agility],
+    ['지력', profile.stats.intelligence],
+    ['행운', profile.stats.luck]
   ] as const) {
     const chip = document.createElement('div')
 
@@ -157,11 +168,11 @@ export const createPlayerHudOverlay = ({
   headerMeta.className = 'player-hud-overlay__header-meta'
 
   headerIdentity.append(nameElement, jobElement)
-  headerMeta.append(levelBadge, attackBadge, bagButton)
+  headerMeta.append(levelBadge, attackBadge, progressionBadge, bagButton)
   bagButton.append(bagIcon)
   headerRow.append(headerIdentity, headerMeta)
 
-  resourceGrid.append(hpRow.row, mpRow.row)
+  resourceGrid.append(hpRow.row, mpRow.row, expRow.row)
   skillSection.append(skillSectionTitle, skillGrid)
   panelBody.append(headerRow, resourceGrid, statGrid, skillSection)
   panel.append(panelBody)
@@ -186,7 +197,8 @@ export const createPlayerHudOverlay = ({
   const syncResourceRow = (
     row: HTMLDivElement,
     value: { current: number; max: number },
-    color: string
+    color: string,
+    valueText?: string
   ) => {
     const fill = row.querySelector<HTMLElement>('.player-hud-overlay__resource-fill')
     const valueLabel = row.querySelector<HTMLElement>('.player-hud-overlay__resource-value')
@@ -195,11 +207,11 @@ export const createPlayerHudOverlay = ({
       return
     }
 
-    const ratio = value.max === 0 ? 0 : value.current / value.max
+    const ratio = value.max === 0 ? 1 : value.current / value.max
 
     fill.style.width = `${clamp(ratio * 100, 0, 100)}%`
     fill.style.background = color
-    valueLabel.textContent = `${value.current} / ${value.max}`
+    valueLabel.textContent = valueText ?? `${value.current} / ${value.max}`
   }
 
   const syncLayout = () => {
@@ -226,7 +238,9 @@ export const createPlayerHudOverlay = ({
     panel.style.left = '50%'
     panel.style.bottom = `${Math.round(HUD_MARGIN * uiScale)}px`
     panel.style.transformOrigin = 'center bottom'
-    panel.style.transform = `translateX(-50%) scale(${uiScale})`
+    panel.style.transform = `translateX(-50%) scale(${
+      uiScale * HUD_PANEL_SCALE_MULTIPLIER
+    })`
 
     setSpriteFrame(bagButton, BUTTON_SQUARE_FRAME)
     bagButton.classList.toggle(
@@ -240,8 +254,21 @@ export const createPlayerHudOverlay = ({
     )
     bagButton.title = getIsInventoryOpen() ? '가방 닫기' : '가방 열기'
 
+    const nextExperienceToLevelUp = getPlayerExperienceToNextLevel(profile.level)
+
     syncResourceRow(hpRow.row, profile.hp, HEALTH_BAR_COLOR)
     syncResourceRow(mpRow.row, profile.mp, MANA_BAR_COLOR)
+    syncResourceRow(
+      expRow.row,
+      {
+        current: profile.experience.current,
+        max: nextExperienceToLevelUp
+      },
+      '#d7b24d',
+      profile.level >= PLAYER_MAX_LEVEL
+        ? 'MAX'
+        : `${profile.experience.current} / ${nextExperienceToLevelUp}`
+    )
 
     for (let index = 0; index < skillButtons.length; index += 1) {
       const skill = profile.skills[index]

@@ -214,28 +214,28 @@ body {
 
 .player-hud-overlay__panel-body {
   display: grid;
-  gap: 12px;
+  gap: 8px;
   width: 100%;
   height: 100%;
-  padding: 20px 22px 18px;
+  padding: 14px 16px 12px;
 }
 
 .player-hud-overlay__header {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 12px;
+  gap: 8px;
 }
 
 .player-hud-overlay__header-identity {
   display: grid;
-  gap: 2px;
+  gap: 1px;
   min-width: 0;
 }
 
 .player-hud-overlay__name {
   color: #2e2313;
-  font-size: 1.1rem;
+  font-size: 0.98rem;
   letter-spacing: 0.08em;
   line-height: 1;
   text-transform: uppercase;
@@ -243,8 +243,8 @@ body {
 
 .player-hud-overlay__job {
   color: #6b5534;
-  font-size: 0.72rem;
-  letter-spacing: 0.12em;
+  font-size: 0.66rem;
+  letter-spacing: 0.1em;
   line-height: 1;
   text-transform: uppercase;
 }
@@ -252,18 +252,29 @@ body {
 .player-hud-overlay__header-meta {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 6px;
   margin-left: auto;
 }
 
 .player-hud-overlay__level,
 .player-hud-overlay__attack-badge {
-  padding: 4px 8px;
+  padding: 3px 6px;
   border: 1px solid rgba(111, 89, 58, 0.42);
   background: rgba(255, 249, 238, 0.55);
   color: #6b5534;
-  font-size: 0.72rem;
-  letter-spacing: 0.1em;
+  font-size: 0.64rem;
+  letter-spacing: 0.08em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.player-hud-overlay__progression-badge {
+  padding: 3px 6px;
+  border: 1px solid rgba(111, 89, 58, 0.42);
+  background: rgba(255, 249, 238, 0.55);
+  color: #6b5534;
+  font-size: 0.64rem;
+  letter-spacing: 0.08em;
   line-height: 1;
   text-transform: uppercase;
 }
@@ -312,8 +323,8 @@ body {
 
 .player-hud-overlay__bag-icon {
   display: block;
-  width: 22px;
-  height: 22px;
+  width: 20px;
+  height: 20px;
   pointer-events: none;
 }
 
@@ -326,20 +337,20 @@ body {
 
 .player-hud-overlay__resource-grid {
   display: grid;
-  gap: 8px;
+  gap: 6px;
 }
 
 .player-hud-overlay__resource-row {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
-  gap: 10px;
+  gap: 8px;
   align-items: center;
 }
 
 .player-hud-overlay__resource-label,
 .player-hud-overlay__resource-value {
   color: #6b5534;
-  font-size: 0.72rem;
+  font-size: 0.66rem;
   letter-spacing: 0.1em;
   line-height: 1;
   text-transform: uppercase;
@@ -348,7 +359,7 @@ body {
 
 .player-hud-overlay__resource-track {
   position: relative;
-  height: 15px;
+  height: 12px;
   border: 1px solid rgba(111, 89, 58, 0.42);
   background: rgba(255, 249, 238, 0.5);
   overflow: hidden;
@@ -364,15 +375,15 @@ body {
 .player-hud-overlay__stat-grid {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 6px;
 }
 
 .player-hud-overlay__stat-chip {
-  padding: 4px 8px;
+  padding: 3px 6px;
   border: 1px solid rgba(111, 89, 58, 0.42);
   background: rgba(255, 249, 238, 0.55);
   color: #2e2313;
-  font-size: 0.72rem;
+  font-size: 0.66rem;
   letter-spacing: 0.08em;
   line-height: 1;
   text-transform: uppercase;
@@ -380,13 +391,13 @@ body {
 
 .player-hud-overlay__skill-section {
   display: grid;
-  gap: 8px;
+  gap: 6px;
 }
 
 .player-hud-overlay__skill-title {
   color: #6b5534;
-  font-size: 0.7rem;
-  letter-spacing: 0.12em;
+  font-size: 0.64rem;
+  letter-spacing: 0.1em;
   line-height: 1;
   text-transform: uppercase;
 }
@@ -394,7 +405,7 @@ body {
 .player-hud-overlay__skill-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 10px;
+  gap: 8px;
 }
 
 .player-hud-overlay__skill-slot {
@@ -402,7 +413,7 @@ body {
   display: grid;
   align-content: start;
   min-width: 0;
-  padding: 8px 8px 9px;
+  padding: 6px 6px 7px;
   color: #2e2313;
   text-align: left;
   touch-action: manipulation;
@@ -421,7 +432,7 @@ body {
   left: 6px;
   top: 5px;
   color: #6b5534;
-  font-size: 0.66rem;
+  font-size: 0.6rem;
   line-height: 1;
   letter-spacing: 0.08em;
 }
@@ -429,15 +440,369 @@ body {
 .player-hud-overlay__skill-name {
   align-self: center;
   justify-self: center;
-  margin-top: 12px;
+  margin-top: 10px;
   color: #2e2313;
-  font-size: 0.76rem;
+  font-size: 0.68rem;
   line-height: 1.1;
   text-align: center;
 }
 
 .player-hud-overlay__skill-description {
   display: none;
+}
+
+.player-stat-overlay,
+.player-skill-overlay {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+}
+
+.player-stat-overlay {
+  z-index: 51;
+}
+
+.player-skill-overlay {
+  z-index: 52;
+}
+
+.player-stat-overlay__backdrop,
+.player-skill-overlay__backdrop,
+.player-stat-overlay__close,
+.player-skill-overlay__close,
+.player-stat-overlay__stat-row,
+.player-skill-overlay__skill-row {
+  appearance: none;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+
+.player-stat-overlay__backdrop,
+.player-skill-overlay__backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: auto;
+  background: rgba(9, 7, 6, 0.66);
+  cursor: zoom-out;
+  touch-action: manipulation;
+}
+
+.player-stat-overlay--sidebar .player-stat-overlay__backdrop {
+  background: rgba(9, 7, 6, 0.3);
+}
+
+.player-stat-overlay__panel,
+.player-skill-overlay__panel {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  z-index: 1;
+  display: grid;
+  transform: translate(-50%, -50%);
+  pointer-events: auto;
+  overflow: hidden;
+  background: #f0e0b8;
+  box-shadow: 0 0 0 2px rgba(244, 231, 197, 0.92), 0 18px 36px rgba(0, 0, 0, 0.45);
+  color: #2e2313;
+}
+
+.player-stat-overlay--sidebar .player-stat-overlay__panel {
+  overflow: hidden;
+}
+
+.player-stat-overlay__panel-body,
+.player-skill-overlay__panel-body {
+  display: grid;
+  gap: 14px;
+  width: 100%;
+  height: 100%;
+  padding: 22px 26px 20px;
+}
+
+.player-stat-overlay--sidebar .player-stat-overlay__panel-body {
+  gap: 10px;
+  padding: 16px 18px 14px;
+}
+
+.player-stat-overlay__header,
+.player-skill-overlay__header {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding-right: 68px;
+}
+
+.player-stat-overlay--sidebar .player-stat-overlay__header {
+  gap: 10px;
+  padding-right: 56px;
+}
+
+.player-stat-overlay__title-group,
+.player-skill-overlay__title-group {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.player-stat-overlay__title,
+.player-skill-overlay__title {
+  color: #2e2313;
+  font-size: 1rem;
+  letter-spacing: 0.08em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.player-stat-overlay--sidebar .player-stat-overlay__title {
+  font-size: 0.92rem;
+}
+
+.player-stat-overlay__summary,
+.player-skill-overlay__summary,
+.player-stat-overlay__footer,
+.player-skill-overlay__footer {
+  color: #6b5534;
+  font-size: 0.74rem;
+  letter-spacing: 0.06em;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
+.player-stat-overlay--sidebar .player-stat-overlay__summary,
+.player-stat-overlay--sidebar .player-stat-overlay__footer {
+  font-size: 0.68rem;
+}
+
+.player-stat-overlay__close,
+.player-skill-overlay__close {
+  position: absolute;
+  right: 0;
+  top: 0;
+  display: grid;
+  flex: none;
+  place-items: center;
+  z-index: 2;
+  width: 46px;
+  height: 46px;
+  border: 1px solid rgba(111, 89, 58, 0.42);
+  background: rgba(255, 249, 238, 0.72);
+  color: #2e2313;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.player-stat-overlay--sidebar .player-stat-overlay__close {
+  width: 40px;
+  height: 40px;
+}
+
+.player-stat-overlay__close:focus-visible,
+.player-skill-overlay__close:focus-visible {
+  outline: 2px solid rgba(244, 231, 197, 0.92);
+  outline-offset: 2px;
+}
+
+.player-stat-overlay__close-icon,
+.player-skill-overlay__close-icon {
+  display: block;
+  font-size: 1.3rem;
+  line-height: 1;
+  pointer-events: none;
+}
+
+.player-stat-overlay__info-card,
+.player-skill-overlay__info-card {
+  display: grid;
+  gap: 4px;
+  padding: 14px 16px;
+  border: 1px solid rgba(111, 89, 58, 0.42);
+  background: rgba(255, 249, 238, 0.55);
+}
+
+.player-stat-overlay--sidebar .player-stat-overlay__info-card {
+  gap: 3px;
+  padding: 10px 12px;
+}
+
+.player-stat-overlay__info-name,
+.player-skill-overlay__info-name {
+  font-size: 0.96rem;
+  letter-spacing: 0.08em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.player-stat-overlay--sidebar .player-stat-overlay__info-name {
+  font-size: 0.88rem;
+}
+
+.player-stat-overlay__info-job,
+.player-stat-overlay__info-level,
+.player-stat-overlay__info-hint,
+.player-skill-overlay__info-job,
+.player-skill-overlay__info-level,
+.player-skill-overlay__info-hint {
+  color: #6b5534;
+  font-size: 0.68rem;
+  letter-spacing: 0.06em;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
+.player-stat-overlay--sidebar .player-stat-overlay__info-job,
+.player-stat-overlay--sidebar .player-stat-overlay__info-level,
+.player-stat-overlay--sidebar .player-stat-overlay__info-hint {
+  font-size: 0.64rem;
+}
+
+.player-stat-overlay__stat-grid,
+.player-skill-overlay__skill-grid {
+  display: grid;
+  gap: 10px;
+  min-height: 0;
+}
+
+.player-stat-overlay--sidebar .player-stat-overlay__stat-grid {
+  gap: 8px;
+}
+
+.player-stat-overlay__stat-row,
+.player-skill-overlay__skill-row {
+  display: grid;
+  gap: 10px 12px;
+  padding: 12px 14px;
+  border: 1px solid rgba(111, 89, 58, 0.42);
+  background: rgba(255, 249, 238, 0.55);
+  color: #2e2313;
+  cursor: pointer;
+  text-align: left;
+  touch-action: manipulation;
+  transition: filter 120ms ease, transform 120ms ease, opacity 120ms ease;
+}
+
+.player-stat-overlay--sidebar .player-stat-overlay__stat-row {
+  gap: 8px 10px;
+  padding: 10px 12px;
+}
+
+.player-stat-overlay__stat-row {
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+}
+
+.player-skill-overlay__skill-row {
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center;
+}
+
+.player-stat-overlay__stat-row:hover,
+.player-stat-overlay__stat-row:focus-visible,
+.player-skill-overlay__skill-row:hover,
+.player-skill-overlay__skill-row:focus-visible {
+  filter: brightness(1.05);
+  transform: translateY(-1px);
+}
+
+.player-stat-overlay__stat-row:disabled,
+.player-skill-overlay__skill-row:disabled {
+  cursor: default;
+}
+
+.player-stat-overlay__stat-row--locked,
+.player-skill-overlay__skill-row--locked {
+  opacity: 0.74;
+}
+
+.player-stat-overlay__stat-row--recommended {
+  border-color: rgba(171, 117, 52, 0.7);
+  background: rgba(255, 245, 223, 0.82);
+}
+
+.player-stat-overlay__stat-content,
+.player-skill-overlay__skill-content {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.player-stat-overlay--sidebar .player-stat-overlay__stat-content {
+  gap: 3px;
+}
+
+.player-stat-overlay__stat-label,
+.player-skill-overlay__skill-name {
+  font-size: 0.8rem;
+  letter-spacing: 0.08em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.player-stat-overlay--sidebar .player-stat-overlay__stat-label {
+  font-size: 0.74rem;
+}
+
+.player-stat-overlay__stat-description,
+.player-skill-overlay__skill-description {
+  color: #6b5534;
+  font-size: 0.66rem;
+  line-height: 1.2;
+}
+
+.player-stat-overlay--sidebar .player-stat-overlay__stat-description {
+  font-size: 0.62rem;
+}
+
+.player-stat-overlay__stat-value,
+.player-skill-overlay__skill-level {
+  justify-self: end;
+  color: #2e2313;
+  font-size: 0.76rem;
+  letter-spacing: 0.08em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.player-stat-overlay--sidebar .player-stat-overlay__stat-value {
+  font-size: 0.7rem;
+}
+
+.player-stat-overlay__stat-action,
+.player-skill-overlay__skill-action {
+  justify-self: end;
+  padding: 4px 8px;
+  border: 1px solid rgba(111, 89, 58, 0.42);
+  background: rgba(255, 249, 238, 0.72);
+  color: #6b5534;
+  font-size: 0.66rem;
+  letter-spacing: 0.08em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.player-stat-overlay--sidebar .player-stat-overlay__stat-action {
+  padding: 3px 6px;
+  font-size: 0.62rem;
+}
+
+.player-skill-overlay__skill-hotkey {
+  display: grid;
+  place-items: center;
+  min-width: 28px;
+  min-height: 28px;
+  padding: 4px 6px;
+  border: 1px solid rgba(111, 89, 58, 0.42);
+  background: rgba(255, 249, 238, 0.72);
+  color: #6b5534;
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+  line-height: 1;
+  text-transform: uppercase;
 }
 
 .player-inventory-overlay {

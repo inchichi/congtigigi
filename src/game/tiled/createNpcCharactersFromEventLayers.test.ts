@@ -50,7 +50,13 @@ describe('createNpcCharactersFromEventLayers', () => {
         <property name="monster.level" type="int" value="3"/>
       </properties>
     </object>
-    <object id="10" name="signpost" type="trigger" x="32" y="32"/>
+    <object id="10" name="hunting_path_sign" type="character" x="64" y="96" width="32" height="32">
+      <properties>
+        <property name="type" value="sign_inn"/>
+        <property name="blocksMovement" type="bool" value="false"/>
+        <property name="displayText" value="사냥터로 가는 길"/>
+      </properties>
+    </object>
   </objectgroup>
 </map>`,
       externalTilesets: {
@@ -124,6 +130,26 @@ describe('createNpcCharactersFromEventLayers', () => {
           height: 1
         },
         blocksMovement: true,
+        controller: {
+          kind: 'npc',
+          behavior: 'idle',
+          moveSpeedTilesPerSecond: 8
+        }
+      },
+      {
+        id: 'hunting_path_sign',
+        appearanceType: 'sign_inn',
+        displayText: '사냥터로 가는 길',
+        position: {
+          x: 1.5,
+          y: 2
+        },
+        facing: 'down',
+        collisionSize: {
+          width: 1,
+          height: 1
+        },
+        blocksMovement: false,
         controller: {
           kind: 'npc',
           behavior: 'idle',
