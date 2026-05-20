@@ -2,10 +2,11 @@ import { getResponsiveUiScale } from './getResponsiveUiScale'
 
 type CreateMapOverlayInput = {
   mountElement: HTMLElement
+  cameraElement: HTMLElement
   sourceCanvas: HTMLCanvasElement
   mapPixelWidth: number
   mapPixelHeight: number
-  sceneScale: number
+  getSceneScale: () => number
   getFocusPoint: () => {
     x: number
     y: number
@@ -25,10 +26,11 @@ const FOCUS_MARKER_SIZE = 14
 
 export const createMapOverlay = ({
   mountElement,
+  cameraElement,
   sourceCanvas,
   mapPixelWidth,
   mapPixelHeight,
-  sceneScale,
+  getSceneScale,
   getFocusPoint
 }: CreateMapOverlayInput): MapOverlay => {
   const overlayRoot = document.createElement('div')
@@ -101,25 +103,26 @@ export const createMapOverlay = ({
         backingHeight
       )
 
+      const sceneScale = getSceneScale()
       const scaleX = displayWidth / (mapPixelWidth * sceneScale)
       const scaleY = displayHeight / (mapPixelHeight * sceneScale)
       const viewportWidth = Math.max(
         1,
-        Math.min(displayWidth, Math.round(mountElement.clientWidth * scaleX))
+        Math.min(displayWidth, Math.round(cameraElement.clientWidth * scaleX))
       )
       const viewportHeight = Math.max(
         1,
-        Math.min(displayHeight, Math.round(mountElement.clientHeight * scaleY))
+        Math.min(displayHeight, Math.round(cameraElement.clientHeight * scaleY))
       )
       const maxViewportLeft = Math.max(0, displayWidth - viewportWidth)
       const maxViewportTop = Math.max(0, displayHeight - viewportHeight)
       const viewportLeft = Math.min(
         maxViewportLeft,
-        Math.max(0, Math.round(mountElement.scrollLeft * scaleX))
+        Math.max(0, Math.round(cameraElement.scrollLeft * scaleX))
       )
       const viewportTop = Math.min(
         maxViewportTop,
-        Math.max(0, Math.round(mountElement.scrollTop * scaleY))
+        Math.max(0, Math.round(cameraElement.scrollTop * scaleY))
       )
 
       viewportFrame.style.left = `${viewportLeft}px`
