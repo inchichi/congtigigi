@@ -80,6 +80,7 @@ import { createPlayerSkillOverlay } from './createPlayerSkillOverlay'
 import type { MonsterAnimationTextures } from './monsterAnimationTextures'
 import { loadMonsterPigAnimationTextures } from './loadMonsterPigAnimationTextures'
 import { loadMonsterSlimeAnimationTextures } from './loadMonsterSlimeAnimationTextures'
+import { createGameSoundEffects } from './createGameSoundEffects'
 
 type CreatePixiTiledMapViewInput = {
   mountElement: HTMLElement
@@ -604,6 +605,7 @@ export const createPixiTiledMapView = async ({
   const pressedActions = new Set<CharacterAction>()
   const triggeredActions = new Set<CharacterAction>()
   const gameEventQueue = createGameEventQueue()
+  const gameSoundEffects = createGameSoundEffects()
   const interactionLockUntilByCharacterPair = new Map<string, number>()
   const activeCharacterMessages = new Map<string, ActiveCharacterMessage>()
   const activeCharacterDamageTexts = new Map<
@@ -2168,6 +2170,7 @@ export const createPixiTiledMapView = async ({
       nextHp === 0 ? `-${nextDamage}\n쓰러졌다!` : `-${nextDamage}`
 
     playerProfile.hp.current = nextHp
+    gameSoundEffects.play(nextHp === 0 ? 'playerGameOver' : 'playerDamage')
     showCharacterDamageText(
       PLAYER_CHARACTER_ID,
       damageMessage,
@@ -2204,6 +2207,7 @@ export const createPixiTiledMapView = async ({
     }
 
     monsterCombatStates.set(characterId, nextCombatState)
+    gameSoundEffects.play('playerSwordHit')
     const nextDamage = Math.max(0, Math.floor(damage))
     const damageMessage =
       nextCombatState.currentHp === 0
@@ -2217,6 +2221,9 @@ export const createPixiTiledMapView = async ({
     )
 
     if (isMonsterDefeated(nextCombatState)) {
+      if (character.appearanceType === MONSTER_SLIME_APPEARANCE_TYPE) {
+        gameSoundEffects.play('slimeDeath')
+      }
       character.blocksMovement = false
       monsterPatrolStates.delete(characterId)
       monsterContactDamageLockedUntilById.delete(characterId)
@@ -2234,6 +2241,7 @@ export const createPixiTiledMapView = async ({
         Object.assign(playerProfile, nextPlayerProgress.nextProfile)
         syncPlayerUiOverlays()
         if (nextPlayerProgress.levelsGained > 0) {
+          gameSoundEffects.play('levelUp')
           showCharacterDamageText(
             PLAYER_CHARACTER_ID,
             nextPlayerProgress.levelsGained > 1
@@ -3056,6 +3064,12 @@ export const createPixiTiledMapView = async ({
                   now,
                   monsterBehaviorConfig
                 )
+                if (
+                  monsterCharacter.appearanceType ===
+                  MONSTER_SLIME_APPEARANCE_TYPE
+                ) {
+                  gameSoundEffects.play('slimeAttack')
+                }
                 monsterContactDamageLockedUntilById.set(
                   character.id,
                   now + monsterBehaviorConfig.attackDurationMilliseconds
@@ -3382,6 +3396,7 @@ export const createPixiTiledMapView = async ({
     playerStatOverlay.destroy()
     playerSkillOverlay.destroy()
     playerShopOverlay.destroy()
+    gameSoundEffects.destroy()
     controllerRuntime.destroy()
     app.destroy({ removeView: true }, { children: true })
     sceneElement.remove()
