@@ -289,7 +289,12 @@ const BLACKSMITH_SHOP_NPC_ID = 'blacksmith'
 const SIGN_POST_APPEARANCE_TYPE = 'sign_inn'
 const MONSTER_PIG_APPEARANCE_TYPE = 'monster_pig'
 const MONSTER_SLIME_APPEARANCE_TYPE = 'monster_slime'
-const WORLD_DEFAULT_ZOOM_MULTIPLIER = 1.2
+const GAME_VIEWPORT_WIDTH = 960
+const GAME_VIEWPORT_HEIGHT = 540
+const CAMERA_DEFAULT_ZOOM = 1.1
+const CAMERA_MIN_ZOOM = 0.8
+const CAMERA_MAX_ZOOM = 2
+const CAMERA_ZOOM_WHEEL_SPEED = 0.0015
 const MONSTER_PIG_WORLD_SCALE = 0.315
 const MONSTER_SLIME_WORLD_SCALE = 0.287
 const MONSTER_PIG_CHASE_SPEED_TILES_PER_SECOND = 4.4
@@ -503,15 +508,9 @@ export const createPixiTiledMapView = async ({
   onRequestSceneChange
 }: CreatePixiTiledMapViewInput): Promise<{ destroy: () => void }> => {
   const app = new Application()
-  const viewportFitScale = Math.max(
-    1,
-    Math.ceil(
-      Math.min(window.innerWidth / map.pixelWidth, window.innerHeight / map.pixelHeight)
-    )
-  )
-  const sceneScale = viewportFitScale * WORLD_DEFAULT_ZOOM_MULTIPLIER
-  const scaledMapPixelWidth = Math.round(map.pixelWidth * sceneScale)
-  const scaledMapPixelHeight = Math.round(map.pixelHeight * sceneScale)
+  let cameraZoom = CAMERA_DEFAULT_ZOOM
+  let scaledMapPixelWidth = Math.round(map.pixelWidth * cameraZoom)
+  let scaledMapPixelHeight = Math.round(map.pixelHeight * cameraZoom)
   const [
     messagePanelTexture,
     portalInsideTexture,
@@ -554,17 +553,20 @@ export const createPixiTiledMapView = async ({
   })
   app.ticker.maxFPS = 60
 
+  const viewportElement = document.createElement('div')
   const sceneElement = document.createElement('div')
   const runtimeWarningBannerElement = document.createElement('div')
   const sceneIntroBannerElement = document.createElement('div')
   const sceneIntroPanelElement = document.createElement('div')
   const sceneIntroTextElement = document.createElement('div')
 
+  viewportElement.className = 'game-viewport'
   sceneElement.className = 'game-scene'
   sceneElement.style.width = `${scaledMapPixelWidth}px`
   sceneElement.style.height = `${scaledMapPixelHeight}px`
   sceneElement.append(app.canvas)
-  mountElement.replaceChildren(sceneElement)
+  viewportElement.append(sceneElement)
+  mountElement.replaceChildren(viewportElement)
   app.canvas.classList.add('game-canvas')
 
   runtimeWarningBannerElement.setAttribute('role', 'alert')
@@ -597,7 +599,7 @@ export const createPixiTiledMapView = async ({
   mountElement.append(sceneIntroBannerElement)
 
   const world = new Container()
-  world.scale.set(sceneScale)
+  world.scale.set(cameraZoom)
   const messageLayer = new Container()
   const tilesetResources = new Map<string, TilesetRenderResources>()
   const wallTiles = createWallTileLookup(map)
@@ -712,10 +714,11 @@ export const createPixiTiledMapView = async ({
   const mapPortals = createMapPortalsFromEventLayers({ map })
   const mapOverlay = createMapOverlay({
     mountElement,
+    cameraElement: viewportElement,
     sourceCanvas: app.canvas,
     mapPixelWidth: map.pixelWidth,
     mapPixelHeight: map.pixelHeight,
-    sceneScale,
+    getSceneScale: () => cameraZoom,
     getFocusPoint: () => {
       const focusCharacter = characterStates.find(
         (candidateCharacter) => candidateCharacter.id === cameraTargetCharacterId
@@ -736,6 +739,37 @@ export const createPixiTiledMapView = async ({
       }
     }
   })
+  const syncViewportDisplayScale = () => {
+    const displayScale = Math.max(
+      0.1,
+      Math.min(
+        window.innerWidth / GAME_VIEWPORT_WIDTH,
+        window.innerHeight / GAME_VIEWPORT_HEIGHT
+      )
+    )
+
+    viewportElement.style.transform = `scale(${displayScale})`
+  }
+  const syncCameraZoomLayout = () => {
+    scaledMapPixelWidth = Math.round(map.pixelWidth * cameraZoom)
+    scaledMapPixelHeight = Math.round(map.pixelHeight * cameraZoom)
+    world.scale.set(cameraZoom)
+    app.renderer.resize(scaledMapPixelWidth, scaledMapPixelHeight)
+    sceneElement.style.width = `${scaledMapPixelWidth}px`
+    sceneElement.style.height = `${scaledMapPixelHeight}px`
+  }
+  const setCameraZoom = (nextCameraZoom: number) => {
+    const clampedCameraZoom = clampCameraZoom(nextCameraZoom)
+
+    if (clampedCameraZoom === cameraZoom) {
+      return
+    }
+
+    cameraZoom = clampedCameraZoom
+    syncCameraZoomLayout()
+    centerCameraOnCharacter(getCharacterStateById(cameraTargetCharacterId))
+    mapOverlay.syncFrame()
+  }
   const syncPlayerUiOverlays = () => {
     syncPlayerDerivedCharacterStats()
     playerHudOverlay.syncFrame()
@@ -2709,78 +2743,26 @@ export const createPixiTiledMapView = async ({
     }
   }
 
-  const centerViewportOnCharacter = (character: CharacterState) => {
+  const centerCameraOnCharacter = (character: CharacterState) => {
     const characterCenterX =
       (character.position.x * map.tileWidth + characterPixelWidth / 2) *
-      sceneScale
+      cameraZoom
     const characterCenterY =
       (character.position.y * map.tileHeight + characterPixelHeight / 2) *
-      sceneScale
+      cameraZoom
     const nextScrollLeft = clampScrollOffset(
-      characterCenterX - mountElement.clientWidth / 2,
-      scaledMapPixelWidth - mountElement.clientWidth
+      characterCenterX - viewportElement.clientWidth / 2,
+      scaledMapPixelWidth - viewportElement.clientWidth
     )
     const nextScrollTop = clampScrollOffset(
-      characterCenterY - mountElement.clientHeight / 2,
-      scaledMapPixelHeight - mountElement.clientHeight
+      characterCenterY - viewportElement.clientHeight / 2,
+      scaledMapPixelHeight - viewportElement.clientHeight
     )
 
-    mountElement.scrollTo({
+    viewportElement.scrollTo({
       left: nextScrollLeft,
       top: nextScrollTop
     })
-  }
-
-  const keepCharacterVisible = (character: CharacterState) => {
-    const characterLeft = character.position.x * map.tileWidth * sceneScale
-    const characterTop = character.position.y * map.tileHeight * sceneScale
-    const characterRight = characterLeft + characterPixelWidth * sceneScale
-    const characterBottom = characterTop + characterPixelHeight * sceneScale
-    const viewportLeft = mountElement.scrollLeft
-    const viewportTop = mountElement.scrollTop
-    const viewportWidth = mountElement.clientWidth
-    const viewportHeight = mountElement.clientHeight
-    const viewportRight = viewportLeft + viewportWidth
-    const viewportBottom = viewportTop + viewportHeight
-    const horizontalMargin = Math.floor(viewportWidth * 0.3)
-    const verticalMargin = Math.floor(viewportHeight * 0.3)
-    const deadZoneLeft = viewportLeft + horizontalMargin
-    const deadZoneRight = viewportRight - horizontalMargin
-    const deadZoneTop = viewportTop + verticalMargin
-    const deadZoneBottom = viewportBottom - verticalMargin
-    let nextScrollLeft = viewportLeft
-    let nextScrollTop = viewportTop
-
-    if (characterLeft < deadZoneLeft) {
-      nextScrollLeft = clampScrollOffset(
-        characterLeft - horizontalMargin,
-        scaledMapPixelWidth - viewportWidth
-      )
-    } else if (characterRight > deadZoneRight) {
-      nextScrollLeft = clampScrollOffset(
-        characterRight + horizontalMargin - viewportWidth,
-        scaledMapPixelWidth - viewportWidth
-      )
-    }
-
-    if (characterTop < deadZoneTop) {
-      nextScrollTop = clampScrollOffset(
-        characterTop - verticalMargin,
-        scaledMapPixelHeight - viewportHeight
-      )
-    } else if (characterBottom > deadZoneBottom) {
-      nextScrollTop = clampScrollOffset(
-        characterBottom + verticalMargin - viewportHeight,
-        scaledMapPixelHeight - viewportHeight
-      )
-    }
-
-    if (nextScrollLeft !== viewportLeft || nextScrollTop !== viewportTop) {
-      mountElement.scrollTo({
-        left: nextScrollLeft,
-        top: nextScrollTop
-      })
-    }
   }
 
   const getBlockingCollisionRects = (
@@ -2916,7 +2898,7 @@ export const createPixiTiledMapView = async ({
     }
 
     if (nextCharacter.id === cameraTargetCharacterId && didPositionChange) {
-      keepCharacterVisible(nextCharacter)
+      centerCameraOnCharacter(nextCharacter)
     }
   }
 
@@ -3309,6 +3291,22 @@ export const createPixiTiledMapView = async ({
     clearPressedInputState()
   }
 
+  const handleViewportWheel = (event: WheelEvent) => {
+    event.preventDefault()
+
+    if (event.deltaY === 0) {
+      return
+    }
+
+    setCameraZoom(cameraZoom * Math.exp(-event.deltaY * CAMERA_ZOOM_WHEEL_SPEED))
+  }
+
+  const handleWindowResize = () => {
+    syncViewportDisplayScale()
+    centerCameraOnCharacter(getCharacterStateById(cameraTargetCharacterId))
+    mapOverlay.syncFrame()
+  }
+
   const handleVisibilityChange = () => {
     if (document.hidden) {
       handleWindowBlur()
@@ -3322,6 +3320,10 @@ export const createPixiTiledMapView = async ({
   window.addEventListener('keydown', handleKeyDown)
   window.addEventListener('keyup', handleKeyUp)
   window.addEventListener('blur', handleWindowBlur)
+  window.addEventListener('resize', handleWindowResize)
+  viewportElement.addEventListener('wheel', handleViewportWheel, {
+    passive: false
+  })
   document.addEventListener('visibilitychange', handleVisibilityChange)
   app.ticker.add(updateCharacters)
   app.ticker.add(mapOverlay.syncFrame, undefined, UPDATE_PRIORITY.UTILITY)
@@ -3339,7 +3341,8 @@ export const createPixiTiledMapView = async ({
   )
   app.ticker.add(playerShopOverlay.syncFrame, undefined, UPDATE_PRIORITY.UTILITY)
   syncAllCharacterSprites()
-  centerViewportOnCharacter(getCharacterStateById(cameraTargetCharacterId))
+  syncViewportDisplayScale()
+  centerCameraOnCharacter(getCharacterStateById(cameraTargetCharacterId))
   showSceneIntroBanner()
   mapOverlay.syncFrame()
   playerHudOverlay.syncFrame()
@@ -3358,6 +3361,8 @@ export const createPixiTiledMapView = async ({
     window.removeEventListener('keydown', handleKeyDown)
     window.removeEventListener('keyup', handleKeyUp)
     window.removeEventListener('blur', handleWindowBlur)
+    window.removeEventListener('resize', handleWindowResize)
+    viewportElement.removeEventListener('wheel', handleViewportWheel)
     document.removeEventListener('visibilitychange', handleVisibilityChange)
     app.ticker.remove(updateCharacters)
     app.ticker.remove(mapOverlay.syncFrame)
@@ -3399,7 +3404,7 @@ export const createPixiTiledMapView = async ({
     gameSoundEffects.destroy()
     controllerRuntime.destroy()
     app.destroy({ removeView: true }, { children: true })
-    sceneElement.remove()
+    viewportElement.remove()
   }
 
   if (import.meta.hot) {
@@ -3555,6 +3560,9 @@ const resolveTilesetForTile = (
 
 const clampScrollOffset = (value: number, max: number): number =>
   Math.max(0, Math.min(Math.round(value), Math.max(0, max)))
+
+const clampCameraZoom = (value: number): number =>
+  Math.max(CAMERA_MIN_ZOOM, Math.min(value, CAMERA_MAX_ZOOM))
 
 const isCharacterPositionBlocked = (
   wallTiles: Set<string>,
