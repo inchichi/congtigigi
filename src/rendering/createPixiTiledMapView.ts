@@ -507,6 +507,7 @@ const PLAYER_ATTACK_ROTATION_OFFSET = 1.15
 const PLAYER_ATTACK_SCALE_BOOST = 0.06
 const PLAYER_ATTACK_SLASH_EFFECT_SCALE_X = 0.23
 const PLAYER_ATTACK_SLASH_EFFECT_SCALE_Y = 0.23
+const PLAYER_ATTACK_SLASH_EFFECT_ANIMATION_SPEED = 0.6
 const PLAYER_WEAPON_PLACEMENT_RIGHT = {
   x: 23,
   y: 21,
@@ -1073,10 +1074,14 @@ export const createPixiTiledMapView = async ({
 
     slashSprite.label = 'character:player:slash-effect'
     slashSprite.anchor.set(0.5)
-    slashSprite.animationSpeed = 0.8
+    slashSprite.animationSpeed = PLAYER_ATTACK_SLASH_EFFECT_ANIMATION_SPEED
     slashSprite.loop = false
     slashSprite.roundPixels = true
-    slashSprite.rotation = isHorizontalSlash ? 0 : Math.PI / 2
+    slashSprite.rotation = isHorizontalSlash
+      ? 0
+      : character.facing === 'up'
+        ? -Math.PI / 2
+        : Math.PI / 2
     slashSprite.position.set(
       character.position.x * map.tileWidth + characterPixelWidth / 2,
       character.position.y * map.tileHeight + characterPixelHeight / 2 - 1
