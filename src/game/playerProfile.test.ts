@@ -12,7 +12,7 @@ import {
 describe('createInitialPlayerProfile', () => {
   it('creates the default player HUD profile', () => {
     expect(createInitialPlayerProfile()).toEqual({
-      name: '준수',
+      name: 'zl존 준수',
       job: '초보자',
       level: 1,
       experience: {

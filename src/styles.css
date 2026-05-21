@@ -614,13 +614,40 @@ body.game-root--map-focused > :not(.game-root) {
   color: #2e2313;
 }
 
+.pause-menu-overlay[hidden],
+.pause-menu-overlay [hidden] {
+  display: none !important;
+}
+
 .pause-menu-overlay__panel-body {
   display: grid;
-  grid-template-rows: auto auto auto 1fr;
-  gap: 18px;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 14px;
   width: 100%;
   height: 100%;
-  padding: 28px 30px 26px;
+  padding: 20px 22px 20px;
+}
+
+.pause-menu-overlay__screen-host {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+}
+
+.pause-menu-overlay__screen {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+  min-height: 0;
+  align-content: start;
+}
+
+.pause-menu-overlay__screen--main {
+  grid-template-rows: auto auto auto auto;
+}
+
+.pause-menu-overlay__screen--controls {
+  grid-template-rows: minmax(0, 1fr);
 }
 
 .pause-menu-overlay__title {
@@ -632,10 +659,92 @@ body.game-root--map-focused > :not(.game-root) {
   text-transform: uppercase;
 }
 
+.pause-menu-overlay__key-section {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid rgba(111, 89, 58, 0.34);
+  background: rgba(255, 249, 238, 0.66);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.68);
+  min-height: 0;
+  overflow: auto;
+}
+
+.pause-menu-overlay__key-section-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
+}
+
+.pause-menu-overlay__key-section-title {
+  color: #2e2313;
+  font-size: 0.8rem;
+  letter-spacing: 0.08em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.pause-menu-overlay__key-section-hint {
+  color: #6b5534;
+  font-size: 0.66rem;
+  letter-spacing: 0.04em;
+  line-height: 1.2;
+}
+
+.pause-menu-overlay__key-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 10px;
+}
+
+.pause-menu-overlay__binding-button {
+  appearance: none;
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  padding: 8px 9px;
+  border: 1px solid rgba(111, 89, 58, 0.28);
+  background: rgba(255, 249, 238, 0.82);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.pause-menu-overlay__binding-button:hover,
+.pause-menu-overlay__binding-button:focus-visible {
+  border-color: rgba(111, 89, 58, 0.5);
+  background: rgba(255, 249, 238, 0.94);
+}
+
+.pause-menu-overlay__binding-button--listening {
+  border-color: rgba(139, 111, 63, 0.85);
+  background: rgba(255, 244, 204, 0.96);
+  box-shadow: inset 0 0 0 1px rgba(139, 111, 63, 0.2);
+}
+
+.pause-menu-overlay__binding-label {
+  color: #6b5534;
+  font-size: 0.62rem;
+  letter-spacing: 0.08em;
+  line-height: 1;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.pause-menu-overlay__binding-value {
+  color: #2e2313;
+  font-size: 0.7rem;
+  line-height: 1.2;
+  word-break: keep-all;
+}
+
 .pause-menu-overlay__volume-row {
   display: grid;
   grid-template-columns: 74px minmax(0, 1fr) 48px;
-  gap: 12px;
+  gap: 10px;
   align-items: center;
   min-width: 0;
 }
@@ -643,7 +752,7 @@ body.game-root--map-focused > :not(.game-root) {
 .pause-menu-overlay__volume-label,
 .pause-menu-overlay__volume-value {
   color: #6b5534;
-  font-size: 0.72rem;
+  font-size: 0.7rem;
   letter-spacing: 0.08em;
   line-height: 1;
   text-transform: uppercase;
@@ -662,7 +771,7 @@ body.game-root--map-focused > :not(.game-root) {
 .pause-menu-overlay__resume {
   align-self: end;
   justify-self: center;
-  min-width: 150px;
+  min-width: 168px;
   min-height: 38px;
   padding: 9px 16px;
   border: 1px solid rgba(111, 89, 58, 0.42);
@@ -2201,6 +2310,11 @@ body.game-root--map-focused > :not(.game-root) {
   touch-action: manipulation;
 }
 
+.blacksmith-shop-overlay[hidden],
+.blacksmith-shop-overlay [hidden] {
+  display: none;
+}
+
 .blacksmith-shop-overlay__panel {
   position: absolute;
   left: 50%;
@@ -2351,7 +2465,7 @@ body.game-root--map-focused > :not(.game-root) {
 
 .blacksmith-shop-overlay__portrait-gold {
   color: #6b5534;
-  font-size: 0.66rem;
+  font-size: 0.74rem;
   letter-spacing: 0.06em;
   line-height: 1.2;
   text-transform: uppercase;
@@ -2678,6 +2792,14 @@ body.game-root--map-focused > :not(.game-root) {
   transform: translateY(-1px);
 }
 
+.blacksmith-shop-overlay__row--selected {
+  border-color: rgba(141, 110, 49, 0.72);
+  background: rgba(244, 231, 197, 0.82);
+  box-shadow:
+    inset 0 0 0 1px rgba(141, 110, 49, 0.16),
+    0 0 0 1px rgba(141, 110, 49, 0.08);
+}
+
 .blacksmith-shop-overlay__row--disabled,
 .blacksmith-shop-overlay__row:disabled {
   opacity: 0.5;
@@ -2694,13 +2816,13 @@ body.game-root--map-focused > :not(.game-root) {
 
 .blacksmith-shop-overlay__row-content {
   display: grid;
-  gap: 3px;
+  gap: 4px;
   min-width: 0;
 }
 
 .blacksmith-shop-overlay__row-name {
   color: #2e2313;
-  font-size: 0.74rem;
+  font-size: 0.8rem;
   letter-spacing: 0.06em;
   line-height: 1.05;
   overflow: hidden;
@@ -2710,7 +2832,7 @@ body.game-root--map-focused > :not(.game-root) {
 
 .blacksmith-shop-overlay__row-meta {
   color: #6b5534;
-  font-size: 0.56rem;
+  font-size: 0.62rem;
   letter-spacing: 0.06em;
   line-height: 1.2;
   overflow: hidden;
@@ -2725,7 +2847,7 @@ body.game-root--map-focused > :not(.game-root) {
   border-radius: 0;
   background: rgba(244, 231, 197, 0.6);
   color: #2e2313;
-  font-size: 0.62rem;
+  font-size: 0.68rem;
   letter-spacing: 0.08em;
   line-height: 1;
   white-space: nowrap;
@@ -2749,6 +2871,92 @@ body.game-root--map-focused > :not(.game-root) {
   line-height: 1.2;
   text-align: center;
   text-transform: uppercase;
+}
+
+.potion-shop-overlay__quantity-dialog {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  background: rgba(255, 249, 238, 0.26);
+}
+
+.potion-shop-overlay__quantity-dialog[hidden] {
+  display: none;
+}
+
+.potion-shop-overlay__quantity-dialog-card {
+  display: grid;
+  gap: 10px;
+  width: min(280px, calc(100% - 24px));
+  padding: 16px 18px 14px;
+  border: 1px solid rgba(111, 89, 58, 0.42);
+  background: rgba(255, 249, 238, 0.96);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72);
+}
+
+.potion-shop-overlay__quantity-dialog-title {
+  color: #2e2313;
+  font-size: 0.92rem;
+  letter-spacing: 0.1em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.potion-shop-overlay__quantity-dialog-subtitle {
+  color: #6b5534;
+  font-size: 0.66rem;
+  letter-spacing: 0.06em;
+  line-height: 1.3;
+}
+
+.potion-shop-overlay__quantity-dialog-field {
+  display: grid;
+  gap: 6px;
+}
+
+.potion-shop-overlay__quantity-dialog-field-label {
+  color: #6b5534;
+  font-size: 0.62rem;
+  letter-spacing: 0.08em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.potion-shop-overlay__quantity-input {
+  width: 100%;
+  min-width: 0;
+  padding: 7px 8px;
+  border: 1px solid rgba(111, 89, 58, 0.42);
+  background: rgba(255, 249, 238, 0.86);
+  color: #2e2313;
+  font: inherit;
+  font-size: 0.78rem;
+  letter-spacing: 0.04em;
+}
+
+.potion-shop-overlay__quantity-input:focus-visible {
+  outline: 2px solid rgba(111, 89, 58, 0.8);
+  outline-offset: 2px;
+}
+
+.potion-shop-overlay__quantity-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.potion-shop-overlay__quantity-begin,
+.potion-shop-overlay__quantity-confirm,
+.potion-shop-overlay__quantity-cancel {
+  position: static;
+  width: auto;
+  min-width: 66px;
+  height: auto;
+  padding: 8px 12px;
+  font-size: 0.72rem;
 }
 
 @keyframes blacksmith-shop-overlay-panel-enter {

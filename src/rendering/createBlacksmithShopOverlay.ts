@@ -19,6 +19,7 @@ import type { PlayerInventory } from '../game/playerInventory'
 
 type CreateBlacksmithShopOverlayInput = {
   mountElement: HTMLElement
+  getPlayerName: () => string
   getPlayerInventory: () => PlayerInventory
   getMerchantInventory: () => PlayerInventory
   getIsOpen: () => boolean
@@ -73,6 +74,30 @@ const UI_SPRITESHEET_WIDTH = 512
 const UI_SPRITESHEET_HEIGHT = 512
 const TINY_DUNGEON_TILESET_WIDTH = 192
 const TINY_DUNGEON_TILESET_HEIGHT = 176
+const POTION_ICON_FRAME_BY_ID = {
+  'health-potion': {
+    imageUrl: TINY_DUNGEON_TILESET_IMAGE_URL,
+    imageWidth: TINY_DUNGEON_TILESET_WIDTH,
+    imageHeight: TINY_DUNGEON_TILESET_HEIGHT,
+    frame: {
+      x: 112,
+      y: 144,
+      width: 16,
+      height: 16
+    }
+  },
+  'mana-potion': {
+    imageUrl: TINY_DUNGEON_TILESET_IMAGE_URL,
+    imageWidth: TINY_DUNGEON_TILESET_WIDTH,
+    imageHeight: TINY_DUNGEON_TILESET_HEIGHT,
+    frame: {
+      x: 128,
+      y: 144,
+      width: 16,
+      height: 16
+    }
+  }
+} as const
 const ICON_CHECK_FRAME = {
   x: 369,
   y: 184,
@@ -201,6 +226,7 @@ const PORTRAIT_SCALE = 3
 
 export const createBlacksmithShopOverlay = ({
   mountElement,
+  getPlayerName,
   getPlayerInventory,
   getMerchantInventory,
   getIsOpen,
@@ -296,7 +322,7 @@ export const createBlacksmithShopOverlay = ({
   titleElement.className = 'blacksmith-shop-overlay__title'
   titleElement.textContent = '대장장이 상점'
   subtitleElement.className = 'blacksmith-shop-overlay__subtitle'
-  subtitleElement.textContent = '왼쪽은 구매, 오른쪽은 판매'
+  subtitleElement.hidden = true
 
   closeButton.type = 'button'
   closeButton.className = 'blacksmith-shop-overlay__close'
@@ -311,16 +337,16 @@ export const createBlacksmithShopOverlay = ({
   playerPortrait.className = 'blacksmith-shop-overlay__portrait'
   playerCardText.className = 'blacksmith-shop-overlay__portrait-text'
   playerName.className = 'blacksmith-shop-overlay__portrait-name'
-  playerName.textContent = '플레이어'
+  playerName.textContent = getPlayerName()
   playerGold.className = 'blacksmith-shop-overlay__portrait-gold'
   playerCardText.append(playerName, playerGold)
   playerCard.append(playerPortrait, playerCardText)
 
   panes.className = 'blacksmith-shop-overlay__panes'
   statusElement.className = 'blacksmith-shop-overlay__status'
-  statusElement.textContent = '아이템을 클릭해서 사고팔 수 있습니다'
+  statusElement.hidden = true
   footerElement.className = 'blacksmith-shop-overlay__footer'
-  footerElement.textContent = 'Esc로 닫기 · 탭으로 분류 전환'
+  footerElement.hidden = true
 
   modeBackButton.type = 'button'
   modeBackButton.className = 'blacksmith-shop-overlay__mode-back'
@@ -417,6 +443,7 @@ export const createBlacksmithShopOverlay = ({
 
   function syncLayout() {
     const isOpen = getIsOpen()
+    const playerNameText = getPlayerName()
     const playerInventory = getPlayerInventory()
 
     if (isOpen && !wasOpen) {
@@ -465,25 +492,20 @@ export const createBlacksmithShopOverlay = ({
 
     if (isMenuMode) {
       titleElement.textContent = '대장장이와 상호작용'
-      subtitleElement.textContent = '상점, 강화, 수리를 먼저 선택하세요'
-      statusElement.textContent = '원하는 서비스를 선택하세요'
-      footerElement.textContent = '상점을 선택하면 거래 화면으로 넘어갑니다'
     } else if (isShopMode) {
       titleElement.textContent = '대장장이 상점'
-      subtitleElement.textContent = '왼쪽은 구매, 오른쪽은 판매'
-      statusElement.textContent =
-        statusMessage ?? '왼쪽은 상점 재고 구매, 오른쪽은 내 인벤토리 판매입니다'
-      footerElement.textContent = 'Esc로 닫기 · 탭으로 분류 전환'
     } else {
       const modeLabel = currentServiceMode === 'upgrade' ? '강화' : '수리'
 
       titleElement.textContent = `${modeLabel} 준비중입니다`
-      subtitleElement.textContent = '아직 구현되지 않은 기능입니다'
       workshopBadge.textContent = '준비중입니다'
       workshopTitle.textContent = `${modeLabel} 준비중입니다`
       workshopDescription.textContent = '아직 구현되지 않았습니다.'
     }
 
+    statusElement.hidden = statusMessage === undefined
+    statusElement.textContent = statusMessage ?? ''
+    playerName.textContent = playerNameText
     playerGold.textContent = `${formatGoldAmount(playerInventory.gold)}`
 
     if (isShopMode) {
@@ -733,13 +755,20 @@ export const createBlacksmithShopOverlay = ({
         kind === 'buy'
           ? `구매 · ${getPlayerEquipmentSlotLabelById(equipmentDefinition.slotId)} · 레벨 ${equipmentDefinition.level}`
           : `판매 · ${getPlayerEquipmentSlotLabelById(equipmentDefinition.slotId)} · 레벨 ${equipmentDefinition.level}`
-    } else {
-      setGenericIcon(row.icon)
-      row.name.textContent = potionDefinition?.label ?? item.label
+    } else if (potionDefinition) {
+      renderPotionIcon(row.icon, potionDefinition.id, ROW_ICON_SCALE)
+      row.name.textContent = potionDefinition.label
       row.meta.textContent =
         kind === 'buy'
           ? '구매 · 거래 불가'
-          : `판매 · 소비품 · ${potionDefinition?.description ?? item.label}`
+          : `판매 · 소비품 · ${potionDefinition.description}`
+    } else {
+      setGenericIcon(row.icon)
+      row.name.textContent = item.label
+      row.meta.textContent =
+        kind === 'buy'
+          ? '구매 · 거래 불가'
+          : `판매 · 소비품 · ${item.label}`
     }
 
     if (kind === 'buy') {
@@ -821,6 +850,14 @@ const renderEquipmentIcon = (
   const frame = EQUIPMENT_ICON_FRAME_BY_KEY[definition.icon.key]
 
   setBackgroundFrame(element, frame, scale * definition.icon.scale)
+}
+
+const renderPotionIcon = (
+  element: HTMLElement,
+  itemId: keyof typeof POTION_ICON_FRAME_BY_ID,
+  scale: number
+) => {
+  setBackgroundFrame(element, POTION_ICON_FRAME_BY_ID[itemId], scale)
 }
 
 const setGenericIcon = (element: HTMLElement) => {

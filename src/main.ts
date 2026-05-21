@@ -29,6 +29,11 @@ import { createInitialPlayerEquipment } from './game/playerEquipment'
 import { createInitialPlayerInventory } from './game/playerInventory'
 import { createInitialPlayerProfile } from './game/playerProfile'
 import { createInitialPlayerQuickslots } from './game/playerQuickslots'
+import {
+  normalizeStoredPlayerControlBindings,
+  PLAYER_CONTROL_BINDINGS_STORAGE_KEY,
+  type PlayerControlBindings
+} from './game/playerControls'
 import { createInitialQuestLog } from './game/questLog'
 import { getSceneIntroMessage } from './game/sceneIntro'
 import { createPixiTiledMapView } from './rendering/createPixiTiledMapView'
@@ -110,6 +115,7 @@ const playerProfile = createInitialPlayerProfile()
 let playerEquipment = createInitialPlayerEquipment()
 let playerInventory = createInitialPlayerInventory()
 let playerQuickslots = createInitialPlayerQuickslots()
+let playerControlBindings = readStoredPlayerControlBindings()
 let questLog = createInitialQuestLog()
 let merchantInventory = createInitialBlacksmithInventory()
 let potionMerchantInventory = createInitialPotionInventory()
@@ -164,6 +170,7 @@ const bootstrapScene = async (
     playerEquipment,
     playerInventory,
     playerQuickslots,
+    playerControlBindings,
     questLog,
     merchantInventory,
     potionMerchantInventory,
@@ -189,6 +196,10 @@ const bootstrapScene = async (
     },
     onPlayerQuickslotsChange: (nextQuickslots) => {
       playerQuickslots = nextQuickslots
+    },
+    onPlayerControlBindingsChange: (nextControlBindings) => {
+      playerControlBindings = nextControlBindings
+      savePlayerControlBindings(nextControlBindings)
     },
     onQuestLogChange: (nextQuestLog) => {
       questLog = nextQuestLog
@@ -390,6 +401,31 @@ function saveAudioSettings(nextAudioSettings: AudioSettings): void {
   window.localStorage.setItem(
     AUDIO_SETTINGS_STORAGE_KEY,
     JSON.stringify(nextAudioSettings)
+  )
+}
+
+function readStoredPlayerControlBindings(): PlayerControlBindings {
+  const storedControlBindings = window.localStorage.getItem(
+    PLAYER_CONTROL_BINDINGS_STORAGE_KEY
+  )
+
+  if (!storedControlBindings) {
+    return normalizeStoredPlayerControlBindings(undefined)
+  }
+
+  try {
+    return normalizeStoredPlayerControlBindings(JSON.parse(storedControlBindings))
+  } catch {
+    return normalizeStoredPlayerControlBindings(undefined)
+  }
+}
+
+function savePlayerControlBindings(
+  nextControlBindings: PlayerControlBindings
+): void {
+  window.localStorage.setItem(
+    PLAYER_CONTROL_BINDINGS_STORAGE_KEY,
+    JSON.stringify(nextControlBindings)
   )
 }
 

@@ -10,14 +10,13 @@ import {
   getPlayerEquipmentSlotLabelById
 } from '../game/playerEquipment'
 import {
-  findFirstEmptyPlayerInventorySlotIndex,
   getPlayerInventoryFilledSlotCount
 } from '../game/playerInventory'
 import type { PlayerInventory } from '../game/playerInventory'
-import { getResponsiveUiScale } from './getResponsiveUiScale'
 
 type CreatePotionShopOverlayInput = {
   mountElement: HTMLElement
+  getPlayerName: () => string
   getPlayerInventory: () => PlayerInventory
   getMerchantInventory: () => PlayerInventory
   getIsOpen: () => boolean
@@ -98,10 +97,12 @@ const POTION_MERCHANT_PORTRAIT_FRAME = {
   height: 16
 }
 const POISON_SHOP_ROW_ICON_SCALE = 0.85
+const MIN_TRADE_SLOT_COUNT = 8
 const PORTRAIT_SCALE = 3
 
 export const createPotionShopOverlay = ({
   mountElement,
+  getPlayerName,
   getPlayerInventory,
   getMerchantInventory,
   getIsOpen,
@@ -121,6 +122,7 @@ export const createPotionShopOverlay = ({
   const centerCard = document.createElement('div')
   const titleElement = document.createElement('div')
   const subtitleElement = document.createElement('div')
+  const modeBackButton = document.createElement('button')
   const closeButton = document.createElement('button')
   const playerCard = document.createElement('div')
   const playerPortrait = document.createElement('span')
@@ -129,6 +131,16 @@ export const createPotionShopOverlay = ({
   const playerGold = document.createElement('div')
   const panes = document.createElement('div')
   const statusElement = document.createElement('div')
+  const quantityDialog = document.createElement('div')
+  const quantityDialogCard = document.createElement('div')
+  const quantityDialogTitle = document.createElement('div')
+  const quantityDialogSubtitle = document.createElement('div')
+  const quantityDialogField = document.createElement('label')
+  const quantityDialogFieldLabel = document.createElement('span')
+  const quantityInput = document.createElement('input')
+  const quantityDialogActions = document.createElement('div')
+  const quantityConfirmButton = document.createElement('button')
+  const quantityCancelButton = document.createElement('button')
   const footerElement = document.createElement('div')
   const merchantPane = createTradePane({
     kind: 'buy',
@@ -148,6 +160,15 @@ export const createPotionShopOverlay = ({
   })
   let statusMessage: string | undefined
   let wasOpen = false
+  let suppressRowClicks = false
+  let suppressRowClicksFrameId = 0
+  let pendingTrade:
+    | {
+        kind: TradeMode
+        slotIndex: number
+        itemLabel: string
+      }
+    | undefined
 
   overlayRoot.className = 'blacksmith-shop-overlay potion-shop-overlay'
 
@@ -181,7 +202,13 @@ export const createPotionShopOverlay = ({
   titleElement.className = 'blacksmith-shop-overlay__title'
   titleElement.textContent = '물약 상점'
   subtitleElement.className = 'blacksmith-shop-overlay__subtitle'
-  subtitleElement.textContent = '왼쪽은 구매, 오른쪽은 판매'
+  subtitleElement.hidden = true
+
+  modeBackButton.type = 'button'
+  modeBackButton.className = 'blacksmith-shop-overlay__mode-back'
+  modeBackButton.textContent = '메뉴로 돌아가기'
+  modeBackButton.setAttribute('aria-label', '물약 상점 닫기')
+  modeBackButton.title = '물약 상점 닫기'
 
   closeButton.type = 'button'
   closeButton.className = 'blacksmith-shop-overlay__close'
@@ -190,39 +217,88 @@ export const createPotionShopOverlay = ({
   closeButton.title = '거래 닫기 (Esc)'
   closeButton.textContent = '×'
 
-  centerCard.append(titleElement, subtitleElement)
+  centerCard.append(titleElement, subtitleElement, modeBackButton)
 
   playerCard.className = 'blacksmith-shop-overlay__portrait-card'
   playerPortrait.className = 'blacksmith-shop-overlay__portrait'
   playerCardText.className = 'blacksmith-shop-overlay__portrait-text'
   playerName.className = 'blacksmith-shop-overlay__portrait-name'
-  playerName.textContent = '플레이어'
+  playerName.textContent = getPlayerName()
   playerGold.className = 'blacksmith-shop-overlay__portrait-gold'
   playerCardText.append(playerName, playerGold)
   playerCard.append(playerPortrait, playerCardText)
 
   panes.className = 'blacksmith-shop-overlay__panes'
   statusElement.className = 'blacksmith-shop-overlay__status'
-  statusElement.textContent = '물약을 클릭해서 사고팔 수 있습니다'
+  statusElement.hidden = true
+  quantityDialog.className = 'potion-shop-overlay__quantity-dialog'
+  quantityDialog.hidden = true
+  quantityDialog.setAttribute('role', 'dialog')
+  quantityDialog.setAttribute('aria-modal', 'false')
+  quantityDialogCard.className = 'potion-shop-overlay__quantity-dialog-card'
+  quantityDialogTitle.className = 'potion-shop-overlay__quantity-dialog-title'
+  quantityDialogTitle.textContent = '구매 수량'
+  quantityDialogSubtitle.className =
+    'potion-shop-overlay__quantity-dialog-subtitle'
+  quantityDialogField.className = 'potion-shop-overlay__quantity-dialog-field'
+  quantityDialogFieldLabel.className =
+    'potion-shop-overlay__quantity-dialog-field-label'
+  quantityDialogFieldLabel.textContent = '수량'
+  quantityInput.className = 'pause-menu-overlay__volume-input potion-shop-overlay__quantity-input'
+  quantityInput.type = 'number'
+  quantityInput.min = '1'
+  quantityInput.step = '1'
+  quantityInput.value = '1'
+  quantityInput.inputMode = 'numeric'
+  quantityDialogActions.className = 'potion-shop-overlay__quantity-dialog-actions'
+  quantityConfirmButton.type = 'button'
+  quantityConfirmButton.className = 'blacksmith-shop-overlay__close potion-shop-overlay__quantity-confirm'
+  quantityConfirmButton.textContent = '확인'
+  quantityCancelButton.type = 'button'
+  quantityCancelButton.className = 'blacksmith-shop-overlay__close potion-shop-overlay__quantity-cancel'
+  quantityCancelButton.textContent = '취소'
+  quantityDialogField.append(quantityDialogFieldLabel, quantityInput)
+  quantityDialogActions.append(quantityConfirmButton, quantityCancelButton)
+  quantityDialogCard.append(
+    quantityDialogTitle,
+    quantityDialogSubtitle,
+    quantityDialogField,
+    quantityDialogActions
+  )
+  quantityDialog.append(quantityDialogCard)
   footerElement.className = 'blacksmith-shop-overlay__footer'
-  footerElement.textContent = 'Esc로 닫기'
+  footerElement.hidden = true
 
   setPortraitFrame(merchantPortrait, POTION_MERCHANT_PORTRAIT_FRAME, PORTRAIT_SCALE)
   setPortraitFrame(playerPortrait, PLAYER_PORTRAIT_FRAME, PORTRAIT_SCALE)
 
   header.append(merchantCard, centerCard, playerCard)
   panes.append(merchantPane.root, playerPane.root)
-  panelBody.append(header, panes, statusElement, footerElement)
-  panel.append(panelBody)
+  panelBody.style.position = 'relative'
+  panelBody.append(header, panes, statusElement, footerElement, quantityDialog)
+  panel.append(closeButton, panelBody)
   overlayRoot.append(backdropButton, panel)
   mountElement.append(overlayRoot)
 
   function syncLayout() {
     const isOpen = getIsOpen()
+    const playerNameText = getPlayerName()
     const playerInventory = getPlayerInventory()
 
     if (isOpen && !wasOpen) {
       statusMessage = undefined
+      closeQuantityDialog()
+      panelBody.scrollTop = 0
+      // Ignore the input that opened the shop so it cannot auto-click a row.
+      suppressRowClicks = true
+      suppressRowClicksFrameId += 1
+      const frameId = suppressRowClicksFrameId
+
+      window.requestAnimationFrame(() => {
+        if (suppressRowClicksFrameId === frameId && getIsOpen()) {
+          suppressRowClicks = false
+        }
+      })
     }
 
     overlayRoot.hidden = !isOpen
@@ -234,6 +310,9 @@ export const createPotionShopOverlay = ({
       panel.hidden = true
       closeButton.hidden = true
       statusMessage = undefined
+      closeQuantityDialog()
+      suppressRowClicks = false
+      suppressRowClicksFrameId += 1
       wasOpen = false
       return
     }
@@ -241,57 +320,54 @@ export const createPotionShopOverlay = ({
     backdropButton.hidden = false
     closeButton.hidden = false
     panel.hidden = false
-    panel.style.transformOrigin = 'center center'
-    panel.style.transform = `translate(-50%, -50%) scale(${getResponsiveUiScale()})`
-    panel.style.backgroundImage = 'none'
-    panel.style.backgroundRepeat = 'no-repeat'
-    panel.style.backgroundPosition = '0 0'
-    panel.style.backgroundSize = '100% 100%'
-    panel.style.width = 'max-content'
-    panel.style.height = 'max-content'
-    panelBody.style.width = 'max-content'
-    panelBody.style.height = 'max-content'
 
     titleElement.textContent = '물약 상점'
-    subtitleElement.textContent = '왼쪽은 구매, 오른쪽은 판매'
-    statusElement.textContent =
-      statusMessage ?? '체력 물약과 마나 물약을 준비해뒀어.'
-    footerElement.textContent = 'Esc로 닫기'
+    statusElement.hidden = statusMessage === undefined
+    statusElement.textContent = statusMessage ?? ''
 
+    playerName.textContent = playerNameText
     playerGold.textContent = `${formatGoldAmount(playerInventory.gold)}`
+    syncQuantityDialog()
     merchantPane.sync()
     playerPane.sync()
+
     wasOpen = true
   }
 
   function handleMerchantRowClick(slotIndex: number) {
-    const nextState = buyPotionShopItem({
-      playerInventory: getPlayerInventory(),
-      merchantInventory: getMerchantInventory(),
-      merchantSlotIndex: slotIndex
-    })
+    if (suppressRowClicks) {
+      return
+    }
 
-    statusMessage = nextState.message
-    onRequestTradeStateChange(
-      nextState.playerInventory,
-      nextState.merchantInventory
-    )
-    syncLayout()
+    const item = getMerchantInventory().slots[slotIndex]
+
+    if (!item) {
+      return
+    }
+
+    openQuantityDialog({
+      kind: 'buy',
+      slotIndex,
+      itemLabel: item.label
+    })
   }
 
   function handlePlayerRowClick(slotIndex: number) {
-    const nextState = sellPotionShopItem({
-      playerInventory: getPlayerInventory(),
-      merchantInventory: getMerchantInventory(),
-      playerSlotIndex: slotIndex
-    })
+    if (suppressRowClicks) {
+      return
+    }
 
-    statusMessage = nextState.message
-    onRequestTradeStateChange(
-      nextState.playerInventory,
-      nextState.merchantInventory
-    )
-    syncLayout()
+    const item = getPlayerInventory().slots[slotIndex]
+
+    if (!item) {
+      return
+    }
+
+    openQuantityDialog({
+      kind: 'sell',
+      slotIndex,
+      itemLabel: item.label
+    })
   }
 
   function handleCloseButtonClick(event: MouseEvent) {
@@ -306,20 +382,61 @@ export const createPotionShopOverlay = ({
     onRequestOpenChange(false)
   }
 
+  function handleModeBackButtonClick(event: MouseEvent) {
+    event.preventDefault()
+    event.stopPropagation()
+    onRequestOpenChange(false)
+  }
+
   function handleBackdropClick(event: MouseEvent) {
     event.preventDefault()
     event.stopPropagation()
     onRequestOpenChange(false)
   }
 
+  function handleQuantityConfirmClick(event: MouseEvent) {
+    event.preventDefault()
+    event.stopPropagation()
+    commitPendingTrade()
+  }
+
+  function handleQuantityCancelClick(event: MouseEvent) {
+    event.preventDefault()
+    event.stopPropagation()
+    closeQuantityDialog()
+    syncLayout()
+  }
+
+  function handleQuantityInputKeydown(event: KeyboardEvent) {
+    if (event.key === 'Enter') {
+      event.preventDefault()
+      commitPendingTrade()
+      return
+    }
+
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      closeQuantityDialog()
+      syncLayout()
+    }
+  }
+
   closeButton.addEventListener('click', handleCloseButtonClick)
   closeButton.addEventListener('pointerdown', handleCloseButtonPointerDown)
+  modeBackButton.addEventListener('click', handleModeBackButtonClick)
   backdropButton.addEventListener('click', handleBackdropClick)
+  quantityConfirmButton.addEventListener('click', handleQuantityConfirmClick)
+  quantityCancelButton.addEventListener('click', handleQuantityCancelClick)
+  quantityInput.addEventListener('keydown', handleQuantityInputKeydown)
 
   const destroy = () => {
     closeButton.removeEventListener('click', handleCloseButtonClick)
     closeButton.removeEventListener('pointerdown', handleCloseButtonPointerDown)
+    modeBackButton.removeEventListener('click', handleModeBackButtonClick)
     backdropButton.removeEventListener('click', handleBackdropClick)
+    quantityConfirmButton.removeEventListener('click', handleQuantityConfirmClick)
+    quantityCancelButton.removeEventListener('click', handleQuantityCancelClick)
+    quantityInput.removeEventListener('keydown', handleQuantityInputKeydown)
     overlayRoot.remove()
   }
 
@@ -366,7 +483,10 @@ export const createPotionShopOverlay = ({
         ? '상점 재고가 비어 있습니다'
         : '판매할 아이템이 없습니다'
 
-    const initialSlots = getInventory().slots.length
+    const initialSlots = Math.max(
+      getInventory().slots.length,
+      MIN_TRADE_SLOT_COUNT
+    )
 
     for (let index = 0; index < initialSlots; index += 1) {
       const button = document.createElement('button')
@@ -412,26 +532,28 @@ export const createPotionShopOverlay = ({
     const syncPane = () => {
       const inventory = getInventory()
       const counterInventory = getCounterInventory()
-      const counterHasSpace =
-        findFirstEmptyPlayerInventorySlotIndex(counterInventory) !== undefined
       const visibleRows = rows.map((row, index) => {
         const item = inventory.slots[index]
 
         return syncPaneRow({
           kind,
+          slotIndex: index,
           row,
           item,
           inventory,
-          counterInventory,
-          counterHasSpace
+          counterInventory
         })
       })
       const visibleCount = visibleRows.filter(Boolean).length
+      const visibleSlotCount = Math.max(
+        inventory.slots.length,
+        MIN_TRADE_SLOT_COUNT
+      )
 
       summaryElement.textContent =
         kind === 'buy'
-          ? `상점 재고 · ${getPlayerInventoryFilledSlotCount(inventory)} / ${inventory.slots.length} 칸`
-          : `내 인벤토리 · ${getPlayerInventoryFilledSlotCount(inventory)} / ${inventory.slots.length} 칸`
+          ? `상점 재고 · ${getPlayerInventoryFilledSlotCount(inventory)} / ${visibleSlotCount} 칸`
+          : `내 인벤토리 · ${getPlayerInventoryFilledSlotCount(inventory)} / ${visibleSlotCount} 칸`
 
       emptyState.hidden = visibleCount > 0
     }
@@ -450,18 +572,18 @@ export const createPotionShopOverlay = ({
 
   function syncPaneRow({
     kind,
+    slotIndex,
     row,
     item,
     inventory,
-    counterInventory,
-    counterHasSpace
+    counterInventory
   }: {
     kind: TradeMode
+    slotIndex: number
     row: TradeRowElements
     item: PlayerInventory['slots'][number]
     inventory: PlayerInventory
     counterInventory: PlayerInventory
-    counterHasSpace: boolean
   }): boolean {
     const potionDefinition = item ? getPotionShopItemDefinitionById(item.id) : undefined
     const equipmentDefinition = item
@@ -477,11 +599,26 @@ export const createPotionShopOverlay = ({
       !itemDefinition ||
       (kind === 'buy' ? !potionDefinition : false)
     ) {
-      row.button.hidden = true
-      return false
+      row.button.hidden = false
+      row.button.disabled = true
+      row.button.classList.remove('blacksmith-shop-overlay__row--selected')
+      row.button.classList.add('blacksmith-shop-overlay__row--disabled')
+      row.button.title =
+        kind === 'buy' ? '빈 상품 칸입니다.' : '빈 판매 칸입니다.'
+      row.name.textContent = ''
+      row.meta.textContent = ''
+      row.price.textContent = ''
+      clearRowIcon(row.icon)
+      return true
     }
 
     row.button.hidden = false
+    row.button.disabled = false
+    row.button.classList.remove('blacksmith-shop-overlay__row--disabled')
+    row.button.classList.toggle(
+      'blacksmith-shop-overlay__row--selected',
+      pendingTrade?.kind === kind && pendingTrade.slotIndex === slotIndex
+    )
     if (potionDefinition) {
       renderPotionIcon(row.icon, potionDefinition.id, POISON_SHOP_ROW_ICON_SCALE)
     } else {
@@ -490,26 +627,26 @@ export const createPotionShopOverlay = ({
     row.name.textContent = itemDefinition.label
     row.meta.textContent =
       kind === 'buy'
-        ? `구매 · x${item.quantity} · ${itemDefinition.description}`
+        ? `구매 · 클릭 후 수량 입력 · ${itemDefinition.description}`
         : equipmentDefinition
-          ? `판매 · ${getPlayerEquipmentSlotLabelById(equipmentDefinition.slotId)} · ${equipmentDefinition.description}`
-          : `판매 · 소비품 · ${itemDefinition.description}`
+          ? `판매 · 클릭 후 수량 입력 · ${getPlayerEquipmentSlotLabelById(equipmentDefinition.slotId)} · ${equipmentDefinition.description}`
+          : `판매 · 클릭 후 수량 입력 · 소비품 · ${itemDefinition.description}`
 
     if (kind === 'buy') {
       const price = getPotionShopBuyPriceById(itemDefinition.id)
       const canAfford = price !== undefined && inventory.gold >= price
-      const canBuy = price !== undefined && canAfford && counterHasSpace
+      const canBuy = price !== undefined && canAfford
 
       row.price.textContent = price !== undefined ? formatGoldAmount(price) : '--'
       row.button.disabled = !canBuy
       row.button.classList.toggle('blacksmith-shop-overlay__row--disabled', !canBuy)
       row.button.title = canBuy
-        ? `${itemDefinition.label} 구매`
+        ? `${itemDefinition.label} 클릭 후 수량 입력`
         : price === undefined
           ? '구매할 수 없는 아이템입니다.'
           : !canAfford
             ? '돈이 부족합니다.'
-            : '인벤토리가 가득 찼습니다.'
+            : '구매하려면 수량을 입력하세요.'
       return true
     }
 
@@ -520,11 +657,109 @@ export const createPotionShopOverlay = ({
     row.button.disabled = !canSell
     row.button.classList.toggle('blacksmith-shop-overlay__row--disabled', !canSell)
     row.button.title = canSell
-      ? `${itemDefinition.label} 판매`
+      ? `${itemDefinition.label} 클릭 후 수량 입력`
       : price === undefined
         ? '판매할 수 없는 아이템입니다.'
         : '상점 보유금이 부족합니다.'
     return true
+  }
+
+  function openQuantityDialog({
+    kind,
+    slotIndex,
+    itemLabel
+  }: {
+    kind: TradeMode
+    slotIndex: number
+    itemLabel: string
+  }) {
+    pendingTrade = {
+      kind,
+      slotIndex,
+      itemLabel
+    }
+    quantityInput.value = '1'
+    syncLayout()
+    quantityDialog.hidden = false
+    quantityInput.focus()
+    quantityInput.select()
+  }
+
+  function closeQuantityDialog() {
+    pendingTrade = undefined
+    quantityDialog.hidden = true
+  }
+
+  function syncQuantityDialog() {
+    if (!pendingTrade) {
+      quantityDialog.hidden = true
+      return
+    }
+
+    quantityDialog.hidden = false
+    quantityDialogTitle.textContent =
+      pendingTrade.kind === 'buy' ? '구매 수량' : '판매 수량'
+    quantityDialogSubtitle.textContent = pendingTrade.itemLabel
+    quantityDialogFieldLabel.textContent = '수량'
+    quantityConfirmButton.textContent =
+      pendingTrade.kind === 'buy' ? '구매' : '판매'
+  }
+
+  function commitPendingTrade() {
+    if (!pendingTrade) {
+      return
+    }
+
+    const quantity = parseQuantityInput(quantityInput.value)
+
+    if (quantity === undefined) {
+      statusMessage = '수량은 1개 이상의 정수여야 합니다.'
+      syncLayout()
+      quantityInput.focus()
+      quantityInput.select()
+      return
+    }
+
+    const nextState =
+      pendingTrade.kind === 'buy'
+        ? buyPotionShopItem({
+            playerInventory: getPlayerInventory(),
+            merchantInventory: getMerchantInventory(),
+            merchantSlotIndex: pendingTrade.slotIndex,
+            quantity
+          })
+        : sellPotionShopItem({
+            playerInventory: getPlayerInventory(),
+            merchantInventory: getMerchantInventory(),
+            playerSlotIndex: pendingTrade.slotIndex,
+            quantity
+          })
+
+    statusMessage = nextState.message
+    if (nextState.ok) {
+      onRequestTradeStateChange(
+        nextState.playerInventory,
+        nextState.merchantInventory
+      )
+      closeQuantityDialog()
+    }
+    syncLayout()
+    if (!nextState.ok) {
+      quantityInput.focus()
+      quantityInput.select()
+    }
+  }
+
+  function parseQuantityInput(value: string): number | undefined {
+    const normalizedValue = value.replace(/[\s,]/g, '')
+
+    if (normalizedValue.length === 0) {
+      return undefined
+    }
+
+    const quantity = Number(normalizedValue)
+
+    return Number.isInteger(quantity) && quantity > 0 ? quantity : undefined
   }
 }
 
@@ -543,6 +778,17 @@ const setGenericIcon = (element: HTMLElement) => {
   element.style.backgroundColor = 'rgba(141, 110, 49, 0.18)'
   element.style.border = '1px solid rgba(111, 89, 58, 0.42)'
   element.style.borderRadius = '50%'
+  element.style.width = '16px'
+  element.style.height = '16px'
+}
+
+const clearRowIcon = (element: HTMLElement) => {
+  element.style.backgroundImage = 'none'
+  element.style.backgroundPosition = '0 0'
+  element.style.backgroundSize = 'auto'
+  element.style.backgroundColor = 'transparent'
+  element.style.border = '0'
+  element.style.borderRadius = '0'
   element.style.width = '16px'
   element.style.height = '16px'
 }

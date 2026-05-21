@@ -56,7 +56,7 @@ const PLAYER_STAT_LABEL_BY_ID: Record<PlayerStatId, string> = {
 }
 
 export const createInitialPlayerProfile = (): PlayerProfile => ({
-  name: '준수',
+  name: 'zl존 준수',
   job: PLAYER_STARTING_JOB,
   level: 1,
   experience: {

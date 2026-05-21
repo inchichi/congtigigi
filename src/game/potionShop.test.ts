@@ -18,12 +18,12 @@ describe('createInitialPotionInventory', () => {
         {
           id: 'health-potion',
           label: '체력 회복 포션',
-          quantity: 30
+          quantity: 999_999
         },
         {
           id: 'mana-potion',
           label: '마나 회복 포션',
-          quantity: 30
+          quantity: 999_999
         },
         undefined,
         undefined
@@ -33,7 +33,7 @@ describe('createInitialPotionInventory', () => {
 })
 
 describe('buyPotionShopItem', () => {
-  it('moves a potion stack from the merchant inventory into the player inventory', () => {
+  it('moves a requested potion quantity from the merchant inventory into the player inventory', () => {
     const playerInventory = createInitialPlayerInventory({ slotCount: 2, gold: 1000 })
     const merchantInventory = createInitialPotionInventory({
       slotCount: 4,
@@ -43,36 +43,96 @@ describe('buyPotionShopItem', () => {
     const result = buyPotionShopItem({
       playerInventory,
       merchantInventory,
-      merchantSlotIndex: 0
+      merchantSlotIndex: 0,
+      quantity: 12
     })
 
     expect(result).toEqual({
       ok: true,
       playerInventory: {
-        gold: 990,
+        gold: 880,
         slots: [
           {
             id: 'health-potion',
             label: '체력 회복 포션',
-            quantity: 30
+            quantity: 12
           },
           undefined
         ]
       },
       merchantInventory: {
-        gold: 5010,
+        gold: 5120,
         slots: [
-          undefined,
+          {
+            id: 'health-potion',
+            label: '체력 회복 포션',
+            quantity: 999_987
+          },
           {
             id: 'mana-potion',
             label: '마나 회복 포션',
-            quantity: 30
+            quantity: 999_999
           },
           undefined,
           undefined
         ]
       },
-      message: '구매했습니다.'
+      message: '12개를 구매했습니다.'
+    })
+  })
+
+  it('stacks purchased items into an existing slot when the player inventory is full', () => {
+    const playerInventory = setPlayerInventorySlot({
+      inventory: createInitialPlayerInventory({ slotCount: 1, gold: 1000 }),
+      slotIndex: 0,
+      item: {
+        id: 'health-potion',
+        label: '체력 회복 포션',
+        quantity: 5
+      }
+    })
+    const merchantInventory = createInitialPotionInventory({
+      slotCount: 4,
+      gold: 5000
+    })
+
+    const result = buyPotionShopItem({
+      playerInventory,
+      merchantInventory,
+      merchantSlotIndex: 0,
+      quantity: 3
+    })
+
+    expect(result).toEqual({
+      ok: true,
+      playerInventory: {
+        gold: 970,
+        slots: [
+          {
+            id: 'health-potion',
+            label: '체력 회복 포션',
+            quantity: 8
+          }
+        ]
+      },
+      merchantInventory: {
+        gold: 5030,
+        slots: [
+          {
+            id: 'health-potion',
+            label: '체력 회복 포션',
+            quantity: 999_996
+          },
+          {
+            id: 'mana-potion',
+            label: '마나 회복 포션',
+            quantity: 999_999
+          },
+          undefined,
+          undefined
+        ]
+      },
+      message: '3개를 구매했습니다.'
     })
   })
 
@@ -99,7 +159,7 @@ describe('buyPotionShopItem', () => {
 })
 
 describe('sellPotionShopItem', () => {
-  it('sells a potion stack for gold without changing merchant stock', () => {
+  it('sells a requested potion quantity for gold without changing merchant stock', () => {
     const playerInventory = setPlayerInventorySlot({
       inventory: createInitialPlayerInventory({ slotCount: 2, gold: 1000 }),
       slotIndex: 0,
@@ -117,33 +177,41 @@ describe('sellPotionShopItem', () => {
     const result = sellPotionShopItem({
       playerInventory,
       merchantInventory,
-      playerSlotIndex: 0
+      playerSlotIndex: 0,
+      quantity: 5
     })
 
     expect(result).toEqual({
       ok: true,
       playerInventory: {
-        gold: 1007,
-        slots: [undefined, undefined]
+        gold: 1035,
+        slots: [
+          {
+            id: 'mana-potion',
+            label: '마나 회복 포션',
+            quantity: 25
+          },
+          undefined
+        ]
       },
       merchantInventory: {
-        gold: 4993,
+        gold: 4965,
         slots: [
           {
             id: 'health-potion',
             label: '체력 회복 포션',
-            quantity: 30
+            quantity: 999_999
           },
           {
             id: 'mana-potion',
             label: '마나 회복 포션',
-            quantity: 30
+            quantity: 999_999
           },
           undefined,
           undefined
         ]
       },
-      message: '판매했습니다.'
+      message: '5개를 판매했습니다.'
     })
   })
 
@@ -180,18 +248,18 @@ describe('sellPotionShopItem', () => {
           {
             id: 'health-potion',
             label: '체력 회복 포션',
-            quantity: 30
+            quantity: 999_999
           },
           {
             id: 'mana-potion',
             label: '마나 회복 포션',
-            quantity: 30
+            quantity: 999_999
           },
           undefined,
           undefined
         ]
       },
-      message: '판매했습니다.'
+      message: '1개를 판매했습니다.'
     })
   })
 

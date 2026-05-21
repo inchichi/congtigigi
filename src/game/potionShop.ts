@@ -25,12 +25,14 @@ type BuyPotionShopItemInput = {
   playerInventory: PlayerInventory
   merchantInventory: PlayerInventory
   merchantSlotIndex: number
+  quantity?: number
 }
 
 type SellPotionShopItemInput = {
   playerInventory: PlayerInventory
   merchantInventory: PlayerInventory
   playerSlotIndex: number
+  quantity?: number
 }
 
 type PotionShopItemDefinition = {
@@ -43,7 +45,7 @@ type PotionShopItemDefinition = {
 const DEFAULT_POTION_INVENTORY_SLOT_COUNT = 12
 const DEFAULT_POTION_INVENTORY_GOLD = 1_000_000_000_000_000
 const POTION_SALE_RATIO = 0.5
-const DEFAULT_POTION_STOCK_QUANTITY = 30
+const DEFAULT_POTION_STOCK_QUANTITY = 999_999
 const POTION_ITEM_DEFINITIONS: PotionShopItemDefinition[] = [
   {
     id: 'health-potion',
@@ -123,7 +125,8 @@ export const getPotionShopSellPriceById = (
 export const buyPotionShopItem = ({
   playerInventory,
   merchantInventory,
-  merchantSlotIndex
+  merchantSlotIndex,
+  quantity: requestedQuantity
 }: BuyPotionShopItemInput): PotionShopTransactionResult => {
   assertInventorySlotIndex(merchantInventory, merchantSlotIndex)
 
@@ -147,7 +150,30 @@ export const buyPotionShopItem = ({
     })
   }
 
-  if (playerInventory.gold < itemPrice) {
+  const quantity = resolveTradeQuantity({
+    requestedQuantity,
+    defaultQuantity: 1
+  })
+
+  if (quantity === undefined) {
+    return createPotionShopTransactionFailure({
+      playerInventory,
+      merchantInventory,
+      message: '구매 수량은 1개 이상의 정수여야 합니다.'
+    })
+  }
+
+  if (merchantItem.quantity < quantity) {
+    return createPotionShopTransactionFailure({
+      playerInventory,
+      merchantInventory,
+      message: '재고가 부족합니다.'
+    })
+  }
+
+  const totalPrice = itemPrice * quantity
+
+  if (playerInventory.gold < totalPrice) {
     return createPotionShopTransactionFailure({
       playerInventory,
       merchantInventory,
@@ -155,11 +181,11 @@ export const buyPotionShopItem = ({
     })
   }
 
-  const emptyPlayerSlotIndex = findFirstEmptyPlayerInventorySlotIndex(
-    playerInventory
-  )
+  const playerInventorySlotIndex =
+    findPlayerInventoryStackSlotIndexByItemId(playerInventory, merchantItem.id) ??
+    findFirstEmptyPlayerInventorySlotIndex(playerInventory)
 
-  if (emptyPlayerSlotIndex === undefined) {
+  if (playerInventorySlotIndex === undefined) {
     return createPotionShopTransactionFailure({
       playerInventory,
       merchantInventory,
@@ -167,34 +193,52 @@ export const buyPotionShopItem = ({
     })
   }
 
+  const existingPlayerItem = playerInventory.slots[playerInventorySlotIndex]
+  const nextPlayerItemQuantity = existingPlayerItem
+    ? existingPlayerItem.quantity + quantity
+    : quantity
   const nextPlayerInventory = withInventoryGold(
     setPlayerInventorySlot({
       inventory: playerInventory,
-      slotIndex: emptyPlayerSlotIndex,
-      item: clonePlayerInventoryItem(merchantItem)
+      slotIndex: playerInventorySlotIndex,
+      item: {
+        id: merchantItem.id,
+        label: merchantItem.label,
+        quantity: nextPlayerItemQuantity
+      }
     }),
-    playerInventory.gold - itemPrice
+    playerInventory.gold - totalPrice
   )
   const nextMerchantInventory = withInventoryGold(
-    clearPlayerInventorySlot({
-      inventory: merchantInventory,
-      slotIndex: merchantSlotIndex
-    }),
-    merchantInventory.gold + itemPrice
+    merchantItem.quantity === quantity
+      ? clearPlayerInventorySlot({
+          inventory: merchantInventory,
+          slotIndex: merchantSlotIndex
+        })
+      : setPlayerInventorySlot({
+          inventory: merchantInventory,
+          slotIndex: merchantSlotIndex,
+          item: {
+            ...merchantItem,
+            quantity: merchantItem.quantity - quantity
+          }
+        }),
+    merchantInventory.gold + totalPrice
   )
 
   return {
     ok: true,
     playerInventory: nextPlayerInventory,
     merchantInventory: nextMerchantInventory,
-    message: '구매했습니다.'
+    message: `${quantity}개를 구매했습니다.`
   }
 }
 
 export const sellPotionShopItem = ({
   playerInventory,
   merchantInventory,
-  playerSlotIndex
+  playerSlotIndex,
+  quantity: requestedQuantity
 }: SellPotionShopItemInput): PotionShopTransactionResult => {
   assertInventorySlotIndex(playerInventory, playerSlotIndex)
 
@@ -218,7 +262,30 @@ export const sellPotionShopItem = ({
     })
   }
 
-  if (merchantInventory.gold < itemPrice) {
+  const quantity = resolveTradeQuantity({
+    requestedQuantity,
+    defaultQuantity: playerItem.quantity
+  })
+
+  if (quantity === undefined) {
+    return createPotionShopTransactionFailure({
+      playerInventory,
+      merchantInventory,
+      message: '판매 수량은 1개 이상의 정수여야 합니다.'
+    })
+  }
+
+  if (playerItem.quantity < quantity) {
+    return createPotionShopTransactionFailure({
+      playerInventory,
+      merchantInventory,
+      message: '보유 수량보다 많이 판매할 수 없습니다.'
+    })
+  }
+
+  const totalPrice = itemPrice * quantity
+
+  if (merchantInventory.gold < totalPrice) {
     return createPotionShopTransactionFailure({
       playerInventory,
       merchantInventory,
@@ -227,22 +294,31 @@ export const sellPotionShopItem = ({
   }
 
   const nextPlayerInventory = withInventoryGold(
-    clearPlayerInventorySlot({
-      inventory: playerInventory,
-      slotIndex: playerSlotIndex
-    }),
-    playerInventory.gold + itemPrice
+    quantity === playerItem.quantity
+      ? clearPlayerInventorySlot({
+          inventory: playerInventory,
+          slotIndex: playerSlotIndex
+        })
+      : setPlayerInventorySlot({
+          inventory: playerInventory,
+          slotIndex: playerSlotIndex,
+          item: {
+            ...playerItem,
+            quantity: playerItem.quantity - quantity
+          }
+        }),
+    playerInventory.gold + totalPrice
   )
   const nextMerchantInventory = withInventoryGold(
     merchantInventory,
-    merchantInventory.gold - itemPrice
+    merchantInventory.gold - totalPrice
   )
 
   return {
     ok: true,
     playerInventory: nextPlayerInventory,
     merchantInventory: nextMerchantInventory,
-    message: '판매했습니다.'
+    message: `${quantity}개를 판매했습니다.`
   }
 }
 
@@ -253,19 +329,12 @@ const getPotionShopTradeItemPriceById = (
   getPlayerEquipmentItemDefinitionById(itemId)?.price
 
 const createPlayerInventoryItemFromPotionDefinition = (
-  definition: PotionShopItemDefinition
+  definition: PotionShopItemDefinition,
+  quantity = DEFAULT_POTION_STOCK_QUANTITY
 ): PlayerInventoryItem => ({
   id: definition.id,
   label: definition.label,
-  quantity: DEFAULT_POTION_STOCK_QUANTITY
-})
-
-const clonePlayerInventoryItem = (
-  item: PlayerInventoryItem
-): PlayerInventoryItem => ({
-  id: item.id,
-  label: item.label,
-  quantity: item.quantity
+  quantity
 })
 
 const withInventoryGold = (
@@ -290,6 +359,27 @@ const createPotionShopTransactionFailure = ({
   merchantInventory,
   message
 })
+
+const resolveTradeQuantity = ({
+  requestedQuantity,
+  defaultQuantity
+}: {
+  requestedQuantity: number | undefined
+  defaultQuantity: number
+}): number | undefined => {
+  const quantity = requestedQuantity ?? defaultQuantity
+
+  return Number.isInteger(quantity) && quantity > 0 ? quantity : undefined
+}
+
+const findPlayerInventoryStackSlotIndexByItemId = (
+  inventory: PlayerInventory,
+  itemId: string
+): number | undefined => {
+  const slotIndex = inventory.slots.findIndex((slot) => slot?.id === itemId)
+
+  return slotIndex < 0 ? undefined : slotIndex
+}
 
 const assertInventorySlotIndex = (
   inventory: PlayerInventory,

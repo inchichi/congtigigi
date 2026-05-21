@@ -16,8 +16,6 @@ import {
 
 import {
   PLAYER_CHARACTER_ID,
-  getCharacterActionFromKey,
-  getCharacterMoveDirectionFromKey,
   moveCharacterState
 } from '../game/characterState'
 import type {
@@ -39,6 +37,17 @@ import {
   clearPlayerQuickslotAssignment,
   type PlayerQuickslots
 } from '../game/playerQuickslots'
+import {
+  createInitialPlayerControlBindings,
+  getPlayerControlActionFromCode,
+  getPlayerControlMovementDirectionFromCode,
+  getPlayerControlQuickslotIndexFromCode,
+  isPlayerControlCaptureModifierKey,
+  isPlayerControlPauseKey,
+  setPlayerControlBinding,
+  type PlayerControlBindingId,
+  type PlayerControlBindings
+} from '../game/playerControls'
 import {
   FIRST_SLIME_HUNT_OBJECTIVE_ID,
   FIRST_SLIME_HUNT_QUEST_ID,
@@ -114,6 +123,7 @@ type CreatePixiTiledMapViewInput = {
   playerEquipment: PlayerEquipment
   playerInventory: PlayerInventory
   playerQuickslots: PlayerQuickslots
+  playerControlBindings: PlayerControlBindings
   questLog: QuestLogState
   merchantInventory: PlayerInventory
   potionMerchantInventory: PlayerInventory
@@ -128,6 +138,9 @@ type CreatePixiTiledMapViewInput = {
   onPlayerInventoryChange: (nextInventory: PlayerInventory) => void
   onPlayerEquipmentChange: (nextEquipment: PlayerEquipment) => void
   onPlayerQuickslotsChange: (nextQuickslots: PlayerQuickslots) => void
+  onPlayerControlBindingsChange: (
+    nextControlBindings: PlayerControlBindings
+  ) => void
   onQuestLogChange: (nextQuestLog: QuestLogState) => void
   onMerchantInventoryChange: (nextInventory: PlayerInventory) => void
   onPotionMerchantInventoryChange: (nextInventory: PlayerInventory) => void
@@ -628,6 +641,7 @@ export const createPixiTiledMapView = async ({
   playerEquipment,
   playerInventory,
   playerQuickslots,
+  playerControlBindings,
   questLog,
   merchantInventory,
   potionMerchantInventory,
@@ -639,6 +653,7 @@ export const createPixiTiledMapView = async ({
   onPlayerInventoryChange,
   onPlayerEquipmentChange,
   onPlayerQuickslotsChange,
+  onPlayerControlBindingsChange,
   onQuestLogChange,
   onMerchantInventoryChange,
   onPotionMerchantInventoryChange,
@@ -765,6 +780,7 @@ export const createPixiTiledMapView = async ({
   let currentPlayerEquipment = playerEquipment
   let currentPlayerInventory = playerInventory
   let currentPlayerQuickslots = playerQuickslots
+  let currentPlayerControlBindings = playerControlBindings
   let currentQuestLog = questLog
   let currentBlacksmithInventory = merchantInventory
   let currentPotionMerchantInventory = potionMerchantInventory
@@ -797,6 +813,7 @@ export const createPixiTiledMapView = async ({
   let isBlacksmithShopOpen = false
   let isPotionShopOpen = false
   let isPauseMenuOpen = false
+  let pendingControlBindingId: PlayerControlBindingId | undefined
   let playerHudOverlay: {
     syncFrame: () => void
     destroy: () => void
@@ -1001,33 +1018,13 @@ export const createPixiTiledMapView = async ({
       sceneIntroBannerElement.classList.remove('scene-intro-overlay--visible')
     }, SCENE_INTRO_VISIBLE_DURATION_MILLISECONDS)
   }
-  const isAttackKey = (event: KeyboardEvent): boolean =>
-    event.code === 'KeyA' || event.key.toLowerCase() === 'a'
   const getQuickslotIndexFromKeyboardEvent = (
     event: KeyboardEvent
   ): number | undefined => {
-    switch (event.code) {
-      case 'Digit1':
-      case 'Numpad1':
-        return 0
-      case 'Digit2':
-      case 'Numpad2':
-        return 1
-      case 'Digit3':
-      case 'Numpad3':
-        return 2
-      case 'Digit4':
-      case 'Numpad4':
-        return 3
-      case 'Digit5':
-      case 'Numpad5':
-        return 4
-      case 'Digit6':
-      case 'Numpad6':
-        return 5
-      default:
-        return undefined
-    }
+    return getPlayerControlQuickslotIndexFromCode(
+      currentPlayerControlBindings,
+      event.code
+    )
   }
   const triggerPlayerAttack = (now: number) => {
     if (now < playerAttackReadyAtMilliseconds) {
@@ -1192,6 +1189,7 @@ export const createPixiTiledMapView = async ({
     }
 
     isPauseMenuOpen = nextIsOpen
+    pendingControlBindingId = undefined
     if (nextIsOpen) {
       isPlayerUiOpen = false
       isPlayerStatOpen = false
@@ -1259,6 +1257,7 @@ export const createPixiTiledMapView = async ({
       isBlacksmithShopOpen = false
       isPotionShopOpen = false
       isPauseMenuOpen = false
+      pendingControlBindingId = undefined
       gameSoundEffects.stopAllLoops()
     }
     clearPressedInputState()
@@ -1287,11 +1286,29 @@ export const createPixiTiledMapView = async ({
     isBlacksmithShopOpen = false
     isPotionShopOpen = false
     isPauseMenuOpen = false
+    pendingControlBindingId = undefined
     mapOverlay.setExpanded(false)
     gameSoundEffects.stopAllLoops()
     clearPressedInputState()
     syncPlayerUiOverlays()
     return true
+  }
+  const setControlBindingCaptureTarget = (
+    bindingId: PlayerControlBindingId | undefined
+  ) => {
+    pendingControlBindingId = bindingId
+    syncPlayerUiOverlays()
+  }
+  const updatePlayerControlBindings = (
+    nextControlBindings: PlayerControlBindings
+  ) => {
+    currentPlayerControlBindings = nextControlBindings
+    onPlayerControlBindingsChange(nextControlBindings)
+  }
+  const resetPlayerControlBindings = () => {
+    pendingControlBindingId = undefined
+    updatePlayerControlBindings(createInitialPlayerControlBindings())
+    syncPlayerUiOverlays()
   }
   const requestSceneTransition = (portal: MapPortal) => {
     if (isSceneTransitionPending) {
@@ -1500,6 +1517,7 @@ export const createPixiTiledMapView = async ({
   })
   playerShopOverlay = createBlacksmithShopOverlay({
     mountElement,
+    getPlayerName: () => playerProfile.name,
     getPlayerInventory: () => currentPlayerInventory,
     getMerchantInventory: () => currentBlacksmithInventory,
     getIsOpen: () => isBlacksmithShopOpen,
@@ -1517,6 +1535,7 @@ export const createPixiTiledMapView = async ({
   })
   potionShopOverlay = createPotionShopOverlay({
     mountElement,
+    getPlayerName: () => playerProfile.name,
     getPlayerInventory: () => currentPlayerInventory,
     getMerchantInventory: () => currentPotionMerchantInventory,
     getIsOpen: () => isPotionShopOpen,
@@ -1536,8 +1555,12 @@ export const createPixiTiledMapView = async ({
     mountElement,
     getIsOpen: () => isPauseMenuOpen,
     getAudioSettings: () => currentAudioSettings,
+    getControlBindings: () => currentPlayerControlBindings,
+    getControlBindingCaptureTarget: () => pendingControlBindingId,
     onRequestOpenChange: setPauseMenuOpen,
-    onAudioSettingsChange: updateCurrentAudioSettings
+    onAudioSettingsChange: updateCurrentAudioSettings,
+    onRequestControlBindingCapture: setControlBindingCaptureTarget,
+    onRequestControlBindingsReset: resetPlayerControlBindings
   })
   questLogOverlay = createQuestLogOverlay({
     mountElement,
@@ -4073,20 +4096,38 @@ export const createPixiTiledMapView = async ({
   }
 
   const handleKeyDown = (event: KeyboardEvent) => {
-    const isInventoryToggleKey =
-      event.code === 'KeyI' || event.key.toLowerCase() === 'i'
-    const isStatToggleKey =
-      event.code === 'KeyS' || event.key.toLowerCase() === 's'
-    const isEquipmentToggleKey =
-      event.code === 'KeyU' || event.key.toLowerCase() === 'u'
-    const isSkillToggleKey =
-      event.code === 'KeyK' || event.key.toLowerCase() === 'k'
-    const isQuestLogToggleKey =
-      event.code === 'KeyB' || event.key.toLowerCase() === 'b'
-    const isMapToggleKey =
-      event.code === 'KeyM' || event.key.toLowerCase() === 'm'
+    const code = event.code
+    const isInventoryToggleKey = code === currentPlayerControlBindings.inventory
+    const isStatToggleKey = code === currentPlayerControlBindings.stat
+    const isEquipmentToggleKey = code === currentPlayerControlBindings.equipment
+    const isSkillToggleKey = code === currentPlayerControlBindings.skill
+    const isQuestLogToggleKey = code === currentPlayerControlBindings.quest
+    const isMapToggleKey = code === currentPlayerControlBindings.map
+    const isPauseKey = isPlayerControlPauseKey(
+      currentPlayerControlBindings,
+      code
+    )
 
-    if (event.key === 'Escape') {
+    if (pendingControlBindingId) {
+      event.preventDefault()
+
+      if (event.repeat || isPlayerControlCaptureModifierKey(code)) {
+        return
+      }
+
+      updatePlayerControlBindings(
+        setPlayerControlBinding({
+          bindings: currentPlayerControlBindings,
+          bindingId: pendingControlBindingId,
+          nextCode: code
+        })
+      )
+      pendingControlBindingId = undefined
+      syncPlayerUiOverlays()
+      return
+    }
+
+    if (isPauseKey) {
       event.preventDefault()
 
       if (event.repeat) {
@@ -4235,18 +4276,10 @@ export const createPixiTiledMapView = async ({
       return
     }
 
-    const action = getCharacterActionFromKey(event.key)
-
-    if (isAttackKey(event)) {
-      event.preventDefault()
-
-      if (!pressedActions.has('attack') || event.repeat) {
-        triggeredActions.add('attack')
-      }
-
-      pressedActions.add('attack')
-      return
-    }
+    const action = getPlayerControlActionFromCode(
+      currentPlayerControlBindings,
+      code
+    )
 
     if (action) {
       event.preventDefault()
@@ -4259,7 +4292,10 @@ export const createPixiTiledMapView = async ({
       return
     }
 
-    const direction = getCharacterMoveDirectionFromKey(event.key)
+    const direction = getPlayerControlMovementDirectionFromCode(
+      currentPlayerControlBindings,
+      code
+    )
 
     if (!direction) {
       return
@@ -4270,19 +4306,21 @@ export const createPixiTiledMapView = async ({
   }
 
   const handleKeyUp = (event: KeyboardEvent) => {
-    const action = getCharacterActionFromKey(event.key)
+    const code = event.code
+    const action = getPlayerControlActionFromCode(
+      currentPlayerControlBindings,
+      code
+    )
 
     if (action) {
       pressedActions.delete(action)
       return
     }
 
-    if (isAttackKey(event)) {
-      pressedActions.delete('attack')
-      return
-    }
-
-    const direction = getCharacterMoveDirectionFromKey(event.key)
+    const direction = getPlayerControlMovementDirectionFromCode(
+      currentPlayerControlBindings,
+      code
+    )
 
     if (!direction) {
       return
