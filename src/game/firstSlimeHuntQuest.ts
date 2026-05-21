@@ -15,6 +15,8 @@ export type FirstSlimeHuntQuestState = {
   slimeDefeats: number
 }
 
+export type FirstSlimeHuntQuestNpcBadgeKind = 'new' | 'finish'
+
 export type CompleteFirstSlimeHuntQuestResult = {
   nextQuest: FirstSlimeHuntQuestState
   didComplete: boolean
@@ -92,6 +94,20 @@ export const getFirstSlimeHuntTrackerText = (
     case 'ready-to-turn-in':
       return '첫 사냥: 마법사에게 돌아가기'
     case 'not-started':
+    case 'completed':
+      return undefined
+  }
+}
+
+export const getFirstSlimeHuntQuestNpcBadgeKind = (
+  quest: FirstSlimeHuntQuestState
+): FirstSlimeHuntQuestNpcBadgeKind | undefined => {
+  switch (quest.status) {
+    case 'not-started':
+      return 'new'
+    case 'ready-to-turn-in':
+      return 'finish'
+    case 'active':
     case 'completed':
       return undefined
   }

@@ -1,9 +1,13 @@
 import huntingGroundMapXml from './assets/maps/hunting-ground.tmx?raw'
+import caveMapXml from './assets/maps/cave.tmx?raw'
 import townMapXml from './assets/maps/town.tmx?raw'
 import replyWithMessageControllerLua from './assets/lua/reply-with-message.lua?raw'
 import wanderNearHomeControllerLua from './assets/lua/wander-near-home.lua?raw'
 import huntingGroundMusicUrl from './assets/sounds/전투브금.mp3'
 import townMusicUrl from './assets/sounds/브금5.mp3'
+import questFinUrl from './assets/tilesets/quest_fin.png'
+import questNewUrl from './assets/tilesets/quest_new.png'
+import caveEntranceVisibleUrl from './assets/tilesets/cave1-visible.png'
 import townTilesetXml from './assets/tilesets/town-32.tsx?raw'
 import townTilesetUrl from './assets/tilesets/town-32.png'
 import tinyDungeonTilesetXml from './assets/tilesets/tiny-dungeon-16.tsx?raw'
@@ -33,7 +37,7 @@ import type {
 } from './rendering/createPixiTiledMapView'
 import './styles.css'
 
-type SceneId = 'town' | 'hunting-ground'
+type SceneId = 'town' | 'hunting-ground' | 'cave'
 
 type SceneSpawn = {
   x: number
@@ -69,6 +73,12 @@ const parsedHuntingGroundMap = parseTiledMap({
     '../tilesets/town-32.tsx': townTilesetXml
   }
 })
+const parsedCaveMap = parseTiledMap({
+  mapXml: caveMapXml,
+  externalTilesets: {
+    '../tilesets/town-32.tsx': townTilesetXml
+  }
+})
 const tinyDungeonTileset = parseTiledTileset({
   firstGid: 1,
   source: '../tilesets/tiny-dungeon-16.tsx',
@@ -87,11 +97,13 @@ const availableLuaControllerScriptsById: Record<string, { source: string }> = {
 }
 const sceneMaps: Record<SceneId, typeof parsedTownMap> = {
   town: parsedTownMap,
-  'hunting-ground': parsedHuntingGroundMap
+  'hunting-ground': parsedHuntingGroundMap,
+  cave: parsedCaveMap
 }
 const sceneMusicUrls: Record<SceneId, string> = {
   town: townMusicUrl,
-  'hunting-ground': huntingGroundMusicUrl
+  'hunting-ground': huntingGroundMusicUrl,
+  cave: huntingGroundMusicUrl
 }
 const playerProfile = createInitialPlayerProfile()
 let playerEquipment = createInitialPlayerEquipment()
@@ -159,6 +171,9 @@ const bootstrapScene = async (
       scale: characterSpriteScale
     },
     imageUrls: {
+      'cave1-visible.png': caveEntranceVisibleUrl,
+      'quest_fin.png': questFinUrl,
+      'quest_new.png': questNewUrl,
       'town-32.png': townTilesetUrl,
       'tiny-dungeon-16.png': tinyDungeonTilesetUrl
     },

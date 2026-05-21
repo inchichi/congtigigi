@@ -95,5 +95,14 @@
     <property name="targetSpawnTileY" type="int" value="17"/>
    </properties>
   </object>
+  <object id="10" name="cave_entrance" type="portal" x="1568" y="320" width="32" height="64">
+   <properties>
+    <property name="appearanceType" value="cave_entrance"/>
+    <property name="targetFacing" value="left"/>
+    <property name="targetSceneId" value="cave"/>
+    <property name="targetSpawnTileX" type="int" value="2"/>
+    <property name="targetSpawnTileY" type="int" value="10"/>
+   </properties>
+  </object>
  </objectgroup>
 </map>

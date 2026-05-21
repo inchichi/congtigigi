@@ -37,6 +37,7 @@ import type { PlayerProfile } from '../game/playerProfile'
 import type { PlayerQuickslots } from '../game/playerQuickslots'
 import {
   completeFirstSlimeHuntQuest,
+  getFirstSlimeHuntQuestNpcBadgeKind,
   recordFirstSlimeHuntSlimeDefeat,
   startFirstSlimeHuntQuest,
   type FirstSlimeHuntQuestState
@@ -195,6 +196,7 @@ type MonsterGoldDrop = {
 type RenderedCharacterNode = {
   container: Container
   sprite: Sprite
+  questBadge?: Sprite
   playerHealthBar?: {
     container: Container
     track: Graphics
@@ -483,6 +485,8 @@ const QUEST_DIALOGUE_DURATION_MILLISECONDS = 3600
 const QUEST_START_TEXT = '퀘스트 시작: 첫 사냥'
 const QUEST_OBJECTIVE_COMPLETE_TEXT = '퀘스트 목표 완료!\n마법사에게 돌아가기'
 const QUEST_COMPLETE_TEXT = '퀘스트 완료: 첫 사냥\n100골드 · 경험치 60'
+const QUEST_BADGE_SCALE = 0.16
+const QUEST_BADGE_Y_OFFSET = 10
 type MonsterAppearanceType =
   | typeof MONSTER_PIG_APPEARANCE_TYPE
   | typeof MONSTER_SLIME_APPEARANCE_TYPE
@@ -555,6 +559,17 @@ const createMonsterHealthBar = (): NonNullable<
     track,
     fill
   }
+}
+
+const createQuestBadgeSprite = (texture: Texture): Sprite => {
+  const sprite = new Sprite(texture)
+
+  sprite.anchor.set(0.5, 1)
+  sprite.scale.set(QUEST_BADGE_SCALE)
+  sprite.roundPixels = true
+  sprite.visible = false
+
+  return sprite
 }
 
 const createPlayerResourceBar = (): NonNullable<
@@ -734,6 +749,14 @@ export const createPixiTiledMapView = async ({
   let syncPlayerCharacterVisual: (nowMilliseconds?: number) => void = () => {}
   let isSceneTransitionPending = false
   let isDestroyed = false
+  const isBossMonsterScene = sceneIntroMessage === '동굴'
+  const monsterCombatStateOptions = isBossMonsterScene
+    ? {
+        hpMultiplier: 2,
+        damageMultiplier: 2
+      }
+    : undefined
+  const monsterRenderScaleMultiplier = isBossMonsterScene ? 2 : 1
   const clearPressedInputState = () => {
     pressedDirections.clear()
     pressedActions.clear()
@@ -1112,6 +1135,7 @@ export const createPixiTiledMapView = async ({
     currentFirstSlimeHuntQuest = nextQuest
     onFirstSlimeHuntQuestChange(nextQuest)
     questTrackerOverlay.syncFrame()
+    syncQuestNpcBadges()
   }
   const grantPlayerExperienceReward = (experienceReward: number) => {
     const nextPlayerProgress = grantPlayerExperience(
@@ -1475,7 +1499,21 @@ export const createPixiTiledMapView = async ({
     PLAYER_WEAPON_TILE_FRAME_SOURCE,
     PLAYER_WEAPON_TILE_LOCAL_ID
   )
+  const questNewTexture = await Assets.load<Texture>(
+    imageUrls['quest_new.png']
+  )
+  const questFinTexture = await Assets.load<Texture>(
+    imageUrls['quest_fin.png']
+  )
+  const caveEntranceTexture = await Assets.load<Texture>(
+    imageUrls['cave1-visible.png']
+  )
+  caveEntranceTexture.source.addressMode = 'clamp-to-edge'
   const resolveMapPortalTexture = (appearanceType: string): Texture => {
+    if (appearanceType === 'cave_entrance') {
+      return caveEntranceTexture
+    }
+
     for (const tileset of map.tilesets) {
       const renderResources = tilesetResources.get(tileset.source)
 
@@ -1604,7 +1642,7 @@ export const createPixiTiledMapView = async ({
       ? new AnimatedSprite(monsterAnimationTextures.idleLeft)
       : new Sprite(resolvedCharacterAppearanceTexture!.texture)
     const renderScale = monsterBehaviorConfig
-      ? monsterBehaviorConfig.renderScale
+      ? monsterBehaviorConfig.renderScale * monsterRenderScaleMultiplier
       : resolvedCharacterAppearanceTexture!.renderScale
     const isPlayer = character.id === PLAYER_CHARACTER_ID
     const playerHealthBar = isPlayer
@@ -1656,6 +1694,10 @@ export const createPixiTiledMapView = async ({
             style: MONSTER_LEVEL_BADGE_STYLE,
             text: `Lv ${character.level}`
           })
+    const questBadge =
+      character.id === WIZARD_NPC_ID
+        ? createQuestBadgeSprite(questNewTexture)
+        : undefined
     container.label = `character:${character.id}:container`
     container.sortableChildren = true
     sprite.label = `character:${character.id}`
@@ -1701,11 +1743,20 @@ export const createPixiTiledMapView = async ({
       levelBadge.zIndex = 20
       container.addChild(levelBadge)
     }
+    if (questBadge) {
+      questBadge.label = `character:${character.id}:quest-badge`
+      questBadge.roundPixels = true
+      questBadge.zIndex = 22
+      container.addChild(questBadge)
+    }
 
     if (isMonsterCharacter) {
       monsterCombatStates.set(
         character.id,
-        createMonsterCombatState(character.level ?? 1)
+        createMonsterCombatState(
+          character.level ?? 1,
+          monsterCombatStateOptions
+        )
       )
       monsterSpawnStates.set(character.id, {
         ...character,
@@ -1752,6 +1803,7 @@ export const createPixiTiledMapView = async ({
       displayLabelPanel,
       displayLabel,
       levelBadge,
+      questBadge,
       monsterHealthBar
     })
     if (monsterAnimationTextures) {
@@ -1766,7 +1818,6 @@ export const createPixiTiledMapView = async ({
     const container = new Container()
     const baseSprite = new Sprite(resolveMapPortalTexture(portal.appearanceType))
     const coreSprite = new Sprite(portalInsideTexture)
-
     container.label = `portal:${portal.id}:container`
     container.sortableChildren = true
     baseSprite.label = `portal:${portal.id}:base`
@@ -1777,7 +1828,16 @@ export const createPixiTiledMapView = async ({
     coreSprite.scale.set(PORTAL_INSIDE_WORLD_SCALE)
     coreSprite.roundPixels = true
     coreSprite.zIndex = 1
-    if (portal.appearanceType === 'stairs_stone_step_base_00') {
+    const isCaveEntrancePortal = portal.appearanceType === 'cave_entrance'
+
+    if (isCaveEntrancePortal) {
+      baseSprite.scale.set(0.24)
+      container.position.set(
+        portal.position.x * map.tileWidth - 32,
+        portal.position.y * map.tileHeight
+      )
+      container.addChild(baseSprite)
+    } else if (portal.appearanceType === 'stairs_stone_step_base_00') {
       container.position.set(
         portal.position.x * map.tileWidth,
         portal.position.y * map.tileHeight
@@ -1994,6 +2054,31 @@ export const createPixiTiledMapView = async ({
     renderNode.levelBadge.position.set(
       Math.round((renderNode.sprite.width - renderNode.levelBadge.width) / 2),
       -Math.round(renderNode.levelBadge.height + 4)
+    )
+  }
+
+  const syncQuestNpcBadges = () => {
+    const wizardRenderNode = renderedCharacters.get(WIZARD_NPC_ID)
+
+    if (!wizardRenderNode?.questBadge) {
+      return
+    }
+
+    const badgeKind = getFirstSlimeHuntQuestNpcBadgeKind(
+      currentFirstSlimeHuntQuest
+    )
+
+    if (!badgeKind) {
+      wizardRenderNode.questBadge.visible = false
+      return
+    }
+
+    wizardRenderNode.questBadge.visible = true
+    wizardRenderNode.questBadge.texture =
+      badgeKind === 'new' ? questNewTexture : questFinTexture
+    wizardRenderNode.questBadge.position.set(
+      Math.round(wizardRenderNode.sprite.width / 2),
+      -QUEST_BADGE_Y_OFFSET
     )
   }
 
@@ -2449,7 +2534,10 @@ export const createPixiTiledMapView = async ({
     )
     monsterCombatStates.set(
       characterId,
-      createMonsterCombatState(nextCharacter.level ?? 1)
+      createMonsterCombatState(
+        nextCharacter.level ?? 1,
+        monsterCombatStateOptions
+      )
     )
     monsterPatrolStates.delete(characterId)
     monsterContactDamageLockedUntilById.delete(characterId)
@@ -3916,6 +4004,7 @@ export const createPixiTiledMapView = async ({
   app.ticker.add(pauseMenuOverlay.syncFrame, undefined, UPDATE_PRIORITY.UTILITY)
   app.ticker.add(questTrackerOverlay.syncFrame, undefined, UPDATE_PRIORITY.UTILITY)
   syncAllCharacterSprites()
+  syncQuestNpcBadges()
   syncViewportDisplayScale()
   centerCameraOnCharacter(getCharacterStateById(cameraTargetCharacterId))
   showSceneIntroBanner()

@@ -32,7 +32,6 @@ export const createFrameTexturesFromBand = ({
   band,
   expectedFrameCount,
   framePaddingY = 10,
-  foregroundSumThreshold = 15,
   pixelPredicate,
   mirrorX = false
 }: {
@@ -40,14 +39,17 @@ export const createFrameTexturesFromBand = ({
   band: FrameBand
   expectedFrameCount: number
   framePaddingY?: number
-  foregroundSumThreshold?: number
-  pixelPredicate?: (red: number, green: number, blue: number, alpha: number) => boolean
+  pixelPredicate: (
+    red: number,
+    green: number,
+    blue: number,
+    alpha: number
+  ) => boolean
   mirrorX?: boolean
 }): Texture[] => {
   const bounds = findForegroundBounds({
     sourceImageData,
     band,
-    foregroundSumThreshold,
     pixelPredicate
   })
 
@@ -87,7 +89,6 @@ export const createFrameTexturesFromBand = ({
         height: frameHeight
       },
       mirrorX,
-      foregroundSumThreshold,
       pixelPredicate
     })
   )
@@ -97,21 +98,23 @@ export const createFrameTexturesFromRects = ({
   sourceImageData,
   frames,
   mirrorX = false,
-  foregroundSumThreshold = 15,
   pixelPredicate
 }: {
   sourceImageData: ImageData
   frames: FrameRect[]
   mirrorX?: boolean
-  foregroundSumThreshold?: number
-  pixelPredicate?: (red: number, green: number, blue: number, alpha: number) => boolean
+  pixelPredicate: (
+    red: number,
+    green: number,
+    blue: number,
+    alpha: number
+  ) => boolean
 }): Texture[] =>
   frames.map((frame) =>
     createCroppedTexture({
       sourceImageData,
       frame,
       mirrorX,
-      foregroundSumThreshold,
       pixelPredicate
     })
   )
@@ -120,14 +123,17 @@ const createCroppedTexture = ({
   sourceImageData,
   frame,
   mirrorX = false,
-  foregroundSumThreshold = 15,
   pixelPredicate
 }: {
   sourceImageData: ImageData
   frame: FrameRect
   mirrorX?: boolean
-  foregroundSumThreshold?: number
-  pixelPredicate?: (red: number, green: number, blue: number, alpha: number) => boolean
+  pixelPredicate: (
+    red: number,
+    green: number,
+    blue: number,
+    alpha: number
+  ) => boolean
 }): Texture => {
   const frameCanvas = document.createElement('canvas')
   const frameContext = frameCanvas.getContext('2d')
@@ -154,12 +160,9 @@ const createCroppedTexture = ({
       const red = sourceImageData.data[sampleIndex] ?? 0
       const green = sourceImageData.data[sampleIndex + 1] ?? 0
       const blue = sourceImageData.data[sampleIndex + 2] ?? 0
+      const alpha = sourceImageData.data[sampleIndex + 3] ?? 0
 
-      if (
-        !(pixelPredicate
-          ? pixelPredicate(red, green, blue, sourceImageData.data[sampleIndex + 3] ?? 255)
-          : red + green + blue >= foregroundSumThreshold)
-      ) {
+      if (!pixelPredicate(red, green, blue, alpha)) {
         continue
       }
 
@@ -182,13 +185,16 @@ const createCroppedTexture = ({
 const findForegroundBounds = ({
   sourceImageData,
   band,
-  foregroundSumThreshold,
   pixelPredicate
 }: {
   sourceImageData: ImageData
   band: FrameBand
-  foregroundSumThreshold: number
-  pixelPredicate?: (red: number, green: number, blue: number, alpha: number) => boolean
+  pixelPredicate: (
+    red: number,
+    green: number,
+    blue: number,
+    alpha: number
+  ) => boolean
 }): FrameBounds | undefined => {
   const { width, data } = sourceImageData
   let minX = Number.POSITIVE_INFINITY
@@ -199,14 +205,7 @@ const findForegroundBounds = ({
   for (let y = band.top; y < band.bottom; y += 1) {
     for (let x = 0; x < width; x += 1) {
       if (
-        !isForegroundPixel(
-          data,
-          width,
-          x,
-          y,
-          foregroundSumThreshold,
-          pixelPredicate
-        )
+        !isForegroundPixel(data, width, x, y, pixelPredicate)
       ) {
         continue
       }
@@ -240,20 +239,21 @@ const isForegroundPixel = (
   width: number,
   x: number,
   y: number,
-  foregroundSumThreshold: number,
-  pixelPredicate?: (red: number, green: number, blue: number, alpha: number) => boolean
+  pixelPredicate: (
+    red: number,
+    green: number,
+    blue: number,
+    alpha: number
+  ) => boolean
 ): boolean => {
   const index = (y * width + x) * 4
-  const red = data[index] ?? 0
-  const green = data[index + 1] ?? 0
-  const blue = data[index + 2] ?? 0
-  const alpha = data[index + 3] ?? 255
 
-  if (pixelPredicate) {
-    return pixelPredicate(red, green, blue, alpha)
-  }
-
-  return red + green + blue >= foregroundSumThreshold
+  return pixelPredicate(
+    data[index] ?? 0,
+    data[index + 1] ?? 0,
+    data[index + 2] ?? 0,
+    data[index + 3] ?? 0
+  )
 }
 
 const clamp = (value: number, min: number, max: number): number =>
