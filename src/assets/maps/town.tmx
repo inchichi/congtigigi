@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<map version="1.10" tiledversion="1.12.1" orientation="orthogonal" renderorder="right-down" width="50" height="50" tilewidth="32" tileheight="32" infinite="0" nextlayerid="9" nextobjectid="8">
+<map version="1.10" tiledversion="1.12.1" orientation="orthogonal" renderorder="right-down" width="50" height="50" tilewidth="32" tileheight="32" infinite="0" nextlayerid="10" nextobjectid="10">
  <tileset firstgid="1" source="../tilesets/town-32.tsx"/>
  <layer id="1" name="ground" width="50" height="50">
   <data encoding="csv">
@@ -172,11 +172,25 @@
     </property>
     <property name="controller.messageDurationSeconds" type="float" value="2.8"/>
     <property name="controller.scriptId" value="reply-with-message"/>
+    <property name="displayText" value="대장장이"/>
     <property name="type" value="character_bearded_apron_man"/>
+   </properties>
+  </object>
+  <object id="10" name="potion_merchant" type="character" x="256.467" y="515.737">
+   <properties>
+    <property name="controller.dialogueLines" type="list">
+     <item value="물약이 필요하면 여기로 와."/>
+     <item value="체력 물약과 마나 물약을 준비해뒀어."/>
+    </property>
+    <property name="controller.messageDurationSeconds" type="float" value="2.8"/>
+    <property name="controller.scriptId" value="reply-with-message"/>
+    <property name="displayText" value="물약상인"/>
+    <property name="type" value="character_villager_flower_dress"/>
    </properties>
   </object>
   <object id="3" name="wizard" type="character" x="831.323" y="542.823">
    <properties>
+    <property name="displayText" value="마법사"/>
     <property name="type" value="character_wizard_purple"/>
    </properties>
   </object>
@@ -202,6 +216,24 @@
   <object id="7" name="villager_4" type="character" x="880.362" y="1388.81">
    <properties>
     <property name="type" value="character_commoner_tan_tunic"/>
+   </properties>
+  </object>
+  <object id="9" name="hunting_path_sign" type="character" x="1488" y="608" width="32" height="32">
+   <properties>
+    <property name="type" value="sign_inn"/>
+    <property name="blocksMovement" type="bool" value="false"/>
+    <property name="displayText" value="사냥터로 가는 길"/>
+   </properties>
+  </object>
+ </objectgroup>
+ <objectgroup id="9" name="portals">
+  <object id="8" name="east_gate" type="portal" x="1568" y="544" width="32" height="64">
+   <properties>
+    <property name="appearanceType" value="stairs_stone_step_base_00"/>
+    <property name="targetFacing" value="left"/>
+    <property name="targetSceneId" value="hunting-ground"/>
+    <property name="targetSpawnTileX" type="int" value="2"/>
+    <property name="targetSpawnTileY" type="int" value="10"/>
    </properties>
   </object>
  </objectgroup>

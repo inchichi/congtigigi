@@ -1,0 +1,501 @@
+import {
+  PLAYER_MAX_LEVEL,
+  type PlayerProfile
+} from '../game/playerProfile'
+import { getPlayerExperienceToNextLevel } from '../game/playerExperience'
+import { getPlayerEquipmentItemDefinitionById } from '../game/playerEquipment'
+import type { PlayerInventory } from '../game/playerInventory'
+import {
+  clearPlayerQuickslotAssignment,
+  setPlayerQuickslotAssignment,
+  type PlayerQuickslots
+} from '../game/playerQuickslots'
+import { getResponsiveUiScale } from './getResponsiveUiScale'
+
+type CreatePlayerHudOverlayInput = {
+  mountElement: HTMLElement
+  profile: PlayerProfile
+  getInventory: () => PlayerInventory
+  getQuickslots: () => PlayerQuickslots
+  onRequestQuickslotChange: (nextQuickslots: PlayerQuickslots) => void
+}
+
+export type PlayerHudOverlay = {
+  syncFrame: () => void
+  destroy: () => void
+}
+
+const UI_SPRITESHEET_IMAGE_URL = new URL(
+  '../assets/spritesheets/uipack_rpg_sheet.png',
+  import.meta.url
+).href
+const BUTTON_SQUARE_FRAME = {
+  x: 293,
+  y: 294,
+  width: 45,
+  height: 49
+}
+const HUD_MARGIN = 16
+const HUD_PANEL_MIN_WIDTH = 400
+const HUD_PANEL_MAX_WIDTH = 760
+const HUD_PANEL_SCALE_MULTIPLIER = 0.82
+const HEALTH_BAR_COLOR = '#d06b5d'
+const MANA_BAR_COLOR = '#5b86d6'
+const SKILL_HOTKEYS = ['Q', 'W', 'E', 'R'] as const
+const QUICK_CONSUMABLE_HOTKEYS = ['1', '2', '3', '4', '5', '6'] as const
+const QUICK_CONSUMABLE_SLOT_COUNT = QUICK_CONSUMABLE_HOTKEYS.length
+
+export const createPlayerHudOverlay = ({
+  mountElement,
+  profile,
+  getInventory,
+  getQuickslots,
+  onRequestQuickslotChange
+}: CreatePlayerHudOverlayInput): PlayerHudOverlay => {
+  const overlayRoot = document.createElement('div')
+  const panel = document.createElement('section')
+  const panelBody = document.createElement('div')
+  const statusSection = document.createElement('div')
+  const resourceGrid = document.createElement('div')
+  const hpRow = createResourceRow('체력')
+  const mpRow = createResourceRow('마나')
+  const expRow = createResourceRow('경험치')
+  const skillSection = document.createElement('div')
+  const skillSectionTitle = document.createElement('div')
+  const skillGrid = document.createElement('div')
+  const consumableSection = document.createElement('div')
+  const consumableSectionTitle = document.createElement('div')
+  const consumableGrid = document.createElement('div')
+  const skillButtons: HTMLButtonElement[] = []
+  const skillHotkeyLabels: HTMLSpanElement[] = []
+  const skillNameLabels: HTMLSpanElement[] = []
+  const skillDescriptionLabels: HTMLSpanElement[] = []
+  const consumableButtons: HTMLButtonElement[] = []
+  const consumableHotkeyLabels: HTMLSpanElement[] = []
+  const consumableNameLabels: HTMLSpanElement[] = []
+  const consumableQuantityLabels: HTMLSpanElement[] = []
+  const skillSlotCount = profile.skills.length
+
+  overlayRoot.className = 'player-hud-overlay'
+
+  panel.className = 'player-hud-overlay__panel'
+  panel.setAttribute('aria-label', '캐릭터 상태')
+
+  panelBody.className = 'player-hud-overlay__panel-body'
+
+  statusSection.className = 'player-hud-overlay__status-section'
+  resourceGrid.className = 'player-hud-overlay__resource-grid'
+
+  skillSection.className = 'player-hud-overlay__skill-section'
+  skillSectionTitle.className = 'player-hud-overlay__skill-title'
+  skillSectionTitle.textContent = '스킬'
+  skillGrid.className = 'player-hud-overlay__skill-grid'
+  consumableSection.className = 'player-hud-overlay__consumable-section'
+  consumableSectionTitle.className = 'player-hud-overlay__section-title'
+  consumableSectionTitle.textContent = '퀵슬롯'
+  consumableGrid.className = 'player-hud-overlay__consumable-grid'
+
+  for (let index = 0; index < QUICK_CONSUMABLE_SLOT_COUNT; index += 1) {
+    const consumableButton = document.createElement('button')
+    const hotkeyLabel = document.createElement('span')
+    const nameLabel = document.createElement('span')
+    const quantityLabel = document.createElement('span')
+
+    consumableButton.type = 'button'
+    consumableButton.className = 'player-hud-overlay__consumable-slot'
+    consumableButton.dataset.playerQuickslotIndex = String(index)
+    consumableButton.setAttribute(
+      'aria-label',
+      `퀵슬롯 ${index + 1} 비어있음`
+    )
+    consumableButton.title = `퀵슬롯 ${index + 1} 비어있음`
+
+    hotkeyLabel.className = 'player-hud-overlay__consumable-hotkey'
+    hotkeyLabel.textContent = QUICK_CONSUMABLE_HOTKEYS[index]
+
+    nameLabel.className = 'player-hud-overlay__consumable-name'
+    nameLabel.textContent = '비어있음'
+
+    quantityLabel.className = 'player-hud-overlay__consumable-quantity'
+    quantityLabel.hidden = true
+
+    consumableButton.append(hotkeyLabel, nameLabel, quantityLabel)
+    consumableGrid.append(consumableButton)
+
+    consumableButtons.push(consumableButton)
+    consumableHotkeyLabels.push(hotkeyLabel)
+    consumableNameLabels.push(nameLabel)
+    consumableQuantityLabels.push(quantityLabel)
+  }
+
+  for (let index = 0; index < skillSlotCount; index += 1) {
+    const skillButton = document.createElement('button')
+    const hotkeyLabel = document.createElement('span')
+    const nameLabel = document.createElement('span')
+    const descriptionLabel = document.createElement('span')
+
+    skillButton.type = 'button'
+    skillButton.className = 'player-hud-overlay__skill-slot'
+    skillButton.setAttribute('aria-label', `스킬 슬롯 ${index + 1} 비어있음`)
+    skillButton.title = `스킬 슬롯 ${index + 1} 비어있음`
+
+    hotkeyLabel.className = 'player-hud-overlay__skill-hotkey'
+    hotkeyLabel.textContent = SKILL_HOTKEYS[index]
+
+    nameLabel.className = 'player-hud-overlay__skill-name'
+    nameLabel.textContent = '비어있음'
+
+    descriptionLabel.className = 'player-hud-overlay__skill-description'
+    descriptionLabel.textContent = ''
+
+    skillButton.append(hotkeyLabel, nameLabel, descriptionLabel)
+    skillGrid.append(skillButton)
+
+    skillButtons.push(skillButton)
+    skillHotkeyLabels.push(hotkeyLabel)
+    skillNameLabels.push(nameLabel)
+    skillDescriptionLabels.push(descriptionLabel)
+  }
+
+  statusSection.append(resourceGrid)
+  resourceGrid.append(hpRow.row, mpRow.row, expRow.row)
+  skillSection.append(skillSectionTitle, skillGrid)
+  consumableSection.append(consumableSectionTitle, consumableGrid)
+  panelBody.append(statusSection, skillSection, consumableSection)
+  panel.append(panelBody)
+  overlayRoot.append(panel)
+  mountElement.append(overlayRoot)
+
+  const setSpriteFrame = (
+    element: HTMLElement,
+    frame: { x: number; y: number; width: number; height: number },
+    scaleX = 1,
+    scaleY = scaleX
+  ) => {
+    element.style.backgroundImage = `url(${UI_SPRITESHEET_IMAGE_URL})`
+    element.style.backgroundRepeat = 'no-repeat'
+    element.style.backgroundPosition = `-${frame.x * scaleX}px -${frame.y * scaleY}px`
+    element.style.backgroundSize = `${512 * scaleX}px ${512 * scaleY}px`
+    element.style.width = `${frame.width * scaleX}px`
+    element.style.height = `${frame.height * scaleY}px`
+    element.style.imageRendering = 'pixelated'
+  }
+
+  const setEmptySlotAppearance = (element: HTMLElement) => {
+    element.style.backgroundImage = 'none'
+    element.style.backgroundRepeat = 'no-repeat'
+    element.style.backgroundPosition = '0 0'
+    element.style.backgroundSize = '100% 100%'
+    element.style.backgroundColor = 'rgba(255, 249, 238, 0.9)'
+    element.style.border = '1px solid rgba(111, 89, 58, 0.34)'
+    element.style.boxShadow = 'inset 0 1px 0 rgba(255, 255, 255, 0.7)'
+  }
+
+  const isLikelyConsumableInventoryItem = (item: {
+    id: string
+    label: string
+  }): boolean => {
+    if (getPlayerEquipmentItemDefinitionById(item.id)) {
+      return false
+    }
+
+    return /potion|elixir|antidote|herb|food|drink|scroll|물약|포션|회복|음료/.test(
+      `${item.label} ${item.id}`.toLowerCase()
+    )
+  }
+
+  const getQuickslotButton = (target: EventTarget | null) => {
+    if (!(target instanceof Element)) {
+      return undefined
+    }
+
+    return target.closest('button[data-player-quickslot-index]') as
+      | HTMLButtonElement
+      | undefined
+  }
+
+  const getQuickslotIndexFromButton = (button: HTMLButtonElement): number =>
+    Number(button.dataset.playerQuickslotIndex)
+
+  const getDraggedInventorySlotIndex = (event: DragEvent): number | undefined => {
+    const rawValue =
+      event.dataTransfer?.getData('application/x-player-inventory-slot-index') ||
+      event.dataTransfer?.getData('text/plain')
+
+    if (!rawValue) {
+      return undefined
+    }
+
+    const slotIndex = Number(rawValue)
+
+    return Number.isNaN(slotIndex) ? undefined : slotIndex
+  }
+
+  const handleQuickslotDragStart = (event: DragEvent) => {
+    const quickslotButton = getQuickslotButton(event.target)
+
+    if (!quickslotButton || !event.dataTransfer) {
+      return
+    }
+
+    const quickslotIndex = getQuickslotIndexFromButton(quickslotButton)
+    const quickslot = getQuickslots().slots[quickslotIndex]
+    const inventorySlotIndex = quickslot?.inventorySlotIndex
+    const inventory = getInventory()
+    const item =
+      inventorySlotIndex === undefined
+        ? undefined
+        : inventory.slots[inventorySlotIndex]
+
+    if (!item || !isLikelyConsumableInventoryItem(item)) {
+      event.preventDefault()
+      return
+    }
+
+    event.dataTransfer.effectAllowed = 'move'
+    event.dataTransfer.setData(
+      'application/x-player-inventory-slot-index',
+      String(inventorySlotIndex)
+    )
+    event.dataTransfer.setData('text/plain', String(inventorySlotIndex))
+  }
+
+  const handleQuickslotDragOver = (event: DragEvent) => {
+    const quickslotButton = getQuickslotButton(event.target)
+
+    if (!quickslotButton || !event.dataTransfer) {
+      return
+    }
+
+    const inventorySlotIndex = getDraggedInventorySlotIndex(event)
+    const inventory = getInventory()
+
+    if (inventorySlotIndex === undefined) {
+      return
+    }
+
+    const item = inventory.slots[inventorySlotIndex]
+
+    if (!item || !isLikelyConsumableInventoryItem(item)) {
+      return
+    }
+
+    event.preventDefault()
+    event.dataTransfer.dropEffect = 'move'
+  }
+
+  const handleQuickslotDrop = (event: DragEvent) => {
+    const quickslotButton = getQuickslotButton(event.target)
+
+    if (!quickslotButton) {
+      return
+    }
+
+    const quickslotIndex = getQuickslotIndexFromButton(quickslotButton)
+    const inventorySlotIndex = getDraggedInventorySlotIndex(event)
+    const inventory = getInventory()
+
+    if (inventorySlotIndex === undefined) {
+      return
+    }
+
+    const item = inventory.slots[inventorySlotIndex]
+
+    if (!item || !isLikelyConsumableInventoryItem(item)) {
+      return
+    }
+
+    event.preventDefault()
+    onRequestQuickslotChange(
+      setPlayerQuickslotAssignment({
+        quickslots: getQuickslots(),
+        quickslotIndex,
+        inventorySlotIndex
+      })
+    )
+  }
+
+  const handleQuickslotContextMenu = (event: MouseEvent) => {
+    const quickslotButton = getQuickslotButton(event.target)
+
+    if (!quickslotButton) {
+      return
+    }
+
+    event.preventDefault()
+    onRequestQuickslotChange(
+      clearPlayerQuickslotAssignment({
+        quickslots: getQuickslots(),
+        quickslotIndex: getQuickslotIndexFromButton(quickslotButton)
+      })
+    )
+  }
+
+  const syncResourceRow = (
+    row: HTMLDivElement,
+    value: { current: number; max: number },
+    color: string,
+    valueText?: string
+  ) => {
+    const fill = row.querySelector<HTMLElement>('.player-hud-overlay__resource-fill')
+    const valueLabel = row.querySelector<HTMLElement>('.player-hud-overlay__resource-value')
+
+    if (!fill || !valueLabel) {
+      return
+    }
+
+    const ratio = value.max === 0 ? 1 : value.current / value.max
+
+    fill.style.width = `${clamp(ratio * 100, 0, 100)}%`
+    fill.style.background = color
+    valueLabel.textContent = valueText ?? `${value.current} / ${value.max}`
+  }
+
+  const syncLayout = () => {
+    const uiScale = getResponsiveUiScale()
+    const inventory = getInventory()
+    const panelWidth = clamp(
+      window.innerWidth - HUD_MARGIN * 2,
+      HUD_PANEL_MIN_WIDTH,
+      HUD_PANEL_MAX_WIDTH
+    )
+
+    panel.style.width = `${panelWidth}px`
+    panel.style.height = 'auto'
+    panel.style.left = '50%'
+    panel.style.bottom = `${Math.round(HUD_MARGIN * uiScale)}px`
+    panel.style.transformOrigin = 'center bottom'
+    panel.style.transform = `translateX(-50%) scale(${
+      uiScale * HUD_PANEL_SCALE_MULTIPLIER
+    })`
+
+    const nextExperienceToLevelUp = getPlayerExperienceToNextLevel(profile.level)
+
+    syncResourceRow(hpRow.row, profile.hp, HEALTH_BAR_COLOR)
+    syncResourceRow(mpRow.row, profile.mp, MANA_BAR_COLOR)
+    syncResourceRow(
+      expRow.row,
+      {
+        current: profile.experience.current,
+        max: nextExperienceToLevelUp
+      },
+      '#d7b24d',
+      profile.level >= PLAYER_MAX_LEVEL
+        ? 'MAX'
+        : `${profile.experience.current} / ${nextExperienceToLevelUp}`
+    )
+
+    for (let index = 0; index < skillButtons.length; index += 1) {
+      const skillButton = skillButtons[index]
+      const hotkeyLabel = skillHotkeyLabels[index]
+      const nameLabel = skillNameLabels[index]
+      const descriptionLabel = skillDescriptionLabels[index]
+
+      setSpriteFrame(skillButton, BUTTON_SQUARE_FRAME)
+      setEmptySlotAppearance(skillButton)
+      skillButton.setAttribute('aria-label', `스킬 슬롯 ${index + 1} 비어있음`)
+      skillButton.title = `스킬 슬롯 ${index + 1} 비어있음`
+      hotkeyLabel.textContent = SKILL_HOTKEYS[index]
+      nameLabel.textContent = '비어있음'
+      descriptionLabel.textContent = ''
+    }
+
+    const quickslots = getQuickslots()
+
+    for (let index = 0; index < consumableButtons.length; index += 1) {
+      const consumableButton = consumableButtons[index]
+      const hotkeyLabel = consumableHotkeyLabels[index]
+      const nameLabel = consumableNameLabels[index]
+      const quantityLabel = consumableQuantityLabels[index]
+      const quickslot = quickslots.slots[index]
+      const item = quickslot ? inventory.slots[quickslot.inventorySlotIndex] : undefined
+      const isQuickslotItem = item ? isLikelyConsumableInventoryItem(item) : false
+
+      setSpriteFrame(consumableButton, BUTTON_SQUARE_FRAME)
+      setEmptySlotAppearance(consumableButton)
+      consumableButton.classList.toggle(
+        'player-hud-overlay__consumable-slot--filled',
+        Boolean(item && isQuickslotItem)
+      )
+      consumableButton.classList.toggle(
+        'player-hud-overlay__consumable-slot--empty',
+        !item || !isQuickslotItem
+      )
+      consumableButton.draggable = Boolean(item && isQuickslotItem)
+      if (item && isQuickslotItem) {
+        consumableButton.style.borderColor = 'rgba(91, 134, 214, 0.42)'
+        consumableButton.style.boxShadow =
+          'inset 0 1px 0 rgba(255, 255, 255, 0.7), 0 0 0 1px rgba(91, 134, 214, 0.08)'
+      } else {
+        consumableButton.style.borderColor = 'rgba(111, 89, 58, 0.34)'
+        consumableButton.style.boxShadow =
+          'inset 0 1px 0 rgba(255, 255, 255, 0.7)'
+      }
+      consumableButton.setAttribute(
+        'aria-label',
+        item && isQuickslotItem
+          ? `퀵슬롯 ${index + 1} ${item.label}${
+              item.quantity > 1 ? ` x${item.quantity}` : ''
+            }. 드래그해서 다른 칸으로 이동`
+          : `퀵슬롯 ${index + 1} 비어있음`
+      )
+      consumableButton.title = item && isQuickslotItem
+        ? `${item.label}${item.quantity > 1 ? ` x${item.quantity}` : ''}. 드래그해서 다른 칸으로 이동`
+        : `퀵슬롯 ${index + 1} 비어있음`
+      hotkeyLabel.textContent = QUICK_CONSUMABLE_HOTKEYS[index]
+      nameLabel.textContent = item && isQuickslotItem ? item.label : '비어있음'
+      quantityLabel.hidden = !(item && isQuickslotItem && item.quantity > 1)
+      quantityLabel.textContent =
+        item && isQuickslotItem && item.quantity > 1 ? `x${item.quantity}` : ''
+    }
+  }
+
+  consumableGrid.addEventListener('dragstart', handleQuickslotDragStart)
+  consumableGrid.addEventListener('dragover', handleQuickslotDragOver)
+  consumableGrid.addEventListener('drop', handleQuickslotDrop)
+  consumableGrid.addEventListener('contextmenu', handleQuickslotContextMenu)
+
+  const destroy = () => {
+    overlayRoot.remove()
+    consumableGrid.removeEventListener('dragstart', handleQuickslotDragStart)
+    consumableGrid.removeEventListener('dragover', handleQuickslotDragOver)
+    consumableGrid.removeEventListener('drop', handleQuickslotDrop)
+    consumableGrid.removeEventListener('contextmenu', handleQuickslotContextMenu)
+  }
+
+  syncLayout()
+
+  return {
+    syncFrame: syncLayout,
+    destroy
+  }
+}
+
+type ResourceRow = {
+  row: HTMLDivElement
+}
+
+const createResourceRow = (label: string): ResourceRow => {
+  const row = document.createElement('div')
+  const labelElement = document.createElement('div')
+  const track = document.createElement('div')
+  const fill = document.createElement('div')
+  const value = document.createElement('div')
+
+  row.className = 'player-hud-overlay__resource-row'
+  labelElement.className = 'player-hud-overlay__resource-label'
+  labelElement.textContent = label
+  track.className = 'player-hud-overlay__resource-track'
+  fill.className = 'player-hud-overlay__resource-fill'
+  value.className = 'player-hud-overlay__resource-value'
+
+  track.append(fill)
+  row.append(labelElement, track, value)
+
+  return {
+    row
+  }
+}
+
+const clamp = (value: number, min: number, max: number): number =>
+  Math.min(max, Math.max(min, value))

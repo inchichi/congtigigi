@@ -159,6 +159,65 @@ describe('createCharacterControllerRuntime', () => {
       source: 'return 1'
     })
   })
+
+  it('lets monster npc characters receive interaction and return an alert', () => {
+    const runtime = createCharacterControllerRuntime()
+    const monster = createNpcCharacter({
+      id: '꿀꿀이',
+      appearanceType: 'monster_pig',
+      position: {
+        x: 10,
+        y: 8
+      },
+      collisionSize: {
+        width: 1,
+        height: 1
+      }
+    })
+
+    expect(runtime.canReceiveInteraction(monster)).toBe(true)
+    expect(
+      runtime.handleInteraction({
+        targetCharacter: monster,
+        sourceCharacter: createInitialPlayerCharacter({
+          mapWidth: 32,
+          mapHeight: 20
+        })
+      })
+    ).toEqual({
+      kind: 'message',
+      message: '!',
+      durationMilliseconds: 600
+    })
+  })
+
+  it('ignores defeated monster corpses for interaction', () => {
+    const runtime = createCharacterControllerRuntime()
+    const monster = createNpcCharacter({
+      id: '꿀꿀이',
+      appearanceType: 'monster_pig',
+      position: {
+        x: 10,
+        y: 8
+      },
+      collisionSize: {
+        width: 1,
+        height: 1
+      },
+      blocksMovement: false
+    })
+
+    expect(runtime.canReceiveInteraction(monster)).toBe(false)
+    expect(
+      runtime.handleInteraction({
+        targetCharacter: monster,
+        sourceCharacter: createInitialPlayerCharacter({
+          mapWidth: 32,
+          mapHeight: 20
+        })
+      })
+    ).toBeUndefined()
+  })
 })
 
 const createLuaRuntimeStub = ({
