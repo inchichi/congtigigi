@@ -51,6 +51,11 @@ export const createMapOverlay = ({
   let backingWidth = 0
   let backingHeight = 0
 
+  const syncMapFocusMode = () => {
+    mountElement.classList.toggle('game-root--map-focused', isExpanded)
+    document.body.classList.toggle('game-root--map-focused', isExpanded)
+  }
+
   overlayRoot.className = 'world-map-overlay'
   overlayRoot.setAttribute('aria-hidden', 'false')
 
@@ -275,6 +280,7 @@ export const createMapOverlay = ({
     }
 
     isExpanded = nextExpanded
+    syncMapFocusMode()
     syncLayout()
   }
 
@@ -306,11 +312,14 @@ export const createMapOverlay = ({
   window.addEventListener('keydown', handleWindowKeyDown)
   window.addEventListener('resize', handleWindowResize)
 
+  syncMapFocusMode()
   syncLayout()
 
   return {
     syncFrame,
     destroy: () => {
+      mountElement.classList.remove('game-root--map-focused')
+      document.body.classList.remove('game-root--map-focused')
       panelButton.removeEventListener('click', handlePanelClick)
       backdropButton.removeEventListener('click', handleBackdropClick)
       window.removeEventListener('keydown', handleWindowKeyDown)

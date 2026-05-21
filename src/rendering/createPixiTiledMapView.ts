@@ -8,7 +8,6 @@ import {
   NineSliceSprite,
   Rectangle,
   Sprite,
-  Spritesheet,
   Text,
   TextStyle,
   Texture,
@@ -32,6 +31,7 @@ import { processInteractionEvents } from '../game/interaction/processInteraction
 import type { PlayerEquipment } from '../game/playerEquipment'
 import type { PlayerInventory } from '../game/playerInventory'
 import type { PlayerProfile } from '../game/playerProfile'
+import type { PlayerQuickslots } from '../game/playerQuickslots'
 import {
   getPlayerMovementSpeedTilesPerSecond,
   getPlayerPhysicalAttackPower,
@@ -73,6 +73,7 @@ import {
 } from './tiledSpriteTransform'
 import { createMapOverlay } from './createMapOverlay'
 import { createBlacksmithShopOverlay } from './createBlacksmithShopOverlay'
+import { createPlayerEquipmentOverlay } from './createPlayerEquipmentOverlay'
 import { createPlayerHudOverlay } from './createPlayerHudOverlay'
 import { createPlayerInventoryOverlay } from './createPlayerInventoryOverlay'
 import { createPlayerStatOverlay } from './createPlayerStatOverlay'
@@ -89,6 +90,7 @@ type CreatePixiTiledMapViewInput = {
   playerProfile: PlayerProfile
   playerEquipment: PlayerEquipment
   playerInventory: PlayerInventory
+  playerQuickslots: PlayerQuickslots
   merchantInventory: PlayerInventory
   sceneIntroMessage: string
   cameraTargetCharacterId: string
@@ -100,6 +102,7 @@ type CreatePixiTiledMapViewInput = {
   controllerRuntime: CharacterControllerRuntime
   onPlayerInventoryChange: (nextInventory: PlayerInventory) => void
   onPlayerEquipmentChange: (nextEquipment: PlayerEquipment) => void
+  onPlayerQuickslotsChange: (nextQuickslots: PlayerQuickslots) => void
   onMerchantInventoryChange: (nextInventory: PlayerInventory) => void
   onRequestSceneChange: (request: SceneTransitionRequest) => void
 }
@@ -174,6 +177,17 @@ type MonsterGoldDrop = {
 type RenderedCharacterNode = {
   container: Container
   sprite: Sprite
+  playerHealthBar?: {
+    container: Container
+    track: Graphics
+    fill: Graphics
+  }
+  playerManaBar?: {
+    container: Container
+    track: Graphics
+    fill: Graphics
+  }
+  playerNameBadge?: Text
   displayLabelPanel?: NineSliceSprite
   displayLabel?: Text
   levelBadge?: Text
@@ -225,15 +239,20 @@ type PlayerHitReactionState = {
 }
 
 const DEPTH_SORTED_LAYER_NAME = 'object'
-const UI_SPRITESHEET_URL = new URL(
-  '../assets/spritesheets/uipack_rpg_sheet.json',
+const UI_SPRITESHEET_IMAGE_URL = new URL(
+  '../assets/spritesheets/uipack_rpg_sheet.png',
   import.meta.url
 ).href
 const TINY_DUNGEON_TILESET_IMAGE_URL = new URL(
   '../assets/tilesets/tiny-dungeon-16.png',
   import.meta.url
 ).href
-const MESSAGE_PANEL_TEXTURE_NAME = 'panelInset_beige.png'
+const MESSAGE_PANEL_FRAME = {
+  x: 200,
+  y: 294,
+  width: 93,
+  height: 94
+}
 const MESSAGE_PANEL_BORDER_SIZE = 8
 const MESSAGE_PANEL_PADDING_X = 12
 const MESSAGE_PANEL_PADDING_Y = 8
@@ -345,6 +364,30 @@ const MONSTER_LEVEL_BADGE_STYLE = new TextStyle({
     width: 3
   }
 })
+const PLAYER_NAME_BADGE_STYLE = new TextStyle({
+  align: 'center',
+  fill: 0xf4e7c5,
+  fontFamily: '"Jersey 25", NeoDunggeunmo, monospace',
+  fontSize: 12,
+  lineHeight: 13,
+  padding: 1,
+  stroke: {
+    color: 0x2e2313,
+    width: 3
+  }
+})
+const PLAYER_HEALTH_BAR_WIDTH = 38
+const PLAYER_HEALTH_BAR_HEIGHT = 5
+const PLAYER_HEALTH_BAR_TRACK_COLOR = 0x2e2313
+const PLAYER_HEALTH_BAR_FILL_COLOR = 0xd06b5d
+const PLAYER_HEALTH_BAR_BORDER_COLOR = 0xf4e7c5
+const PLAYER_HEALTH_BAR_GAP = 5
+const PLAYER_MANA_BAR_WIDTH = 38
+const PLAYER_MANA_BAR_HEIGHT = 5
+const PLAYER_MANA_BAR_TRACK_COLOR = 0x2e2313
+const PLAYER_MANA_BAR_FILL_COLOR = 0x5b86d6
+const PLAYER_MANA_BAR_BORDER_COLOR = 0xf4e7c5
+const PLAYER_MANA_BAR_GAP = 2
 const SIGN_POST_LABEL_STYLE = new TextStyle({
   align: 'center',
   breakWords: true,
@@ -487,6 +530,27 @@ const createMonsterHealthBar = (): NonNullable<
   }
 }
 
+const createPlayerResourceBar = (): NonNullable<
+  RenderedCharacterNode['playerHealthBar']
+> => {
+  const container = new Container()
+  const track = new Graphics()
+  const fill = new Graphics()
+
+  container.sortableChildren = true
+  track.roundPixels = true
+  fill.roundPixels = true
+  track.zIndex = 0
+  fill.zIndex = 1
+  container.addChild(track, fill)
+
+  return {
+    container,
+    track,
+    fill
+  }
+}
+
 let messageFontsReadyPromise: Promise<void> | undefined
 
 export const createPixiTiledMapView = async ({
@@ -496,6 +560,7 @@ export const createPixiTiledMapView = async ({
   playerProfile,
   playerEquipment,
   playerInventory,
+  playerQuickslots,
   merchantInventory,
   sceneIntroMessage,
   cameraTargetCharacterId,
@@ -504,6 +569,7 @@ export const createPixiTiledMapView = async ({
   controllerRuntime,
   onPlayerInventoryChange,
   onPlayerEquipmentChange,
+  onPlayerQuickslotsChange,
   onMerchantInventoryChange,
   onRequestSceneChange
 }: CreatePixiTiledMapViewInput): Promise<{ destroy: () => void }> => {
@@ -623,6 +689,7 @@ export const createPixiTiledMapView = async ({
     characterSpriteSheet.tileset.tileHeight * characterSpriteSheet.scale
   let currentPlayerEquipment = playerEquipment
   let currentPlayerInventory = playerInventory
+  let currentPlayerQuickslots = playerQuickslots
   let currentBlacksmithInventory = merchantInventory
   let playerAttackStartedAtMilliseconds: number | undefined
   let playerAttackFacing: CharacterMoveDirection | undefined
@@ -639,6 +706,7 @@ export const createPixiTiledMapView = async ({
   }
   let isPlayerUiOpen = false
   let isPlayerStatOpen = false
+  let isPlayerEquipmentOpen = false
   let isPlayerSkillOpen = false
   let isBlacksmithShopOpen = false
   let playerHudOverlay: {
@@ -649,6 +717,13 @@ export const createPixiTiledMapView = async ({
     destroy: () => {}
   }
   let playerInventoryOverlay: {
+    syncFrame: () => void
+    destroy: () => void
+  } = {
+    syncFrame: () => {},
+    destroy: () => {}
+  }
+  let playerEquipmentOverlay: {
     syncFrame: () => void
     destroy: () => void
   } = {
@@ -774,6 +849,7 @@ export const createPixiTiledMapView = async ({
     syncPlayerDerivedCharacterStats()
     playerHudOverlay.syncFrame()
     playerInventoryOverlay.syncFrame()
+    playerEquipmentOverlay.syncFrame()
     playerStatOverlay.syncFrame()
     playerSkillOverlay.syncFrame()
     playerShopOverlay.syncFrame()
@@ -892,12 +968,6 @@ export const createPixiTiledMapView = async ({
     }
 
     isPlayerUiOpen = nextIsOpen
-    if (nextIsOpen) {
-      isPlayerStatOpen = false
-      isPlayerSkillOpen = false
-      isBlacksmithShopOpen = false
-    }
-    clearPressedInputState()
     syncPlayerUiOverlays()
   }
   const setPlayerStatOpen = (nextIsOpen: boolean) => {
@@ -906,12 +976,14 @@ export const createPixiTiledMapView = async ({
     }
 
     isPlayerStatOpen = nextIsOpen
-    if (nextIsOpen) {
-      isPlayerUiOpen = false
-      isPlayerSkillOpen = false
-      isBlacksmithShopOpen = false
+    syncPlayerUiOverlays()
+  }
+  const setPlayerEquipmentOpen = (nextIsOpen: boolean) => {
+    if (isPlayerEquipmentOpen === nextIsOpen) {
+      return
     }
-    clearPressedInputState()
+
+    isPlayerEquipmentOpen = nextIsOpen
     syncPlayerUiOverlays()
   }
   const setPlayerSkillOpen = (nextIsOpen: boolean) => {
@@ -920,12 +992,6 @@ export const createPixiTiledMapView = async ({
     }
 
     isPlayerSkillOpen = nextIsOpen
-    if (nextIsOpen) {
-      isPlayerUiOpen = false
-      isPlayerStatOpen = false
-      isBlacksmithShopOpen = false
-    }
-    clearPressedInputState()
     syncPlayerUiOverlays()
   }
   const setBlacksmithShopOpen = (nextIsOpen: boolean) => {
@@ -934,18 +1000,13 @@ export const createPixiTiledMapView = async ({
     }
 
     isBlacksmithShopOpen = nextIsOpen
-    if (nextIsOpen) {
-      isPlayerUiOpen = false
-      isPlayerStatOpen = false
-      isPlayerSkillOpen = false
-    }
-    clearPressedInputState()
     syncPlayerUiOverlays()
   }
   const closeAllOverlays = () => {
     if (
       !isPlayerUiOpen &&
       !isPlayerStatOpen &&
+      !isPlayerEquipmentOpen &&
       !isPlayerSkillOpen &&
       !isBlacksmithShopOpen
     ) {
@@ -954,9 +1015,9 @@ export const createPixiTiledMapView = async ({
 
     isPlayerUiOpen = false
     isPlayerStatOpen = false
+    isPlayerEquipmentOpen = false
     isPlayerSkillOpen = false
     isBlacksmithShopOpen = false
-    clearPressedInputState()
     syncPlayerUiOverlays()
   }
   const requestSceneTransition = (portal: MapPortal) => {
@@ -988,16 +1049,40 @@ export const createPixiTiledMapView = async ({
   playerHudOverlay = createPlayerHudOverlay({
     mountElement,
     profile: playerProfile,
-    getIsInventoryOpen: () => isPlayerUiOpen,
-    onRequestInventoryOpenChange: setPlayerUiOpen
+    getInventory: () => currentPlayerInventory,
+    getQuickslots: () => currentPlayerQuickslots,
+    onRequestQuickslotChange: (nextQuickslots) => {
+      currentPlayerQuickslots = nextQuickslots
+      onPlayerQuickslotsChange(nextQuickslots)
+      syncPlayerUiOverlays()
+    }
   })
   playerInventoryOverlay = createPlayerInventoryOverlay({
+    mountElement,
+    getInventory: () => currentPlayerInventory,
+    getQuickslots: () => currentPlayerQuickslots,
+    getEquipment: () => currentPlayerEquipment,
+    getIsOpen: () => isPlayerUiOpen,
+    onRequestOpenChange: setPlayerUiOpen,
+    onRequestInventoryChange: (nextInventory) => {
+      currentPlayerInventory = nextInventory
+      onPlayerInventoryChange(nextInventory)
+      syncPlayerUiOverlays()
+    },
+    onRequestEquipmentChange: (nextEquipment) => {
+      currentPlayerEquipment = nextEquipment
+      onPlayerEquipmentChange(nextEquipment)
+      syncPlayerCharacterVisual()
+      syncPlayerUiOverlays()
+    }
+  })
+  playerEquipmentOverlay = createPlayerEquipmentOverlay({
     mountElement,
     profile: playerProfile,
     getInventory: () => currentPlayerInventory,
     getEquipment: () => currentPlayerEquipment,
-    getIsOpen: () => isPlayerUiOpen,
-    onRequestOpenChange: setPlayerUiOpen,
+    getIsOpen: () => isPlayerEquipmentOpen,
+    onRequestOpenChange: setPlayerEquipmentOpen,
     onRequestInventoryChange: (nextInventory) => {
       currentPlayerInventory = nextInventory
       onPlayerInventoryChange(nextInventory)
@@ -1250,9 +1335,22 @@ export const createPixiTiledMapView = async ({
       ? monsterBehaviorConfig.renderScale
       : resolvedCharacterAppearanceTexture!.renderScale
     const isPlayer = character.id === PLAYER_CHARACTER_ID
+    const playerHealthBar = isPlayer
+      ? createPlayerResourceBar()
+      : undefined
+    const playerManaBar = isPlayer
+      ? createPlayerResourceBar()
+      : undefined
     const monsterHealthBar = isMonsterCharacter
       ? createMonsterHealthBar()
       : undefined
+    const playerNameBadge =
+      isPlayer
+        ? new Text({
+            style: PLAYER_NAME_BADGE_STYLE,
+            text: playerProfile.name
+          })
+        : undefined
     const displayLabel =
       character.displayText === undefined
         ? undefined
@@ -1301,6 +1399,22 @@ export const createPixiTiledMapView = async ({
       displayLabel.roundPixels = true
       displayLabel.zIndex = displayLabelPanel ? 17 : 16
       container.addChild(displayLabel)
+    }
+    if (playerNameBadge) {
+      playerNameBadge.label = `character:${character.id}:name`
+      playerNameBadge.roundPixels = true
+      playerNameBadge.zIndex = 21
+      container.addChild(playerNameBadge)
+    }
+    if (playerHealthBar) {
+      playerHealthBar.container.label = `character:${character.id}:player-health-bar`
+      playerHealthBar.container.zIndex = 18
+      container.addChild(playerHealthBar.container)
+    }
+    if (playerManaBar) {
+      playerManaBar.container.label = `character:${character.id}:player-mana-bar`
+      playerManaBar.container.zIndex = 18.5
+      container.addChild(playerManaBar.container)
     }
     if (monsterHealthBar) {
       monsterHealthBar.container.label = `character:${character.id}:monster-health-bar`
@@ -1358,6 +1472,9 @@ export const createPixiTiledMapView = async ({
     renderedCharacters.set(character.id, {
       container,
       sprite,
+      playerHealthBar,
+      playerManaBar,
+      playerNameBadge,
       displayLabelPanel,
       displayLabel,
       levelBadge,
@@ -1533,7 +1650,9 @@ export const createPixiTiledMapView = async ({
       map.tileHeight
     ) + (character.appearanceType === SIGN_POST_APPEARANCE_TYPE ? 1 : 0)
     syncCharacterDisplayLabel(renderNode)
+    syncPlayerNameBadge(renderNode, character)
     syncCharacterLevelBadge(renderNode, character)
+    syncPlayerResourceBars(renderNode, character)
     depthSortedLayer?.sortChildren()
 
     if (character.id === PLAYER_CHARACTER_ID) {
@@ -1555,6 +1674,23 @@ export const createPixiTiledMapView = async ({
       if (renderNode.monsterHealthBar) {
         renderNode.monsterHealthBar.container.visible = false
       }
+      return
+    }
+
+    if (
+      character.id === PLAYER_CHARACTER_ID &&
+      renderNode.playerNameBadge
+    ) {
+      renderNode.levelBadge.visible = true
+      renderNode.levelBadge.text = `Lv ${character.level}`
+      renderNode.levelBadge.position.set(
+        Math.round((renderNode.sprite.width - renderNode.levelBadge.width) / 2),
+        Math.round(
+          renderNode.playerNameBadge.position.y +
+            renderNode.playerNameBadge.height +
+            2
+        )
+      )
       return
     }
 
@@ -1584,6 +1720,106 @@ export const createPixiTiledMapView = async ({
     renderNode.levelBadge.position.set(
       Math.round((renderNode.sprite.width - renderNode.levelBadge.width) / 2),
       -Math.round(renderNode.levelBadge.height + 4)
+    )
+  }
+
+  const syncPlayerNameBadge = (
+    renderNode: RenderedCharacterNode,
+    character: CharacterState
+  ) => {
+    if (character.id !== PLAYER_CHARACTER_ID || !renderNode.playerNameBadge) {
+      return
+    }
+
+    renderNode.playerNameBadge.visible = true
+    renderNode.playerNameBadge.text = playerProfile.name
+    const levelHeight = renderNode.levelBadge?.height ?? 0
+    const stackHeight =
+      renderNode.playerNameBadge.height +
+      levelHeight +
+      PLAYER_HEALTH_BAR_HEIGHT +
+      PLAYER_MANA_BAR_HEIGHT +
+      PLAYER_HEALTH_BAR_GAP +
+      PLAYER_MANA_BAR_GAP +
+      8
+
+    renderNode.playerNameBadge.position.set(
+      Math.round((renderNode.sprite.width - renderNode.playerNameBadge.width) / 2),
+      -Math.round(stackHeight)
+    )
+  }
+
+  const syncPlayerResourceBars = (
+    renderNode: RenderedCharacterNode,
+    character: CharacterState
+  ) => {
+    if (
+      character.id !== PLAYER_CHARACTER_ID ||
+      !renderNode.playerHealthBar ||
+      !renderNode.playerManaBar ||
+      !renderNode.playerNameBadge
+    ) {
+      return
+    }
+
+    const healthBar = renderNode.playerHealthBar
+    const manaBar = renderNode.playerManaBar
+    const healthRatio =
+      playerProfile.hp.max === 0
+        ? 0
+        : Math.min(1, Math.max(0, playerProfile.hp.current / playerProfile.hp.max))
+    const manaRatio =
+      playerProfile.mp.max === 0
+        ? 0
+        : Math.min(1, Math.max(0, playerProfile.mp.current / playerProfile.mp.max))
+    const healthInnerWidth = PLAYER_HEALTH_BAR_WIDTH - 2
+    const healthInnerHeight = PLAYER_HEALTH_BAR_HEIGHT - 2
+    const manaInnerWidth = PLAYER_MANA_BAR_WIDTH - 2
+    const manaInnerHeight = PLAYER_MANA_BAR_HEIGHT - 2
+    const healthFilledWidth = Math.max(0, Math.round(healthInnerWidth * healthRatio))
+    const manaFilledWidth = Math.max(0, Math.round(manaInnerWidth * manaRatio))
+    const nameHeight = renderNode.playerNameBadge.height
+    const levelBadge = renderNode.levelBadge
+    const levelHeight = levelBadge?.height ?? 0
+    const levelBottomY = levelBadge
+      ? levelBadge.position.y + levelHeight
+      : renderNode.playerNameBadge.position.y + nameHeight
+
+    healthBar.container.visible = true
+    healthBar.track.clear()
+    healthBar.track
+      .rect(0, 0, PLAYER_HEALTH_BAR_WIDTH, PLAYER_HEALTH_BAR_HEIGHT)
+      .fill({ color: PLAYER_HEALTH_BAR_TRACK_COLOR })
+      .stroke({ color: PLAYER_HEALTH_BAR_BORDER_COLOR, width: 1 })
+    healthBar.fill.clear()
+
+    if (healthFilledWidth > 0) {
+      healthBar.fill
+        .rect(1, 1, healthFilledWidth, healthInnerHeight)
+        .fill({ color: PLAYER_HEALTH_BAR_FILL_COLOR })
+    }
+
+    manaBar.container.visible = true
+    manaBar.track.clear()
+    manaBar.track
+      .rect(0, 0, PLAYER_MANA_BAR_WIDTH, PLAYER_MANA_BAR_HEIGHT)
+      .fill({ color: PLAYER_MANA_BAR_TRACK_COLOR })
+      .stroke({ color: PLAYER_MANA_BAR_BORDER_COLOR, width: 1 })
+    manaBar.fill.clear()
+
+    if (manaFilledWidth > 0) {
+      manaBar.fill
+        .rect(1, 1, manaFilledWidth, manaInnerHeight)
+        .fill({ color: PLAYER_MANA_BAR_FILL_COLOR })
+    }
+
+    healthBar.container.position.set(
+      Math.round((renderNode.sprite.width - PLAYER_HEALTH_BAR_WIDTH) / 2),
+      Math.round(levelBottomY + PLAYER_HEALTH_BAR_GAP)
+    )
+    manaBar.container.position.set(
+      Math.round((renderNode.sprite.width - PLAYER_MANA_BAR_WIDTH) / 2),
+      healthBar.container.position.y + PLAYER_HEALTH_BAR_HEIGHT + PLAYER_MANA_BAR_GAP
     )
   }
 
@@ -3186,6 +3422,8 @@ export const createPixiTiledMapView = async ({
       event.code === 'KeyI' || event.key.toLowerCase() === 'i'
     const isStatToggleKey =
       event.code === 'KeyS' || event.key.toLowerCase() === 's'
+    const isEquipmentToggleKey =
+      event.code === 'KeyU' || event.key.toLowerCase() === 'u'
     const isSkillToggleKey =
       event.code === 'KeyK' || event.key.toLowerCase() === 'k'
 
@@ -3207,6 +3445,15 @@ export const createPixiTiledMapView = async ({
       return
     }
 
+    if (isEquipmentToggleKey) {
+      if (!event.repeat) {
+        event.preventDefault()
+        setPlayerEquipmentOpen(!isPlayerEquipmentOpen)
+      }
+
+      return
+    }
+
     if (isSkillToggleKey) {
       if (!event.repeat) {
         event.preventDefault()
@@ -3216,27 +3463,20 @@ export const createPixiTiledMapView = async ({
       return
     }
 
-    if (playerProfile.hp.current === 0) {
+    if (
+      event.key === 'Escape' &&
+      (isPlayerUiOpen ||
+        isPlayerStatOpen ||
+        isPlayerEquipmentOpen ||
+        isPlayerSkillOpen ||
+        isBlacksmithShopOpen)
+    ) {
+      event.preventDefault()
+      closeAllOverlays()
       return
     }
 
-    if (
-      isPlayerUiOpen ||
-      isPlayerStatOpen ||
-      isPlayerSkillOpen ||
-      isBlacksmithShopOpen
-    ) {
-      const action = getCharacterActionFromKey(event.key)
-      const direction = getCharacterMoveDirectionFromKey(event.key)
-
-      if (event.key === 'Escape' || action || direction || isAttackKey(event)) {
-        event.preventDefault()
-      }
-
-      if (event.key === 'Escape') {
-        closeAllOverlays()
-      }
-
+    if (playerProfile.hp.current === 0) {
       return
     }
 
@@ -3333,6 +3573,11 @@ export const createPixiTiledMapView = async ({
     undefined,
     UPDATE_PRIORITY.UTILITY
   )
+  app.ticker.add(
+    playerEquipmentOverlay.syncFrame,
+    undefined,
+    UPDATE_PRIORITY.UTILITY
+  )
   app.ticker.add(playerStatOverlay.syncFrame, undefined, UPDATE_PRIORITY.UTILITY)
   app.ticker.add(
     playerSkillOverlay.syncFrame,
@@ -3347,6 +3592,7 @@ export const createPixiTiledMapView = async ({
   mapOverlay.syncFrame()
   playerHudOverlay.syncFrame()
   playerInventoryOverlay.syncFrame()
+  playerEquipmentOverlay.syncFrame()
   playerStatOverlay.syncFrame()
   playerSkillOverlay.syncFrame()
   playerShopOverlay.syncFrame()
@@ -3368,6 +3614,7 @@ export const createPixiTiledMapView = async ({
     app.ticker.remove(mapOverlay.syncFrame)
     app.ticker.remove(playerHudOverlay.syncFrame)
     app.ticker.remove(playerInventoryOverlay.syncFrame)
+    app.ticker.remove(playerEquipmentOverlay.syncFrame)
     app.ticker.remove(playerStatOverlay.syncFrame)
     app.ticker.remove(playerSkillOverlay.syncFrame)
     app.ticker.remove(playerShopOverlay.syncFrame)
@@ -3398,6 +3645,7 @@ export const createPixiTiledMapView = async ({
     mapOverlay.destroy()
     playerHudOverlay.destroy()
     playerInventoryOverlay.destroy()
+    playerEquipmentOverlay.destroy()
     playerStatOverlay.destroy()
     playerSkillOverlay.destroy()
     playerShopOverlay.destroy()
@@ -3417,19 +3665,22 @@ export const createPixiTiledMapView = async ({
 }
 
 const loadMessagePanelTexture = async (): Promise<Texture> => {
-  const uiSpritesheet = await Assets.load<Spritesheet>(UI_SPRITESHEET_URL)
+  const uiSpritesheetImageTexture = await Assets.load<Texture>(
+    UI_SPRITESHEET_IMAGE_URL
+  )
 
-  uiSpritesheet.textureSource.scaleMode = 'nearest'
+  uiSpritesheetImageTexture.source.scaleMode = 'nearest'
+  uiSpritesheetImageTexture.source.addressMode = 'clamp-to-edge'
 
-  const panelTexture = uiSpritesheet.textures[MESSAGE_PANEL_TEXTURE_NAME]
-
-  if (!panelTexture) {
-    throw new Error(
-      `Missing ${MESSAGE_PANEL_TEXTURE_NAME} in ${UI_SPRITESHEET_URL}`
+  return new Texture({
+    source: uiSpritesheetImageTexture.source,
+    frame: new Rectangle(
+      MESSAGE_PANEL_FRAME.x,
+      MESSAGE_PANEL_FRAME.y,
+      MESSAGE_PANEL_FRAME.width,
+      MESSAGE_PANEL_FRAME.height
     )
-  }
-
-  return panelTexture
+  })
 }
 
 const loadSmearVfxTextures = async (): Promise<SmearVfxRenderResources> => {

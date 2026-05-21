@@ -23,6 +23,7 @@ import { parseTiledMap, parseTiledTileset } from './game/tiled/parseTiledMap'
 import { createInitialPlayerEquipment } from './game/playerEquipment'
 import { createInitialPlayerInventory } from './game/playerInventory'
 import { createInitialPlayerProfile } from './game/playerProfile'
+import { createInitialPlayerQuickslots } from './game/playerQuickslots'
 import { getSceneIntroMessage } from './game/sceneIntro'
 import { createPixiTiledMapView } from './rendering/createPixiTiledMapView'
 import type {
@@ -87,6 +88,7 @@ const sceneMusicUrls: Record<SceneId, string> = {
 const playerProfile = createInitialPlayerProfile()
 let playerEquipment = createInitialPlayerEquipment()
 let playerInventory = createInitialPlayerInventory()
+let playerQuickslots = createInitialPlayerQuickslots()
 let merchantInventory = createInitialBlacksmithInventory()
 let activeControllerRuntime:
   | ReturnType<typeof createCharacterControllerRuntime>
@@ -137,6 +139,7 @@ const bootstrapScene = async (
     playerProfile,
     playerEquipment,
     playerInventory,
+    playerQuickslots,
     merchantInventory,
     sceneIntroMessage: getSceneIntroMessage(sceneId),
     cameraTargetCharacterId: PLAYER_CHARACTER_ID,
@@ -154,6 +157,9 @@ const bootstrapScene = async (
     },
     onPlayerEquipmentChange: (nextEquipment) => {
       playerEquipment = nextEquipment
+    },
+    onPlayerQuickslotsChange: (nextQuickslots) => {
+      playerQuickslots = nextQuickslots
     },
     onMerchantInventoryChange: (nextInventory) => {
       merchantInventory = nextInventory

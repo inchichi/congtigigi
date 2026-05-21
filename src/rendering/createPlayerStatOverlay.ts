@@ -84,18 +84,30 @@ export const createPlayerStatOverlay = ({
   const statValues: HTMLSpanElement[] = []
   const statDescriptions: HTMLSpanElement[] = []
   const statActions: HTMLSpanElement[] = []
+  let panelPosition = { left: 0, top: 0 }
+  let hasPanelPosition = false
+  let dragState:
+    | {
+        pointerId: number
+        offsetX: number
+        offsetY: number
+        width: number
+        height: number
+      }
+    | undefined
 
   overlayRoot.className = 'player-stat-overlay player-stat-overlay--sidebar'
 
   backdropButton.type = 'button'
   backdropButton.className = 'player-stat-overlay__backdrop'
   backdropButton.hidden = true
-  backdropButton.setAttribute('aria-label', '스텟 창 닫기')
+  backdropButton.tabIndex = -1
+  backdropButton.setAttribute('aria-hidden', 'true')
 
   panel.className = 'player-stat-overlay__panel'
   panel.hidden = true
   panel.setAttribute('role', 'dialog')
-  panel.setAttribute('aria-modal', 'true')
+  panel.setAttribute('aria-modal', 'false')
   panel.setAttribute('aria-labelledby', 'player-stat-overlay-title')
 
   panelBody.className = 'player-stat-overlay__panel-body'
@@ -177,6 +189,77 @@ export const createPlayerStatOverlay = ({
   overlayRoot.append(backdropButton, panel)
   mountElement.append(overlayRoot)
 
+  const clampPanelPosition = (
+    left: number,
+    top: number,
+    width: number,
+    height: number
+  ) => ({
+    left: clamp(
+      left,
+      OVERLAY_MARGIN,
+      Math.max(OVERLAY_MARGIN, window.innerWidth - width - OVERLAY_MARGIN)
+    ),
+    top: clamp(
+      top,
+      OVERLAY_MARGIN,
+      Math.max(OVERLAY_MARGIN, window.innerHeight - height - OVERLAY_MARGIN)
+    )
+  })
+
+  const startDragging = (event: PointerEvent) => {
+    if (event.button !== 0 || panel.hidden || !event.isPrimary) {
+      return
+    }
+
+    const target = event.target
+
+    if (!(target instanceof Element) || closeButton.contains(target)) {
+      return
+    }
+
+    const rect = panel.getBoundingClientRect()
+
+    dragState = {
+      pointerId: event.pointerId,
+      offsetX: event.clientX - rect.left,
+      offsetY: event.clientY - rect.top,
+      width: rect.width,
+      height: rect.height
+    }
+    hasPanelPosition = true
+    headerRow.classList.add('player-stat-overlay__header--dragging')
+    event.preventDefault()
+  }
+
+  const stopDragging = (pointerId?: number) => {
+    if (dragState && pointerId !== undefined && dragState.pointerId !== pointerId) {
+      return
+    }
+
+    dragState = undefined
+    headerRow.classList.remove('player-stat-overlay__header--dragging')
+  }
+
+  const handleDocumentPointerMove = (event: PointerEvent) => {
+    if (!dragState || event.pointerId !== dragState.pointerId) {
+      return
+    }
+
+    panelPosition = clampPanelPosition(
+      event.clientX - dragState.offsetX,
+      event.clientY - dragState.offsetY,
+      dragState.width,
+      dragState.height
+    )
+    panel.style.left = `${panelPosition.left}px`
+    panel.style.top = `${panelPosition.top}px`
+  }
+
+  const handleDocumentPointerUp = (event: PointerEvent) => {
+    stopDragging(event.pointerId)
+  }
+
   const syncLayout = () => {
     const isOpen = getIsOpen()
     const uiScale = getResponsiveUiScale()
@@ -203,22 +286,41 @@ export const createPlayerStatOverlay = ({
       PANEL_MIN_HEIGHT,
       Math.min(PANEL_MAX_HEIGHT, availableHeight)
     )
+    const renderedWidth = panelWidth * uiScale
+    const renderedHeight = panelHeight * uiScale
+    const defaultPosition = clampPanelPosition(
+      window.innerWidth - renderedWidth - OVERLAY_MARGIN,
+      OVERLAY_MARGIN,
+      renderedWidth,
+      renderedHeight
+    )
 
     backdropButton.hidden = false
     panel.hidden = false
     panel.style.left = 'auto'
-    panel.style.right = `${OVERLAY_MARGIN}px`
-    panel.style.top = `${OVERLAY_MARGIN}px`
+    panel.style.right = 'auto'
+    panel.style.top = 'auto'
     panel.style.bottom = 'auto'
     panel.style.width = `${panelWidth}px`
-    panel.style.height = 'auto'
-    panel.style.maxHeight = `${panelHeight}px`
-    panel.style.transformOrigin = 'top right'
+    panel.style.height = `${panelHeight}px`
+    panel.style.transformOrigin = 'left top'
     panel.style.transform = `scale(${uiScale})`
-
-    panelBody.style.height = 'auto'
-    panelBody.style.maxHeight = `${panelHeight}px`
+    panelBody.style.height = '100%'
     panelBody.style.overflowY = 'auto'
+
+    if (!hasPanelPosition) {
+      panelPosition = defaultPosition
+    } else {
+      panelPosition = clampPanelPosition(
+        panelPosition.left,
+        panelPosition.top,
+        renderedWidth,
+        renderedHeight
+      )
+    }
+
+    panel.style.left = `${panelPosition.left}px`
+    panel.style.top = `${panelPosition.top}px`
 
     infoName.textContent = profile.name
     infoJob.textContent = profile.job
@@ -303,24 +405,28 @@ export const createPlayerStatOverlay = ({
   const handleBackdropPointerDown = (event: PointerEvent) => {
     event.preventDefault()
     event.stopPropagation()
+    stopDragging()
     onRequestOpenChange(false)
   }
 
   const handleBackdropClick = (event: MouseEvent) => {
     event.preventDefault()
     event.stopPropagation()
+    stopDragging()
     onRequestOpenChange(false)
   }
 
   const handleCloseButtonPointerDown = (event: PointerEvent) => {
     event.preventDefault()
     event.stopPropagation()
+    stopDragging()
     onRequestOpenChange(false)
   }
 
   const handleCloseButtonClick = (event: MouseEvent) => {
     event.preventDefault()
     event.stopPropagation()
+    stopDragging()
     onRequestOpenChange(false)
   }
 
@@ -336,6 +442,10 @@ export const createPlayerStatOverlay = ({
 
   backdropButton.addEventListener('pointerdown', handleBackdropPointerDown)
   backdropButton.addEventListener('click', handleBackdropClick)
+  headerRow.addEventListener('pointerdown', startDragging)
+  document.addEventListener('pointermove', handleDocumentPointerMove)
+  document.addEventListener('pointerup', handleDocumentPointerUp)
+  document.addEventListener('pointercancel', handleDocumentPointerUp)
   closeButton.addEventListener('pointerdown', handleCloseButtonPointerDown)
   closeButton.addEventListener('click', handleCloseButtonClick)
   panel.addEventListener('click', handlePanelClick)
@@ -348,6 +458,10 @@ export const createPlayerStatOverlay = ({
   const destroy = () => {
     backdropButton.removeEventListener('pointerdown', handleBackdropPointerDown)
     backdropButton.removeEventListener('click', handleBackdropClick)
+    headerRow.removeEventListener('pointerdown', startDragging)
+    document.removeEventListener('pointermove', handleDocumentPointerMove)
+    document.removeEventListener('pointerup', handleDocumentPointerUp)
+    document.removeEventListener('pointercancel', handleDocumentPointerUp)
     closeButton.removeEventListener('pointerdown', handleCloseButtonPointerDown)
     closeButton.removeEventListener('click', handleCloseButtonClick)
     panel.removeEventListener('click', handlePanelClick)
