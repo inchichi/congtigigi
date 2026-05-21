@@ -126,12 +126,12 @@ const BLACKSMITH_SERVICE_OPTIONS: Array<{
   {
     mode: 'upgrade',
     label: '강화',
-    description: '장비를 더 강하게 만드는 기능입니다.'
+    description: '준비중입니다.'
   },
   {
     mode: 'repair',
     label: '수리',
-    description: '장비를 정비하고 회복하는 기능입니다.'
+    description: '준비중입니다.'
   }
 ]
 const EQUIPMENT_ICON_FRAME_BY_KEY: Record<
@@ -231,10 +231,15 @@ export const createBlacksmithShopOverlay = ({
   const serviceMenuTitle = document.createElement('div')
   const serviceMenuDescription = document.createElement('div')
   const serviceMenuGrid = document.createElement('div')
+  const selectionPanel = document.createElement('section')
+  const selectionPanelBody = document.createElement('div')
+  const workshopPanelWindow = document.createElement('section')
+  const workshopPanelBody = document.createElement('div')
   const workshopPanel = document.createElement('section')
   const workshopBadge = document.createElement('div')
   const workshopTitle = document.createElement('div')
   const workshopDescription = document.createElement('div')
+  const workshopBackButton = document.createElement('button')
   const panes = document.createElement('div')
   const statusElement = document.createElement('div')
   const footerElement = document.createElement('div')
@@ -256,6 +261,7 @@ export const createBlacksmithShopOverlay = ({
   })
   let statusMessage: string | undefined
   let currentServiceMode: BlacksmithServiceMode = 'menu'
+  let wasOpen = false
 
   overlayRoot.className = 'blacksmith-shop-overlay'
 
@@ -265,7 +271,7 @@ export const createBlacksmithShopOverlay = ({
   backdropButton.tabIndex = -1
   backdropButton.setAttribute('aria-hidden', 'true')
 
-  panel.className = 'blacksmith-shop-overlay__panel'
+  panel.className = 'blacksmith-shop-overlay__panel blacksmith-shop-overlay__panel--shop'
   panel.hidden = true
   panel.setAttribute('role', 'dialog')
   panel.setAttribute('aria-modal', 'false')
@@ -280,6 +286,7 @@ export const createBlacksmithShopOverlay = ({
   merchantName.className = 'blacksmith-shop-overlay__portrait-name'
   merchantName.textContent = '대장장이'
   merchantGold.className = 'blacksmith-shop-overlay__portrait-gold'
+  merchantGold.hidden = true
   merchantCardText.append(merchantName, merchantGold)
   merchantCard.append(merchantPortrait, merchantCardText)
 
@@ -292,6 +299,7 @@ export const createBlacksmithShopOverlay = ({
 
   closeButton.type = 'button'
   closeButton.className = 'blacksmith-shop-overlay__close'
+  closeButton.hidden = true
   closeButton.setAttribute('aria-label', '대장장이 거래 닫기')
   closeButton.title = '거래 닫기 (Esc)'
   closeButton.textContent = '×'
@@ -322,19 +330,45 @@ export const createBlacksmithShopOverlay = ({
   serviceMenu.className = 'blacksmith-shop-overlay__service-menu'
   serviceMenuHeader.className = 'blacksmith-shop-overlay__service-menu-header'
   serviceMenuTitle.className = 'blacksmith-shop-overlay__service-menu-title'
-  serviceMenuTitle.textContent = '무엇을 할까요?'
+  serviceMenuTitle.textContent = '대장장이와 상호작용'
   serviceMenuDescription.className =
     'blacksmith-shop-overlay__service-menu-description'
-  serviceMenuDescription.textContent =
-    '상점, 강화, 수리를 먼저 선택할 수 있습니다.'
+  serviceMenuDescription.textContent = '먼저 원하는 행동을 선택하세요.'
   serviceMenuGrid.className = 'blacksmith-shop-overlay__service-menu-grid'
+  serviceMenuTitle.id = 'blacksmith-shop-selection-title'
+  selectionPanel.className =
+    'blacksmith-shop-overlay__panel blacksmith-shop-overlay__panel--selection'
+  selectionPanel.hidden = true
+  selectionPanel.setAttribute('role', 'dialog')
+  selectionPanel.setAttribute('aria-modal', 'false')
+  selectionPanel.setAttribute('aria-labelledby', 'blacksmith-shop-selection-title')
+  selectionPanelBody.className =
+    'blacksmith-shop-overlay__panel-body blacksmith-shop-overlay__panel-body--selection'
+
+  workshopPanelWindow.className =
+    'blacksmith-shop-overlay__panel blacksmith-shop-overlay__panel--workshop'
+  workshopPanelWindow.hidden = true
+  workshopPanelWindow.setAttribute('role', 'dialog')
+  workshopPanelWindow.setAttribute('aria-modal', 'false')
+  workshopPanelWindow.setAttribute('aria-labelledby', 'blacksmith-shop-workshop-title')
+  workshopPanelBody.className =
+    'blacksmith-shop-overlay__panel-body blacksmith-shop-overlay__panel-body--workshop'
 
   workshopPanel.className = 'blacksmith-shop-overlay__workshop-panel'
   workshopBadge.className = 'blacksmith-shop-overlay__workshop-badge'
-  workshopBadge.textContent = '준비 중'
+  workshopBadge.textContent = '준비중입니다'
   workshopTitle.className = 'blacksmith-shop-overlay__workshop-title'
+  workshopTitle.id = 'blacksmith-shop-workshop-title'
+  workshopTitle.textContent = '준비중입니다'
   workshopDescription.className =
     'blacksmith-shop-overlay__workshop-description'
+  workshopDescription.textContent = '강화와 수리는 아직 준비 중입니다.'
+
+  workshopBackButton.type = 'button'
+  workshopBackButton.className = 'blacksmith-shop-overlay__mode-back'
+  workshopBackButton.textContent = '메뉴로 돌아가기'
+  workshopBackButton.setAttribute('aria-label', '대장장이 메뉴로 돌아가기')
+  workshopBackButton.title = '대장장이 메뉴로 돌아가기'
 
   for (const option of BLACKSMITH_SERVICE_OPTIONS) {
     const serviceCard = document.createElement('button')
@@ -365,28 +399,30 @@ export const createBlacksmithShopOverlay = ({
   setPortraitFrame(merchantPortrait, BLACKSMITH_PORTRAIT_FRAME, PORTRAIT_SCALE)
   setPortraitFrame(playerPortrait, PLAYER_PORTRAIT_FRAME, PORTRAIT_SCALE)
 
-  header.append(merchantCard, centerCard, playerCard, closeButton)
+  header.append(merchantCard, centerCard, playerCard)
   centerCard.append(titleElement, subtitleElement, modeBackButton)
   serviceMenuHeader.append(serviceMenuTitle, serviceMenuDescription)
   serviceMenu.append(serviceMenuHeader, serviceMenuGrid)
   workshopPanel.append(workshopBadge, workshopTitle, workshopDescription)
   panes.append(merchantPane.root, playerPane.root)
-  panelBody.append(
-    header,
-    serviceMenu,
-    workshopPanel,
-    panes,
-    statusElement,
-    footerElement
-  )
+  selectionPanelBody.append(serviceMenu)
+  selectionPanel.append(selectionPanelBody, closeButton)
+  panelBody.append(header, panes, statusElement, footerElement)
+  workshopPanelBody.append(workshopPanel, workshopBackButton)
+  workshopPanelWindow.append(workshopPanelBody)
   panel.append(panelBody)
-  overlayRoot.append(backdropButton, panel)
+  overlayRoot.append(backdropButton, selectionPanel, panel, workshopPanelWindow)
   mountElement.append(overlayRoot)
 
   function syncLayout() {
     const isOpen = getIsOpen()
     const playerInventory = getPlayerInventory()
-    const merchantInventory = getMerchantInventory()
+
+    if (isOpen && !wasOpen) {
+      currentServiceMode = 'menu'
+      statusMessage = undefined
+    }
+
     const isMenuMode = currentServiceMode === 'menu'
     const isShopMode = currentServiceMode === 'shop'
     const isWorkshopMode =
@@ -398,25 +434,39 @@ export const createBlacksmithShopOverlay = ({
 
     if (!isOpen) {
       backdropButton.hidden = true
+      selectionPanel.hidden = true
       panel.hidden = true
+      workshopPanelWindow.hidden = true
+      closeButton.hidden = true
       currentServiceMode = 'menu'
       statusMessage = undefined
+      wasOpen = false
       return
     }
 
     backdropButton.hidden = false
+    closeButton.hidden = false
     panel.hidden = false
 
-    serviceMenu.hidden = !isMenuMode
-    workshopPanel.hidden = !isWorkshopMode
-    panes.hidden = !isShopMode
-    modeBackButton.hidden = isMenuMode
+    selectionPanel.hidden = !isMenuMode
+    panel.hidden = !isShopMode
+    workshopPanelWindow.hidden = !isWorkshopMode
+    modeBackButton.hidden = !isShopMode
+    workshopBackButton.hidden = !isWorkshopMode
+    if (isMenuMode) {
+      selectionPanel.append(closeButton)
+    } else if (isShopMode) {
+      panel.append(closeButton)
+    } else {
+      workshopPanelWindow.append(closeButton)
+    }
+    closeButton.hidden = false
 
     if (isMenuMode) {
-      titleElement.textContent = '대장장이 메뉴'
-      subtitleElement.textContent = '상점, 강화, 수리 중 선택'
+      titleElement.textContent = '대장장이와 상호작용'
+      subtitleElement.textContent = '상점, 강화, 수리를 먼저 선택하세요'
       statusElement.textContent = '원하는 서비스를 선택하세요'
-      footerElement.textContent = '상점: 사고팔기 · 강화: 장비 강화 · 수리: 장비 수리'
+      footerElement.textContent = '상점을 선택하면 거래 화면으로 넘어갑니다'
     } else if (isShopMode) {
       titleElement.textContent = '대장장이 상점'
       subtitleElement.textContent = '왼쪽은 구매, 오른쪽은 판매'
@@ -426,24 +476,21 @@ export const createBlacksmithShopOverlay = ({
     } else {
       const modeLabel = currentServiceMode === 'upgrade' ? '강화' : '수리'
 
-      titleElement.textContent = `장비 ${modeLabel}`
-      subtitleElement.textContent = '아직 준비 중인 기능입니다'
-      workshopTitle.textContent = `장비 ${modeLabel}`
-      workshopDescription.textContent =
-        currentServiceMode === 'upgrade'
-          ? '대장장이 강화 기능은 아직 준비 중입니다.'
-          : '대장장이 수리 기능은 아직 준비 중입니다.'
-      statusElement.textContent = '메뉴로 돌아가 다른 기능을 선택할 수 있습니다'
-      footerElement.textContent = '메뉴로 돌아가기 버튼을 누르거나 Esc로 닫기'
+      titleElement.textContent = `${modeLabel} 준비중입니다`
+      subtitleElement.textContent = '아직 구현되지 않은 기능입니다'
+      workshopBadge.textContent = '준비중입니다'
+      workshopTitle.textContent = `${modeLabel} 준비중입니다`
+      workshopDescription.textContent = '아직 구현되지 않았습니다.'
     }
 
-    merchantGold.textContent = `${formatGoldAmount(merchantInventory.gold)}`
     playerGold.textContent = `${formatGoldAmount(playerInventory.gold)}`
 
     if (isShopMode) {
       merchantPane.sync()
       playerPane.sync()
     }
+
+    wasOpen = true
   }
 
   const setServiceMode = (nextMode: BlacksmithServiceMode) => {
@@ -745,11 +792,13 @@ export const createBlacksmithShopOverlay = ({
   closeButton.addEventListener('click', handleCloseButtonClick)
   closeButton.addEventListener('pointerdown', handleCloseButtonPointerDown)
   modeBackButton.addEventListener('click', handleModeBackButtonClick)
+  workshopBackButton.addEventListener('click', handleModeBackButtonClick)
 
   const destroy = () => {
     closeButton.removeEventListener('click', handleCloseButtonClick)
     closeButton.removeEventListener('pointerdown', handleCloseButtonPointerDown)
     modeBackButton.removeEventListener('click', handleModeBackButtonClick)
+    workshopBackButton.removeEventListener('click', handleModeBackButtonClick)
     overlayRoot.remove()
   }
 

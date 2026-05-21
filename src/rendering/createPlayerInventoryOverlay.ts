@@ -335,6 +335,7 @@ export const createPlayerInventoryOverlay = ({
     slotQuantityLabels.push(slotQuantityLabel)
     slotEmptyMarkers.push(slotEmptyMarker)
     slotQuickslotBadges.push(slotQuickslotBadge)
+    slotButton.addEventListener('pointerleave', handleSlotButtonPointerLeave)
   }
 
   titleGroup.append(titleElement, summaryElement)
@@ -936,6 +937,10 @@ export const createPlayerInventoryOverlay = ({
     syncTooltip()
   }
 
+  function handleSlotButtonPointerLeave() {
+    hideTooltip()
+  }
+
   const handleSlotGridPointerOut = (event: PointerEvent) => {
     const slotButton = getInventorySlotButton(event.target)
 
@@ -1070,6 +1075,9 @@ export const createPlayerInventoryOverlay = ({
     closeButton.removeEventListener('click', handleCloseButtonClick)
     closeButton.removeEventListener('pointerdown', handleCloseButtonPointerDown)
     panel.removeEventListener('click', handlePanelClick)
+    for (const slotButton of slotButtons) {
+      slotButton.removeEventListener('pointerleave', handleSlotButtonPointerLeave)
+    }
     overlayRoot.remove()
   }
 
