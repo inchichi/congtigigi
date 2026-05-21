@@ -7,7 +7,6 @@ import {
   NineSliceSprite,
   Rectangle,
   Sprite,
-  Spritesheet,
   Text,
   TextStyle,
   Texture
@@ -64,6 +63,18 @@ type SmearVfxRenderResources = {
   verticalTextures: Texture[]
 }
 
+type PlayerEquipmentTier = 'leather' | 'chain' | 'iron'
+
+type PlayerEquipmentTextureSet = {
+  armor: Texture
+  helmet: Texture
+}
+
+type PlayerEquipmentSprites = {
+  armor: Sprite
+  helmet: Sprite
+}
+
 type TileTextureFrameSource = {
   columns: number
   margin: number
@@ -87,8 +98,8 @@ type ActiveCharacterMessage = {
 }
 
 const DEPTH_SORTED_LAYER_NAME = 'object'
-const UI_SPRITESHEET_URL = new URL(
-  '../assets/spritesheets/uipack_rpg_sheet.json',
+const UI_SPRITESHEET_IMAGE_URL = new URL(
+  '../assets/spritesheets/uipack_rpg_sheet.png',
   import.meta.url
 ).href
 const PLAYER_WEAPON_TILE_LOCAL_ID = 117
@@ -107,6 +118,44 @@ const SMEAR_VFX_VERTICAL_SPRITESHEET_URL = new URL(
   '../assets/vfx/smear-vfx-01/smear-vfx-01-vertical-1.png',
   import.meta.url
 ).href
+const PLAYER_EQUIPMENT_ASSET_URLS = {
+  leather: {
+    armor: new URL(
+      '../assets/spritesheets/player-equipment/leather-armor-overlay.png',
+      import.meta.url
+    ).href,
+    helmet: new URL(
+      '../assets/spritesheets/player-equipment/leather-helmet-overlay.png',
+      import.meta.url
+    ).href
+  },
+  chain: {
+    armor: new URL(
+      '../assets/spritesheets/player-equipment/chain-armor-overlay.png',
+      import.meta.url
+    ).href,
+    helmet: new URL(
+      '../assets/spritesheets/player-equipment/chain-helmet-overlay.png',
+      import.meta.url
+    ).href
+  },
+  iron: {
+    armor: new URL(
+      '../assets/spritesheets/player-equipment/iron-armor-overlay.png',
+      import.meta.url
+    ).href,
+    helmet: new URL(
+      '../assets/spritesheets/player-equipment/iron-helmet-overlay.png',
+      import.meta.url
+    ).href
+  }
+} satisfies Record<PlayerEquipmentTier, Record<'armor' | 'helmet', string>>
+const PLAYER_EQUIPMENT_TIER_BY_KEY: Record<string, PlayerEquipmentTier> = {
+  Digit1: 'leather',
+  Digit2: 'chain',
+  Digit3: 'iron'
+}
+const PLAYER_DEFAULT_EQUIPMENT_TIER: PlayerEquipmentTier = 'leather'
 const SMEAR_VFX_FRAME_SIZE = 48
 const PLAYER_WEAPON_WORLD_SCALE = 1.35
 const PLAYER_ATTACK_DURATION_MILLISECONDS = 220
@@ -128,6 +177,7 @@ const PLAYER_WEAPON_PLACEMENT_LEFT = {
   rotation: -0.75
 }
 const MESSAGE_PANEL_TEXTURE_NAME = 'panelInset_beige.png'
+const MESSAGE_PANEL_TEXTURE_FRAME = new Rectangle(200, 294, 93, 94)
 const MESSAGE_PANEL_BORDER_SIZE = 8
 const MESSAGE_PANEL_PADDING_X = 12
 const MESSAGE_PANEL_PADDING_Y = 8
@@ -162,9 +212,11 @@ export const createPixiTiledMapView = async ({
   controllerRuntime
 }: CreatePixiTiledMapViewInput): Promise<Application> => {
   const app = new Application()
-  const [messagePanelTexture, smearVfxTextures] = await Promise.all([
+  const [messagePanelTexture, smearVfxTextures, playerEquipmentTextures] =
+    await Promise.all([
     loadMessagePanelTexture(),
-    loadSmearVfxTextures()
+    loadSmearVfxTextures(),
+    loadPlayerEquipmentTextures()
   ])
 
   await ensureMessageFontsLoaded()
@@ -230,6 +282,8 @@ export const createPixiTiledMapView = async ({
   let playerAttackFacing: CharacterMoveDirection | undefined
   let playerWeaponTrailSprites: Sprite[] = []
   let playerWeaponSprite: Sprite | undefined
+  let playerEquipmentSprites: PlayerEquipmentSprites | undefined
+  let activePlayerEquipmentTier: PlayerEquipmentTier = PLAYER_DEFAULT_EQUIPMENT_TIER
   let playerSlashEffectSprite: AnimatedSprite | undefined
   let lastRuntimeErrorMessage: string | undefined
   let depthSortedLayer: Container | undefined
@@ -407,6 +461,13 @@ export const createPixiTiledMapView = async ({
     depthSortedLayer.addChild(sprite)
 
     if (character.id === PLAYER_CHARACTER_ID) {
+      playerEquipmentSprites = createPlayerEquipmentSprites(
+        playerEquipmentTextures[activePlayerEquipmentTier]
+      )
+      depthSortedLayer.addChild(
+        playerEquipmentSprites.armor,
+        playerEquipmentSprites.helmet
+      )
       playerWeaponTrailSprites = Array.from(
         { length: PLAYER_ATTACK_TRAIL_SPRITE_COUNT },
         (_, index) => {
@@ -461,6 +522,11 @@ export const createPixiTiledMapView = async ({
       characterPixelHeight,
       map.tileHeight
     )
+
+    if (character.id === PLAYER_CHARACTER_ID && playerEquipmentSprites) {
+      syncPlayerEquipmentSprites(character)
+    }
+
     depthSortedLayer?.sortChildren()
   }
 
@@ -468,6 +534,46 @@ export const createPixiTiledMapView = async ({
     for (const character of characterStates) {
       syncCharacterSprite(character)
     }
+  }
+
+  const syncPlayerEquipmentSprites = (character: CharacterState) => {
+    if (!playerEquipmentSprites) {
+      return
+    }
+
+    const characterLeft = character.position.x * map.tileWidth
+    const characterTop = character.position.y * map.tileHeight
+    const characterDepth = getCharacterDepthSortValue(
+      character.position.y,
+      characterPixelHeight,
+      map.tileHeight
+    )
+
+    playerEquipmentSprites.armor.position.set(
+      characterLeft,
+      characterTop
+    )
+    playerEquipmentSprites.armor.zIndex = characterDepth + 0.1
+    playerEquipmentSprites.helmet.position.set(
+      characterLeft,
+      characterTop
+    )
+    playerEquipmentSprites.helmet.zIndex = characterDepth + 0.2
+  }
+
+  const updatePlayerEquipmentTier = (tier: PlayerEquipmentTier) => {
+    activePlayerEquipmentTier = tier
+
+    if (!playerEquipmentSprites) {
+      return
+    }
+
+    const textures = playerEquipmentTextures[tier]
+
+    playerEquipmentSprites.armor.texture = textures.armor
+    playerEquipmentSprites.helmet.texture = textures.helmet
+    syncPlayerEquipmentSprites(getCharacterStateById(PLAYER_CHARACTER_ID))
+    depthSortedLayer?.sortChildren()
   }
 
   const clearPlayerAttackSprites = () => {
@@ -1030,6 +1136,14 @@ export const createPixiTiledMapView = async ({
     slashSprite.play()
   }
   const handleKeyDown = (event: KeyboardEvent) => {
+    const equipmentTier = PLAYER_EQUIPMENT_TIER_BY_KEY[event.code]
+
+    if (equipmentTier) {
+      event.preventDefault()
+      updatePlayerEquipmentTier(equipmentTier)
+      return
+    }
+
     if (isAttackKey(event)) {
       event.preventDefault()
       if (!event.repeat) {
@@ -1135,15 +1249,24 @@ export const createPixiTiledMapView = async ({
 }
 
 const loadMessagePanelTexture = async (): Promise<Texture> => {
-  const uiSpritesheet = await Assets.load<Spritesheet>(UI_SPRITESHEET_URL)
+  const uiSpritesheetTexture = await Assets.load<Texture>(UI_SPRITESHEET_IMAGE_URL)
 
-  uiSpritesheet.textureSource.scaleMode = 'nearest'
+  uiSpritesheetTexture.source.scaleMode = 'nearest'
 
-  const panelTexture = uiSpritesheet.textures[MESSAGE_PANEL_TEXTURE_NAME]
+  const panelTexture = new Texture({
+    source: uiSpritesheetTexture.source,
+    frame: MESSAGE_PANEL_TEXTURE_FRAME,
+    orig: new Rectangle(
+      0,
+      0,
+      MESSAGE_PANEL_TEXTURE_FRAME.width,
+      MESSAGE_PANEL_TEXTURE_FRAME.height
+    )
+  })
 
   if (!panelTexture) {
     throw new Error(
-      `Missing ${MESSAGE_PANEL_TEXTURE_NAME} in ${UI_SPRITESHEET_URL}`
+      `Missing ${MESSAGE_PANEL_TEXTURE_NAME} in ${UI_SPRITESHEET_IMAGE_URL}`
     )
   }
 
@@ -1205,6 +1328,48 @@ const createSmearVfxFrameTextures = (imageTexture: Texture): Texture[] => {
       orig: new Rectangle(0, 0, SMEAR_VFX_FRAME_SIZE, SMEAR_VFX_FRAME_SIZE)
     })
   )
+}
+
+const loadPlayerEquipmentTextures = async (): Promise<
+  Record<PlayerEquipmentTier, PlayerEquipmentTextureSet>
+> => ({
+  leather: {
+    armor: await loadNearestTexture(PLAYER_EQUIPMENT_ASSET_URLS.leather.armor),
+    helmet: await loadNearestTexture(PLAYER_EQUIPMENT_ASSET_URLS.leather.helmet)
+  },
+  chain: {
+    armor: await loadNearestTexture(PLAYER_EQUIPMENT_ASSET_URLS.chain.armor),
+    helmet: await loadNearestTexture(PLAYER_EQUIPMENT_ASSET_URLS.chain.helmet)
+  },
+  iron: {
+    armor: await loadNearestTexture(PLAYER_EQUIPMENT_ASSET_URLS.iron.armor),
+    helmet: await loadNearestTexture(PLAYER_EQUIPMENT_ASSET_URLS.iron.helmet)
+  }
+})
+
+const loadNearestTexture = async (imageUrl: string): Promise<Texture> => {
+  const texture = await Assets.load<Texture>(imageUrl)
+
+  texture.source.scaleMode = 'nearest'
+
+  return texture
+}
+
+const createPlayerEquipmentSprites = (
+  textures: PlayerEquipmentTextureSet
+): PlayerEquipmentSprites => {
+  const armor = new Sprite(textures.armor)
+  const helmet = new Sprite(textures.helmet)
+
+  armor.label = 'character:player:armor'
+  helmet.label = 'character:player:helmet'
+  armor.roundPixels = true
+  helmet.roundPixels = true
+
+  return {
+    armor,
+    helmet
+  }
 }
 
 const loadTilesetRenderResources = async (
