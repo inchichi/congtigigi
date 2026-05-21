@@ -46,6 +46,7 @@ import {
   clearPlayerQuickslotAssignment,
   type PlayerQuickslots
 } from '../game/playerQuickslots'
+import { getMonsterDisplayName } from '../game/monsterDisplayName'
 import {
   getPlayerSkillSlotIndexFromCode,
   type PlayerSkillSlots
@@ -2930,7 +2931,10 @@ export const createPixiTiledMapView = async ({
     }
 
     renderNode.levelBadge.visible = true
-    renderNode.levelBadge.text = `Lv ${character.level}`
+    renderNode.levelBadge.text = `${getMonsterDisplayName({
+      id: character.id,
+      displayText: character.displayText
+    })} Lv ${character.level}`
 
     if (renderNode.monsterHealthBar && character.appearanceType.startsWith('monster_')) {
       const combatState = monsterCombatStates.get(character.id)

@@ -1,5 +1,6 @@
 import {
   PLAYER_MAX_LEVEL,
+  getPlayerJobDisplayName,
   type PlayerProfile
 } from '../game/playerProfile'
 import { getPlayerExperienceToNextLevel } from '../game/playerExperience'
@@ -83,8 +84,8 @@ const TINY_DUNGEON_CONSUMABLE_ICON_FRAMES = {
   }
 } as const
 const HUD_MARGIN = 16
-const HUD_PANEL_MIN_WIDTH = 400
-const HUD_PANEL_MAX_WIDTH = 760
+const HUD_PANEL_MIN_WIDTH = 780
+const HUD_PANEL_MAX_WIDTH = 920
 const HUD_PANEL_SCALE_MULTIPLIER = 0.82
 const HEALTH_BAR_COLOR = '#d06b5d'
 const MANA_BAR_COLOR = '#5b86d6'
@@ -112,6 +113,11 @@ export const createPlayerHudOverlay = ({
   const overlayRoot = document.createElement('div')
   const panel = document.createElement('section')
   const panelBody = document.createElement('div')
+  const infoSection = document.createElement('div')
+  const infoGrid = document.createElement('div')
+  const nicknameRow = createInfoRow('닉네임')
+  const levelRow = createInfoRow('레벨')
+  const jobRow = createInfoRow('직업')
   const statusSection = document.createElement('div')
   const resourceGrid = document.createElement('div')
   const hpRow = createResourceRow('체력')
@@ -154,6 +160,9 @@ export const createPlayerHudOverlay = ({
   panel.setAttribute('aria-label', '캐릭터 상태')
 
   panelBody.className = 'player-hud-overlay__panel-body'
+
+  infoSection.className = 'player-hud-overlay__info-section'
+  infoGrid.className = 'player-hud-overlay__info-grid'
 
   statusSection.className = 'player-hud-overlay__status-section'
   resourceGrid.className = 'player-hud-overlay__resource-grid'
@@ -271,11 +280,13 @@ export const createPlayerHudOverlay = ({
     skillButton.addEventListener('pointerleave', hideTooltip)
   }
 
+  infoSection.append(infoGrid)
+  infoGrid.append(nicknameRow.row, levelRow.row, jobRow.row)
   statusSection.append(resourceGrid)
   resourceGrid.append(hpRow.row, mpRow.row, expRow.row)
   skillSection.append(skillSectionTitle, skillGrid)
   consumableSection.append(consumableSectionTitle, consumableGrid)
-  panelBody.append(statusSection, skillSection, consumableSection)
+  panelBody.append(infoSection, statusSection, skillSection, consumableSection)
   panel.append(panelBody)
   overlayRoot.append(panel, tooltipPanel)
   mountElement.append(overlayRoot)
@@ -828,7 +839,14 @@ export const createPlayerHudOverlay = ({
     })`
 
     const nextExperienceToLevelUp = getPlayerExperienceToNextLevel(profile.level)
+    const jobDisplayName = getPlayerJobDisplayName({
+      job: profile.job,
+      level: profile.level
+    })
 
+    nicknameRow.value.textContent = profile.name
+    levelRow.value.textContent = `Lv ${profile.level}`
+    jobRow.value.textContent = jobDisplayName
     syncResourceRow(hpRow.row, profile.hp, HEALTH_BAR_COLOR)
     syncResourceRow(mpRow.row, profile.mp, MANA_BAR_COLOR)
     syncResourceRow(
@@ -987,6 +1005,29 @@ export const createPlayerHudOverlay = ({
 
 type ResourceRow = {
   row: HTMLDivElement
+}
+
+type InfoRow = {
+  row: HTMLDivElement
+  value: HTMLDivElement
+}
+
+const createInfoRow = (label: string): InfoRow => {
+  const row = document.createElement('div')
+  const labelElement = document.createElement('div')
+  const value = document.createElement('div')
+
+  row.className = 'player-hud-overlay__info-row'
+  labelElement.className = 'player-hud-overlay__info-label'
+  labelElement.textContent = label
+  value.className = 'player-hud-overlay__info-value'
+
+  row.append(labelElement, value)
+
+  return {
+    row,
+    value
+  }
 }
 
 const createResourceRow = (label: string): ResourceRow => {

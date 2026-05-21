@@ -862,10 +862,11 @@ body.game-root--map-focused > :not(.game-root) {
 .player-hud-overlay__panel-body {
   display: grid;
   grid-template-columns:
-    minmax(190px, 0.92fr)
-    minmax(200px, 0.98fr)
-    minmax(330px, 1.7fr);
-  grid-template-areas: 'status skills consumables';
+    minmax(150px, 0.76fr)
+    minmax(170px, 0.9fr)
+    minmax(180px, 0.96fr)
+    minmax(240px, 1.34fr);
+  grid-template-areas: 'info status skills consumables';
   align-items: stretch;
   gap: 6px 10px;
   width: 100%;
@@ -883,6 +884,7 @@ body.game-root--map-focused > :not(.game-root) {
   text-transform: uppercase;
 }
 
+.player-hud-overlay__info-section,
 .player-hud-overlay__status-section,
 .player-hud-overlay__skill-section,
 .player-hud-overlay__consumable-section {
@@ -893,6 +895,13 @@ body.game-root--map-focused > :not(.game-root) {
   border: 1px solid rgba(111, 89, 58, 0.34);
   background: rgba(255, 249, 238, 0.5);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.68);
+}
+
+.player-hud-overlay__info-section {
+  grid-area: info;
+  justify-self: stretch;
+  width: 100%;
+  align-content: start;
 }
 
 .player-hud-overlay__status-section {
@@ -908,6 +917,38 @@ body.game-root--map-focused > :not(.game-root) {
   background: rgba(255, 249, 238, 0.5);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.68);
   width: 100%;
+}
+
+.player-hud-overlay__info-grid {
+  display: grid;
+  gap: 5px;
+}
+
+.player-hud-overlay__info-row {
+  display: grid;
+  grid-template-columns: 62px minmax(0, 1fr);
+  gap: 6px;
+  align-items: center;
+  min-height: 13px;
+}
+
+.player-hud-overlay__info-label,
+.player-hud-overlay__info-value {
+  color: #6b5534;
+  font-size: 0.7rem;
+  letter-spacing: 0.06em;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.player-hud-overlay__info-label {
+  text-transform: uppercase;
+}
+
+.player-hud-overlay__info-value {
+  color: #2e2313;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .player-hud-overlay__skill-section {

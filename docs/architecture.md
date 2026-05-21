@@ -16,6 +16,7 @@ This document is a short guide for module boundaries and code placement.
 - `src/game/lua/luaControllerApi.ts`: source of truth for the Lua-visible controller contract.
 - `src/game/blacksmithShop.ts`: blacksmith merchant inventory, buy/sell trade rules, and stock initialization for the shop NPC.
 - `src/game/monsterCombat.ts`: monster HP, contact damage, and defeat-state rules shared by combat scenes.
+- `src/game/monsterDisplayName.ts`: monster name formatting for on-map labels and HUD badges.
 - `src/game/monsterRewards.ts`: monster reward amounts such as beginner gold, experience, and level-based skill-point drops.
 - `src/game/questLog.ts`: pure quest definitions, quest progress state transitions, prerequisite checks, objective event matching, tracker visibility, NPC badge state, dialogue text formatting, and reward data for the 티르코네일 beginner quest arc.
 - `src/game/playerExperience.ts`: player experience gain, level-up application, and the level 100 cap.
