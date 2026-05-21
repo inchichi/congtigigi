@@ -55,6 +55,18 @@ body {
   transform-origin: center center;
 }
 
+.game-root--map-focused {
+  overflow: hidden;
+}
+
+.game-root.game-root--map-focused > :not(.world-map-overlay) {
+  display: none !important;
+}
+
+body.game-root--map-focused > :not(.game-root) {
+  display: none !important;
+}
+
 .game-scene {
   position: relative;
 }
@@ -330,69 +342,27 @@ body {
 .player-hud-overlay__panel {
   position: absolute;
   left: 50%;
-  bottom: 0;
+  bottom: 16px;
   transform: translateX(-50%);
+  transform-origin: center bottom;
   pointer-events: auto;
   overflow: hidden;
-  background: #f0e0b8;
-  box-shadow: 0 0 0 2px rgba(244, 231, 197, 0.92), 0 18px 36px rgba(0, 0, 0, 0.45);
+  background: transparent;
+  box-shadow: none;
   color: #2e2313;
 }
 
 .player-hud-overlay__panel-body {
   display: grid;
-  gap: 8px;
+  grid-template-columns:
+    minmax(190px, 0.92fr)
+    minmax(200px, 0.98fr)
+    minmax(330px, 1.7fr);
+  grid-template-areas: 'status skills consumables';
+  align-items: stretch;
+  gap: 6px 10px;
   width: 100%;
-  height: 100%;
-  padding: 14px 16px 12px;
-}
-
-.player-hud-overlay__header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.player-hud-overlay__header-identity {
-  display: grid;
-  gap: 1px;
-  min-width: 0;
-}
-
-.player-hud-overlay__name {
-  color: #2e2313;
-  font-size: 0.98rem;
-  letter-spacing: 0.08em;
-  line-height: 1;
-  text-transform: uppercase;
-}
-
-.player-hud-overlay__job {
-  color: #6b5534;
-  font-size: 0.66rem;
-  letter-spacing: 0.1em;
-  line-height: 1;
-  text-transform: uppercase;
-}
-
-.player-hud-overlay__header-meta {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-left: auto;
-}
-
-.player-hud-overlay__level,
-.player-hud-overlay__attack-badge {
-  padding: 3px 6px;
-  border: 1px solid rgba(111, 89, 58, 0.42);
-  background: rgba(255, 249, 238, 0.55);
-  color: #6b5534;
-  font-size: 0.64rem;
-  letter-spacing: 0.08em;
-  line-height: 1;
-  text-transform: uppercase;
+  padding: 9px 12px 10px;
 }
 
 .player-hud-overlay__progression-badge {
@@ -401,84 +371,79 @@ body {
   background: rgba(255, 249, 238, 0.55);
   color: #6b5534;
   font-size: 0.64rem;
+  letter-spacing: 0.06em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.player-hud-overlay__status-section,
+.player-hud-overlay__skill-section,
+.player-hud-overlay__consumable-section {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  padding: 8px 9px 9px;
+  border: 1px solid rgba(111, 89, 58, 0.34);
+  background: rgba(255, 249, 238, 0.5);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.68);
+}
+
+.player-hud-overlay__status-section {
+  grid-area: status;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas: 'resources';
+  align-items: start;
+  gap: 6px 8px;
+  min-width: 0;
+  padding: 8px 9px 9px;
+  border: 1px solid rgba(111, 89, 58, 0.34);
+  background: rgba(255, 249, 238, 0.5);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.68);
+  width: 100%;
+}
+
+.player-hud-overlay__skill-section {
+  grid-area: skills;
+  justify-self: stretch;
+  width: 100%;
+  align-content: start;
+}
+
+.player-hud-overlay__consumable-section {
+  grid-area: consumables;
+  justify-self: stretch;
+  width: 100%;
+  align-content: start;
+}
+
+.player-hud-overlay__section-title,
+.player-hud-overlay__skill-title {
+  color: #6b5534;
+  font-size: 0.68rem;
   letter-spacing: 0.08em;
   line-height: 1;
   text-transform: uppercase;
 }
 
-.player-hud-overlay__bag-button,
-.player-hud-overlay__equipment-button {
-  appearance: none;
-  border: 0;
-  padding: 0;
-  background: transparent;
-  color: #2e2313;
-  font: inherit;
-  cursor: pointer;
-  touch-action: manipulation;
-  display: grid;
-  place-items: center;
-  pointer-events: auto;
-  transition: filter 120ms ease, transform 120ms ease;
-}
-
-.player-hud-overlay__bag-button:hover,
-.player-hud-overlay__equipment-button:hover,
-.player-hud-overlay__bag-button:focus-visible,
-.player-hud-overlay__equipment-button:focus-visible {
-  filter: brightness(1.05);
-  transform: translateY(-1px);
-}
-
-.player-hud-overlay__bag-button:focus-visible {
-  outline: 2px solid rgba(111, 89, 58, 0.8);
-  outline-offset: 2px;
-}
-
-.player-hud-overlay__equipment-button:focus-visible {
-  outline: 2px solid rgba(111, 89, 58, 0.8);
-  outline-offset: 2px;
-}
-
-.player-hud-overlay__bag-button--active {
-  filter: brightness(1.06) saturate(1.08);
-}
-
-.player-hud-overlay__equipment-button--active {
-  filter: brightness(1.06) saturate(1.08);
-}
-
-.player-hud-overlay__bag-icon {
-  display: block;
-  width: 20px;
-  height: 20px;
-  pointer-events: none;
-}
-
-.player-hud-overlay__equipment-icon {
-  display: block;
-  width: 21px;
-  height: 21px;
-  pointer-events: none;
-}
-
 .player-hud-overlay__resource-grid {
+  grid-area: resources;
   display: grid;
-  gap: 6px;
+  gap: 5px;
 }
 
 .player-hud-overlay__resource-row {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
-  gap: 8px;
+  gap: 6px;
   align-items: center;
 }
 
 .player-hud-overlay__resource-label,
 .player-hud-overlay__resource-value {
   color: #6b5534;
-  font-size: 0.66rem;
-  letter-spacing: 0.1em;
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
   line-height: 1;
   text-transform: uppercase;
   white-space: nowrap;
@@ -486,10 +451,28 @@ body {
 
 .player-hud-overlay__resource-track {
   position: relative;
-  height: 12px;
+  height: 13px;
   border: 1px solid rgba(111, 89, 58, 0.42);
   background: rgba(255, 249, 238, 0.5);
   overflow: hidden;
+}
+
+.player-hud-overlay__resource-row:nth-child(3) .player-hud-overlay__resource-track {
+  height: 10px;
+}
+
+.player-hud-overlay__resource-row:first-child .player-hud-overlay__resource-track {
+  height: 15px;
+}
+
+.player-hud-overlay__resource-row:first-child .player-hud-overlay__resource-label,
+.player-hud-overlay__resource-row:first-child .player-hud-overlay__resource-value {
+  font-size: 0.74rem;
+}
+
+.player-hud-overlay__resource-row:nth-child(3) .player-hud-overlay__resource-label,
+.player-hud-overlay__resource-row:nth-child(3) .player-hud-overlay__resource-value {
+  font-size: 0.66rem;
 }
 
 .player-hud-overlay__resource-fill {
@@ -499,40 +482,10 @@ body {
   background: #d06b5d;
 }
 
-.player-hud-overlay__stat-grid {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.player-hud-overlay__stat-chip {
-  padding: 3px 6px;
-  border: 1px solid rgba(111, 89, 58, 0.42);
-  background: rgba(255, 249, 238, 0.55);
-  color: #2e2313;
-  font-size: 0.66rem;
-  letter-spacing: 0.08em;
-  line-height: 1;
-  text-transform: uppercase;
-}
-
-.player-hud-overlay__skill-section {
-  display: grid;
-  gap: 6px;
-}
-
-.player-hud-overlay__skill-title {
-  color: #6b5534;
-  font-size: 0.64rem;
-  letter-spacing: 0.1em;
-  line-height: 1;
-  text-transform: uppercase;
-}
-
 .player-hud-overlay__skill-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 8px;
+  gap: 4px;
 }
 
 .player-hud-overlay__skill-slot {
@@ -540,7 +493,7 @@ body {
   display: grid;
   align-content: start;
   min-width: 0;
-  padding: 6px 6px 7px;
+  padding: 4px 4px 5px;
   color: #2e2313;
   text-align: left;
   touch-action: manipulation;
@@ -556,10 +509,10 @@ body {
 
 .player-hud-overlay__skill-hotkey {
   position: absolute;
-  left: 6px;
-  top: 5px;
+  left: 4px;
+  top: 3px;
   color: #6b5534;
-  font-size: 0.6rem;
+  font-size: 0.66rem;
   line-height: 1;
   letter-spacing: 0.08em;
 }
@@ -567,15 +520,79 @@ body {
 .player-hud-overlay__skill-name {
   align-self: center;
   justify-self: center;
-  margin-top: 10px;
+  margin-top: 9px;
   color: #2e2313;
-  font-size: 0.68rem;
+  font-size: 0.76rem;
   line-height: 1.1;
   text-align: center;
 }
 
 .player-hud-overlay__skill-description {
   display: none;
+}
+
+.player-hud-overlay__consumable-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 3px;
+}
+
+.player-hud-overlay__consumable-slot {
+  position: relative;
+  display: grid;
+  align-content: start;
+  min-width: 0;
+  padding: 4px 4px 5px;
+  color: #2e2313;
+  text-align: left;
+  touch-action: manipulation;
+  cursor: default;
+  transition: filter 120ms ease, transform 120ms ease;
+}
+
+.player-hud-overlay__consumable-slot--filled {
+  cursor: grab;
+  border-color: rgba(91, 134, 214, 0.42);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.7),
+    0 0 0 1px rgba(91, 134, 214, 0.08);
+}
+
+.player-hud-overlay__consumable-slot:hover,
+.player-hud-overlay__consumable-slot:focus-visible {
+  filter: brightness(1.04);
+  transform: translateY(-1px);
+}
+
+.player-hud-overlay__consumable-hotkey {
+  position: absolute;
+  left: 4px;
+  top: 3px;
+  color: #6b5534;
+  font-size: 0.66rem;
+  line-height: 1;
+  letter-spacing: 0.08em;
+}
+
+.player-hud-overlay__consumable-name {
+  align-self: center;
+  justify-self: center;
+  margin-top: 9px;
+  color: #2e2313;
+  font-size: 0.76rem;
+  line-height: 1.1;
+  text-align: center;
+}
+
+.player-hud-overlay__consumable-quantity {
+  position: absolute;
+  right: 5px;
+  bottom: 4px;
+  color: #6b5534;
+  font-size: 0.66rem;
+  line-height: 1;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
 }
 
 .player-stat-overlay,
@@ -612,14 +629,18 @@ body {
   position: absolute;
   inset: 0;
   z-index: 0;
-  pointer-events: auto;
-  background: rgba(9, 7, 6, 0.66);
+  pointer-events: none;
+  background: transparent;
   cursor: zoom-out;
   touch-action: manipulation;
 }
 
+.player-stat-overlay__backdrop {
+  background: transparent;
+}
+
 .player-stat-overlay--sidebar .player-stat-overlay__backdrop {
-  background: rgba(9, 7, 6, 0.3);
+  background: transparent;
 }
 
 .player-stat-overlay__panel,
@@ -632,8 +653,8 @@ body {
   transform: translate(-50%, -50%);
   pointer-events: auto;
   overflow: hidden;
-  background: #f0e0b8;
-  box-shadow: 0 0 0 2px rgba(244, 231, 197, 0.92), 0 18px 36px rgba(0, 0, 0, 0.45);
+  background: #fff9ee;
+  box-shadow: 0 0 0 1px rgba(111, 89, 58, 0.28), 0 18px 36px rgba(0, 0, 0, 0.34);
   color: #2e2313;
 }
 
@@ -663,6 +684,26 @@ body {
   justify-content: space-between;
   gap: 12px;
   padding-right: 68px;
+}
+
+.player-stat-overlay__header {
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+}
+
+.player-skill-overlay__header {
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+}
+
+.player-stat-overlay__header--dragging {
+  cursor: grabbing;
+}
+
+.player-skill-overlay__header--dragging {
+  cursor: grabbing;
 }
 
 .player-stat-overlay--sidebar .player-stat-overlay__header {
@@ -718,7 +759,7 @@ body {
   width: 46px;
   height: 46px;
   border: 1px solid rgba(111, 89, 58, 0.42);
-  background: rgba(255, 249, 238, 0.72);
+  background: #fff9ee;
   color: #2e2313;
   cursor: pointer;
   touch-action: manipulation;
@@ -749,7 +790,7 @@ body {
   gap: 4px;
   padding: 14px 16px;
   border: 1px solid rgba(111, 89, 58, 0.42);
-  background: rgba(255, 249, 238, 0.55);
+  background: #fff9ee;
 }
 
 .player-stat-overlay--sidebar .player-stat-overlay__info-card {
@@ -805,7 +846,7 @@ body {
   gap: 10px 12px;
   padding: 12px 14px;
   border: 1px solid rgba(111, 89, 58, 0.42);
-  background: rgba(255, 249, 238, 0.55);
+  background: #fff9ee;
   color: #2e2313;
   cursor: pointer;
   text-align: left;
@@ -848,7 +889,7 @@ body {
 
 .player-stat-overlay__stat-row--recommended {
   border-color: rgba(171, 117, 52, 0.7);
-  background: rgba(255, 245, 223, 0.82);
+  background: #fff5df;
 }
 
 .player-stat-overlay__stat-content,
@@ -904,7 +945,7 @@ body {
   justify-self: end;
   padding: 4px 8px;
   border: 1px solid rgba(111, 89, 58, 0.42);
-  background: rgba(255, 249, 238, 0.72);
+  background: #fff9ee;
   color: #6b5534;
   font-size: 0.66rem;
   letter-spacing: 0.08em;
@@ -924,7 +965,7 @@ body {
   min-height: 28px;
   padding: 4px 6px;
   border: 1px solid rgba(111, 89, 58, 0.42);
-  background: rgba(255, 249, 238, 0.72);
+  background: #fff9ee;
   color: #6b5534;
   font-size: 0.68rem;
   letter-spacing: 0.08em;
@@ -955,8 +996,8 @@ body {
   position: absolute;
   inset: 0;
   z-index: 0;
-  pointer-events: auto;
-  background: rgba(9, 7, 6, 0.66);
+  pointer-events: none;
+  background: transparent;
   cursor: zoom-out;
   touch-action: manipulation;
 }
@@ -970,17 +1011,58 @@ body {
   transform: translate(-50%, -50%);
   pointer-events: auto;
   overflow: hidden;
-  background: #f0e0b8;
-  box-shadow: 0 0 0 2px rgba(244, 231, 197, 0.92), 0 18px 36px rgba(0, 0, 0, 0.45);
+  background: #fff9ee;
+  box-shadow: 0 0 0 1px rgba(111, 89, 58, 0.28), 0 18px 36px rgba(0, 0, 0, 0.34);
   color: #2e2313;
 }
 
 .player-inventory-overlay__panel-body {
   display: grid;
-  gap: 14px;
-  width: 100%;
-  height: 100%;
-  padding: 22px 26px 20px;
+  grid-template-columns: max-content;
+  grid-template-areas:
+    'header'
+    'tabs'
+    'slots';
+  gap: 4px;
+  width: max-content;
+  height: max-content;
+  padding: 8px;
+  align-content: start;
+  justify-content: start;
+}
+
+.player-inventory-overlay__header {
+  grid-area: header;
+}
+
+.player-inventory-overlay__equipment-section {
+  grid-area: equipment;
+  display: grid;
+  gap: 8px;
+  align-content: start;
+  min-width: 0;
+}
+
+.player-inventory-overlay__slot-grid {
+  grid-area: slots;
+  display: grid;
+  grid-template-columns: repeat(4, max-content);
+  grid-auto-rows: max-content;
+  justify-content: start;
+  justify-self: start;
+  align-content: start;
+  gap: 1px;
+  min-width: 0;
+  width: fit-content;
+  max-width: 100%;
+}
+
+.player-inventory-overlay__empty-state {
+  grid-area: slots;
+}
+
+.player-inventory-overlay__footer {
+  grid-area: footer;
 }
 
 .player-inventory-overlay__header {
@@ -990,6 +1072,13 @@ body {
   justify-content: space-between;
   gap: 12px;
   padding-right: 68px;
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+}
+
+.player-inventory-overlay__header--dragging {
+  cursor: grabbing;
 }
 
 .player-inventory-overlay__title-group {
@@ -1000,17 +1089,59 @@ body {
 
 .player-inventory-overlay__title {
   color: #2e2313;
-  font-size: 1rem;
+  font-size: 0.94rem;
   letter-spacing: 0.08em;
   line-height: 1;
   text-transform: uppercase;
+}
+
+.player-inventory-overlay__tab-bar {
+  grid-area: tabs;
+  display: grid;
+  grid-template-columns: repeat(3, max-content);
+  grid-auto-flow: column;
+  grid-auto-columns: max-content;
+  justify-content: start;
+  justify-self: start;
+  gap: 2px;
+  width: fit-content;
+  max-width: 100%;
+  align-content: start;
+}
+
+.player-inventory-overlay__tab {
+  display: grid;
+  place-items: center;
+  min-height: 18px;
+  padding: 2px 8px 3px;
+  border: 1px solid rgba(111, 89, 58, 0.28);
+  background: #f7ecd4;
+  color: #6b5534;
+  font-size: 0.54rem;
+  letter-spacing: 0.08em;
+  line-height: 1;
+  text-transform: uppercase;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.player-inventory-overlay__tab--active {
+  background: #fff9ee;
+  color: #2e2313;
+  border-color: rgba(111, 89, 58, 0.52);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72);
+}
+
+.player-inventory-overlay__tab:focus-visible {
+  outline: 2px solid rgba(111, 89, 58, 0.52);
+  outline-offset: 2px;
 }
 
 .player-inventory-overlay__summary,
 .player-inventory-overlay__empty-state,
 .player-inventory-overlay__footer {
   color: #6b5534;
-  font-size: 0.74rem;
+  font-size: 0.68rem;
   letter-spacing: 0.06em;
   line-height: 1.2;
   text-transform: uppercase;
@@ -1043,26 +1174,95 @@ body {
   pointer-events: none;
 }
 
-.player-inventory-overlay__slot-grid {
+.player-inventory-overlay__tooltip {
+  position: fixed;
+  z-index: 2;
   display: grid;
-  grid-template-columns: repeat(4, auto);
-  justify-content: center;
+  gap: 8px;
   align-content: start;
-  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  padding: 10px 10px 12px;
+  background: #fff6e8;
+  border: 1px solid rgba(111, 89, 58, 0.24);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.72),
+    0 0 0 1px rgba(255, 255, 255, 0.08);
+  pointer-events: none;
+  max-width: min(240px, calc(100vw - 32px));
+}
+
+.player-inventory-overlay__tooltip-header {
+  display: grid;
+  gap: 8px;
+  align-content: start;
+  justify-items: start;
+}
+
+.player-inventory-overlay__tooltip-icon {
+  display: block;
+  pointer-events: none;
+  image-rendering: pixelated;
+}
+
+.player-inventory-overlay__tooltip-text {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.player-inventory-overlay__tooltip-name {
+  color: #2e2313;
+  font-size: 0.9rem;
+  letter-spacing: 0.08em;
+  line-height: 1.1;
+  text-transform: uppercase;
+}
+
+.player-inventory-overlay__tooltip-meta,
+.player-inventory-overlay__tooltip-description,
+.player-inventory-overlay__tooltip-hint {
+  min-width: 0;
+  word-break: keep-all;
+}
+
+.player-inventory-overlay__tooltip-meta {
+  color: #6b5534;
+  font-size: 0.62rem;
+  letter-spacing: 0.06em;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
+.player-inventory-overlay__tooltip-description {
+  color: #2e2313;
+  font-size: 0.66rem;
+  line-height: 1.35;
+  white-space: pre-wrap;
+}
+
+.player-inventory-overlay__tooltip-hint {
+  color: #5b86d6;
+  font-size: 0.62rem;
+  line-height: 1.25;
 }
 
 .player-inventory-overlay__slot {
   position: relative;
   display: grid;
   align-content: start;
-  justify-items: start;
+  justify-items: center;
   min-width: 0;
   min-height: 0;
   color: #2e2313;
   cursor: pointer;
-  text-align: left;
+  text-align: center;
   touch-action: manipulation;
   transition: filter 120ms ease, transform 120ms ease;
+}
+
+.player-inventory-overlay__slot--draggable {
+  cursor: grab;
 }
 
 .player-inventory-overlay__slot:hover,
@@ -1075,7 +1275,7 @@ body {
 .player-inventory-overlay__slot-quantity {
   position: relative;
   z-index: 1;
-  font-size: 0.7rem;
+  font-size: 0.58rem;
   line-height: 1;
   letter-spacing: 0.08em;
 }
@@ -1087,15 +1287,29 @@ body {
 .player-inventory-overlay__slot-item {
   position: relative;
   z-index: 1;
-  align-self: center;
+  align-self: end;
   justify-self: center;
   max-width: 100%;
-  padding: 0 4px;
+  padding: 0 3px 1px;
   color: #2e2313;
-  font-size: 0.78rem;
+  font-size: 0.58rem;
   line-height: 1.05;
   overflow-wrap: anywhere;
   text-align: center;
+}
+
+.player-inventory-overlay__slot--empty .player-inventory-overlay__slot-item {
+  color: #6b5534;
+  font-size: 0.54rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.player-inventory-overlay__slot--assigned {
+  border-color: rgba(91, 134, 214, 0.52);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.72),
+    0 0 0 1px rgba(91, 134, 214, 0.12);
 }
 
 .player-inventory-overlay__slot-empty-marker {
@@ -1106,12 +1320,32 @@ body {
   pointer-events: none;
 }
 
+.player-inventory-overlay__slot-quickslot-badge {
+  position: absolute;
+  right: 4px;
+  top: 4px;
+  z-index: 1;
+  display: grid;
+  min-width: 16px;
+  min-height: 16px;
+  padding: 0 3px;
+  place-items: center;
+  border: 1px solid rgba(91, 134, 214, 0.42);
+  background: #fff9ee;
+  color: #5b86d6;
+  font-size: 0.52rem;
+  line-height: 1;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
 .player-inventory-overlay__slot-icon {
   position: absolute;
-  left: 8px;
-  bottom: 8px;
+  left: 50%;
+  top: 50%;
   z-index: 1;
   display: block;
+  transform: translate(-50%, -50%);
   pointer-events: none;
 }
 
@@ -1159,12 +1393,12 @@ body {
 
 .player-inventory-overlay__equipment-layout {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(154px, 1.15fr) minmax(0, 1fr);
-  grid-template-rows: repeat(2, auto);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   grid-template-areas:
-    'weapon center accessory'
-    'armor center boots';
-  gap: 10px 12px;
+    'center center'
+    'weapon armor'
+    'boots accessory';
+  gap: 8px;
   align-items: stretch;
   width: 100%;
 }
@@ -1183,8 +1417,8 @@ body {
   grid-area: center;
   align-content: start;
   justify-items: center;
-  gap: 10px;
-  padding: 10px 10px 12px;
+  gap: 8px;
+  padding: 8px 8px 10px;
   overflow: hidden;
   text-align: center;
 }
@@ -1221,7 +1455,7 @@ body {
 }
 
 .player-inventory-overlay__equipment-center-name {
-  font-size: 0.92rem;
+  font-size: 0.88rem;
   letter-spacing: 0.08em;
   line-height: 1;
   text-transform: uppercase;
@@ -1231,7 +1465,7 @@ body {
 .player-inventory-overlay__equipment-center-level,
 .player-inventory-overlay__equipment-center-set {
   color: #6b5534;
-  font-size: 0.68rem;
+  font-size: 0.64rem;
   letter-spacing: 0.08em;
   line-height: 1.2;
   text-transform: uppercase;
@@ -1255,7 +1489,7 @@ body {
 }
 
 .player-inventory-overlay__equipment-slot--empty {
-  opacity: 0.92;
+  opacity: 1;
 }
 
 .player-inventory-overlay__equipment-slot--weapon {
@@ -1278,7 +1512,7 @@ body {
 .player-inventory-overlay__equipment-slot-level {
   position: relative;
   z-index: 1;
-  font-size: 0.64rem;
+  font-size: 0.58rem;
   line-height: 1;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -1292,7 +1526,7 @@ body {
   max-width: 100%;
   padding: 0 2px;
   color: #2e2313;
-  font-size: 0.76rem;
+  font-size: 0.7rem;
   line-height: 1.05;
   overflow-wrap: anywhere;
   text-align: left;
@@ -1303,7 +1537,7 @@ body {
   z-index: 1;
   max-width: 100%;
   color: rgba(46, 35, 19, 0.72);
-  font-size: 0.62rem;
+  font-size: 0.58rem;
   line-height: 1.15;
   overflow-wrap: anywhere;
 }
@@ -1314,8 +1548,8 @@ body {
 
 .player-inventory-overlay__equipment-slot-icon {
   position: absolute;
-  right: 8px;
-  top: 8px;
+  right: 6px;
+  top: 6px;
   z-index: 1;
   display: block;
   width: 16px;
@@ -1331,8 +1565,7 @@ body {
   pointer-events: none;
 }
 
-.player-equipment-overlay__backdrop,
-.player-equipment-overlay__close {
+.player-equipment-overlay__backdrop {
   appearance: none;
   border: 0;
   padding: 0;
@@ -1341,12 +1574,19 @@ body {
   font: inherit;
 }
 
+.player-equipment-overlay__close {
+  appearance: none;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+}
+
 .player-equipment-overlay__backdrop {
   position: absolute;
   inset: 0;
   z-index: 0;
-  pointer-events: auto;
-  background: rgba(9, 7, 6, 0.66);
+  pointer-events: none;
+  background: transparent;
   cursor: zoom-out;
   touch-action: manipulation;
 }
@@ -1533,8 +1773,8 @@ body {
   position: absolute;
   inset: 0;
   z-index: 0;
-  pointer-events: auto;
-  background: rgba(23, 19, 17, 0.7);
+  pointer-events: none;
+  background: transparent;
   cursor: zoom-out;
   touch-action: manipulation;
 }
@@ -1558,7 +1798,14 @@ body {
 
 .blacksmith-shop-overlay__panel-body {
   display: grid;
-  gap: 12px;
+  grid-template-columns: minmax(210px, 0.78fr) minmax(0, 1.22fr);
+  grid-template-areas:
+    'header header'
+    'service panes'
+    'workshop panes'
+    'status panes'
+    'footer panes';
+  gap: 12px 14px;
   width: 100%;
   max-height: calc(100vh - 24px);
   padding: 20px 22px 18px;
@@ -1566,6 +1813,7 @@ body {
 }
 
 .blacksmith-shop-overlay__header {
+  grid-area: header;
   position: relative;
   display: grid;
   grid-template-columns: minmax(180px, 1fr) minmax(240px, 1.15fr) minmax(180px, 1fr);
@@ -1673,6 +1921,7 @@ body {
 }
 
 .blacksmith-shop-overlay__service-menu {
+  grid-area: service;
   display: grid;
   gap: 10px;
   min-width: 0;
@@ -1706,7 +1955,7 @@ body {
 
 .blacksmith-shop-overlay__service-menu-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: 1fr;
   gap: 10px;
 }
 
@@ -1715,8 +1964,8 @@ body {
   display: grid;
   align-content: start;
   gap: 6px;
-  min-height: 110px;
-  padding: 14px 12px 13px;
+  min-height: 72px;
+  padding: 12px 14px 11px;
   border: 1px solid rgba(111, 89, 58, 0.42);
   border-radius: 0;
   background: rgba(255, 249, 238, 0.72);
@@ -1752,6 +2001,7 @@ body {
 }
 
 .blacksmith-shop-overlay__workshop-panel {
+  grid-area: workshop;
   display: grid;
   justify-items: center;
   gap: 8px;
@@ -1812,6 +2062,7 @@ body {
 }
 
 .blacksmith-shop-overlay__panes {
+  grid-area: panes;
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
@@ -1820,7 +2071,7 @@ body {
 
 .blacksmith-shop-overlay__pane {
   display: grid;
-  grid-template-rows: auto auto auto 1fr;
+  grid-template-rows: auto auto 1fr;
   gap: 8px;
   min-height: 0;
   padding: 12px;
@@ -1991,6 +2242,7 @@ body {
 }
 
 .blacksmith-shop-overlay__status {
+  grid-area: status;
   color: #6b5534;
   font-size: 0.66rem;
   letter-spacing: 0.06em;
@@ -2000,6 +2252,7 @@ body {
 }
 
 .blacksmith-shop-overlay__footer {
+  grid-area: footer;
   color: #6b5534;
   font-size: 0.6rem;
   letter-spacing: 0.08em;
@@ -2009,6 +2262,17 @@ body {
 }
 
 @media (max-width: 920px) {
+  .blacksmith-shop-overlay__panel-body {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      'header'
+      'service'
+      'workshop'
+      'panes'
+      'status'
+      'footer';
+  }
+
   .blacksmith-shop-overlay__header {
     grid-template-columns: 1fr;
     padding-right: 0;

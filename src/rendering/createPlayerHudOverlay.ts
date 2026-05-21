@@ -1,16 +1,23 @@
 import {
   PLAYER_MAX_LEVEL,
-  getPlayerJobDisplayName,
   type PlayerProfile
 } from '../game/playerProfile'
 import { getPlayerExperienceToNextLevel } from '../game/playerExperience'
+import { getPlayerEquipmentItemDefinitionById } from '../game/playerEquipment'
+import type { PlayerInventory } from '../game/playerInventory'
+import {
+  clearPlayerQuickslotAssignment,
+  setPlayerQuickslotAssignment,
+  type PlayerQuickslots
+} from '../game/playerQuickslots'
 import { getResponsiveUiScale } from './getResponsiveUiScale'
 
 type CreatePlayerHudOverlayInput = {
   mountElement: HTMLElement
   profile: PlayerProfile
-  getIsInventoryOpen: () => boolean
-  onRequestInventoryOpenChange: (nextIsOpen: boolean) => void
+  getInventory: () => PlayerInventory
+  getQuickslots: () => PlayerQuickslots
+  onRequestQuickslotChange: (nextQuickslots: PlayerQuickslots) => void
 }
 
 export type PlayerHudOverlay = {
@@ -22,12 +29,6 @@ const UI_SPRITESHEET_IMAGE_URL = new URL(
   '../assets/spritesheets/uipack_rpg_sheet.png',
   import.meta.url
 ).href
-const HUD_PANEL_FRAME = {
-  x: 190,
-  y: 100,
-  width: 100,
-  height: 100
-}
 const BUTTON_SQUARE_FRAME = {
   x: 293,
   y: 294,
@@ -35,45 +36,44 @@ const BUTTON_SQUARE_FRAME = {
   height: 49
 }
 const HUD_MARGIN = 16
-const HUD_PANEL_MIN_WIDTH = 360
-const HUD_PANEL_MAX_WIDTH = 500
-const HUD_PANEL_MIN_HEIGHT = 188
-const HUD_PANEL_HEIGHT = 220
-const HUD_PANEL_SCALE_MULTIPLIER = 0.88
+const HUD_PANEL_MIN_WIDTH = 400
+const HUD_PANEL_MAX_WIDTH = 760
+const HUD_PANEL_SCALE_MULTIPLIER = 0.82
 const HEALTH_BAR_COLOR = '#d06b5d'
 const MANA_BAR_COLOR = '#5b86d6'
+const SKILL_HOTKEYS = ['Q', 'W', 'E', 'R'] as const
+const QUICK_CONSUMABLE_HOTKEYS = ['1', '2', '3', '4', '5', '6'] as const
+const QUICK_CONSUMABLE_SLOT_COUNT = QUICK_CONSUMABLE_HOTKEYS.length
 
 export const createPlayerHudOverlay = ({
   mountElement,
   profile,
-  getIsInventoryOpen,
-  onRequestInventoryOpenChange
+  getInventory,
+  getQuickslots,
+  onRequestQuickslotChange
 }: CreatePlayerHudOverlayInput): PlayerHudOverlay => {
   const overlayRoot = document.createElement('div')
   const panel = document.createElement('section')
   const panelBody = document.createElement('div')
-  const headerRow = document.createElement('div')
-  const titleGroup = document.createElement('div')
-  const nameElement = document.createElement('div')
-  const jobElement = document.createElement('div')
-  const levelBadge = document.createElement('div')
-  const attackBadge = document.createElement('div')
-  const progressionBadge = document.createElement('div')
-  const bagButton = document.createElement('button')
-  const bagIcon = createBagIconSvg()
+  const statusSection = document.createElement('div')
   const resourceGrid = document.createElement('div')
   const hpRow = createResourceRow('체력')
   const mpRow = createResourceRow('마나')
   const expRow = createResourceRow('경험치')
-  const statGrid = document.createElement('div')
   const skillSection = document.createElement('div')
   const skillSectionTitle = document.createElement('div')
   const skillGrid = document.createElement('div')
+  const consumableSection = document.createElement('div')
+  const consumableSectionTitle = document.createElement('div')
+  const consumableGrid = document.createElement('div')
   const skillButtons: HTMLButtonElement[] = []
   const skillHotkeyLabels: HTMLSpanElement[] = []
   const skillNameLabels: HTMLSpanElement[] = []
   const skillDescriptionLabels: HTMLSpanElement[] = []
-  const statChips: HTMLDivElement[] = []
+  const consumableButtons: HTMLButtonElement[] = []
+  const consumableHotkeyLabels: HTMLSpanElement[] = []
+  const consumableNameLabels: HTMLSpanElement[] = []
+  const consumableQuantityLabels: HTMLSpanElement[] = []
   const skillSlotCount = profile.skills.length
 
   overlayRoot.className = 'player-hud-overlay'
@@ -82,57 +82,53 @@ export const createPlayerHudOverlay = ({
   panel.setAttribute('aria-label', '캐릭터 상태')
 
   panelBody.className = 'player-hud-overlay__panel-body'
-  headerRow.className = 'player-hud-overlay__header'
-  titleGroup.className = 'player-hud-overlay__title-group'
-  nameElement.className = 'player-hud-overlay__name'
-  nameElement.textContent = profile.name
-  jobElement.className = 'player-hud-overlay__job'
-  jobElement.textContent = getPlayerJobDisplayName(profile)
-  levelBadge.className = 'player-hud-overlay__level'
-  levelBadge.textContent =
-    profile.level >= PLAYER_MAX_LEVEL
-      ? `레벨 ${profile.level} · MAX`
-      : `레벨 ${profile.level}`
-  attackBadge.className = 'player-hud-overlay__attack-badge'
-  attackBadge.textContent = '공격 A'
-  progressionBadge.className = 'player-hud-overlay__progression-badge'
-  progressionBadge.textContent = '스텟 S · 스킬 K'
 
-  bagButton.type = 'button'
-  bagButton.className = 'player-hud-overlay__bag-button'
-  bagButton.setAttribute('aria-label', '가방 열기')
-  bagButton.setAttribute('aria-haspopup', 'dialog')
-  bagButton.setAttribute('aria-controls', 'player-inventory-panel')
-  bagButton.setAttribute('aria-expanded', 'false')
-  bagButton.title = '가방 열기'
-
-  bagIcon.classList.add('player-hud-overlay__bag-icon')
-  bagIcon.setAttribute('aria-hidden', 'true')
-
+  statusSection.className = 'player-hud-overlay__status-section'
   resourceGrid.className = 'player-hud-overlay__resource-grid'
 
-  statGrid.className = 'player-hud-overlay__stat-grid'
   skillSection.className = 'player-hud-overlay__skill-section'
   skillSectionTitle.className = 'player-hud-overlay__skill-title'
   skillSectionTitle.textContent = '스킬'
   skillGrid.className = 'player-hud-overlay__skill-grid'
+  consumableSection.className = 'player-hud-overlay__consumable-section'
+  consumableSectionTitle.className = 'player-hud-overlay__section-title'
+  consumableSectionTitle.textContent = '퀵슬롯'
+  consumableGrid.className = 'player-hud-overlay__consumable-grid'
 
-  for (const stat of [
-    ['힘', profile.stats.strength],
-    ['민첩', profile.stats.agility],
-    ['지력', profile.stats.intelligence],
-    ['행운', profile.stats.luck]
-  ] as const) {
-    const chip = document.createElement('div')
+  for (let index = 0; index < QUICK_CONSUMABLE_SLOT_COUNT; index += 1) {
+    const consumableButton = document.createElement('button')
+    const hotkeyLabel = document.createElement('span')
+    const nameLabel = document.createElement('span')
+    const quantityLabel = document.createElement('span')
 
-    chip.className = 'player-hud-overlay__stat-chip'
-    chip.textContent = `${stat[0]} ${stat[1]}`
-    statChips.push(chip)
-    statGrid.append(chip)
+    consumableButton.type = 'button'
+    consumableButton.className = 'player-hud-overlay__consumable-slot'
+    consumableButton.dataset.playerQuickslotIndex = String(index)
+    consumableButton.setAttribute(
+      'aria-label',
+      `퀵슬롯 ${index + 1} 비어있음`
+    )
+    consumableButton.title = `퀵슬롯 ${index + 1} 비어있음`
+
+    hotkeyLabel.className = 'player-hud-overlay__consumable-hotkey'
+    hotkeyLabel.textContent = QUICK_CONSUMABLE_HOTKEYS[index]
+
+    nameLabel.className = 'player-hud-overlay__consumable-name'
+    nameLabel.textContent = '비어있음'
+
+    quantityLabel.className = 'player-hud-overlay__consumable-quantity'
+    quantityLabel.hidden = true
+
+    consumableButton.append(hotkeyLabel, nameLabel, quantityLabel)
+    consumableGrid.append(consumableButton)
+
+    consumableButtons.push(consumableButton)
+    consumableHotkeyLabels.push(hotkeyLabel)
+    consumableNameLabels.push(nameLabel)
+    consumableQuantityLabels.push(quantityLabel)
   }
 
   for (let index = 0; index < skillSlotCount; index += 1) {
-    const skill = profile.skills[index]
     const skillButton = document.createElement('button')
     const hotkeyLabel = document.createElement('span')
     const nameLabel = document.createElement('span')
@@ -140,17 +136,17 @@ export const createPlayerHudOverlay = ({
 
     skillButton.type = 'button'
     skillButton.className = 'player-hud-overlay__skill-slot'
-    skillButton.setAttribute('aria-label', skill.label)
-    skillButton.title = skill.description
+    skillButton.setAttribute('aria-label', `스킬 슬롯 ${index + 1} 비어있음`)
+    skillButton.title = `스킬 슬롯 ${index + 1} 비어있음`
 
     hotkeyLabel.className = 'player-hud-overlay__skill-hotkey'
-    hotkeyLabel.textContent = skill.hotkey
+    hotkeyLabel.textContent = SKILL_HOTKEYS[index]
 
     nameLabel.className = 'player-hud-overlay__skill-name'
-    nameLabel.textContent = skill.label
+    nameLabel.textContent = '비어있음'
 
     descriptionLabel.className = 'player-hud-overlay__skill-description'
-    descriptionLabel.textContent = skill.description
+    descriptionLabel.textContent = ''
 
     skillButton.append(hotkeyLabel, nameLabel, descriptionLabel)
     skillGrid.append(skillButton)
@@ -161,20 +157,11 @@ export const createPlayerHudOverlay = ({
     skillDescriptionLabels.push(descriptionLabel)
   }
 
-  const headerIdentity = document.createElement('div')
-  const headerMeta = document.createElement('div')
-
-  headerIdentity.className = 'player-hud-overlay__header-identity'
-  headerMeta.className = 'player-hud-overlay__header-meta'
-
-  headerIdentity.append(nameElement, jobElement)
-  headerMeta.append(levelBadge, attackBadge, progressionBadge, bagButton)
-  bagButton.append(bagIcon)
-  headerRow.append(headerIdentity, headerMeta)
-
+  statusSection.append(resourceGrid)
   resourceGrid.append(hpRow.row, mpRow.row, expRow.row)
   skillSection.append(skillSectionTitle, skillGrid)
-  panelBody.append(headerRow, resourceGrid, statGrid, skillSection)
+  consumableSection.append(consumableSectionTitle, consumableGrid)
+  panelBody.append(statusSection, skillSection, consumableSection)
   panel.append(panelBody)
   overlayRoot.append(panel)
   mountElement.append(overlayRoot)
@@ -192,6 +179,156 @@ export const createPlayerHudOverlay = ({
     element.style.width = `${frame.width * scaleX}px`
     element.style.height = `${frame.height * scaleY}px`
     element.style.imageRendering = 'pixelated'
+  }
+
+  const setEmptySlotAppearance = (element: HTMLElement) => {
+    element.style.backgroundImage = 'none'
+    element.style.backgroundRepeat = 'no-repeat'
+    element.style.backgroundPosition = '0 0'
+    element.style.backgroundSize = '100% 100%'
+    element.style.backgroundColor = 'rgba(255, 249, 238, 0.9)'
+    element.style.border = '1px solid rgba(111, 89, 58, 0.34)'
+    element.style.boxShadow = 'inset 0 1px 0 rgba(255, 255, 255, 0.7)'
+  }
+
+  const isLikelyConsumableInventoryItem = (item: {
+    id: string
+    label: string
+  }): boolean => {
+    if (getPlayerEquipmentItemDefinitionById(item.id)) {
+      return false
+    }
+
+    return /potion|elixir|antidote|herb|food|drink|scroll|물약|포션|회복|음료/.test(
+      `${item.label} ${item.id}`.toLowerCase()
+    )
+  }
+
+  const getQuickslotButton = (target: EventTarget | null) => {
+    if (!(target instanceof Element)) {
+      return undefined
+    }
+
+    return target.closest('button[data-player-quickslot-index]') as
+      | HTMLButtonElement
+      | undefined
+  }
+
+  const getQuickslotIndexFromButton = (button: HTMLButtonElement): number =>
+    Number(button.dataset.playerQuickslotIndex)
+
+  const getDraggedInventorySlotIndex = (event: DragEvent): number | undefined => {
+    const rawValue =
+      event.dataTransfer?.getData('application/x-player-inventory-slot-index') ||
+      event.dataTransfer?.getData('text/plain')
+
+    if (!rawValue) {
+      return undefined
+    }
+
+    const slotIndex = Number(rawValue)
+
+    return Number.isNaN(slotIndex) ? undefined : slotIndex
+  }
+
+  const handleQuickslotDragStart = (event: DragEvent) => {
+    const quickslotButton = getQuickslotButton(event.target)
+
+    if (!quickslotButton || !event.dataTransfer) {
+      return
+    }
+
+    const quickslotIndex = getQuickslotIndexFromButton(quickslotButton)
+    const quickslot = getQuickslots().slots[quickslotIndex]
+    const inventorySlotIndex = quickslot?.inventorySlotIndex
+    const inventory = getInventory()
+    const item =
+      inventorySlotIndex === undefined
+        ? undefined
+        : inventory.slots[inventorySlotIndex]
+
+    if (!item || !isLikelyConsumableInventoryItem(item)) {
+      event.preventDefault()
+      return
+    }
+
+    event.dataTransfer.effectAllowed = 'move'
+    event.dataTransfer.setData(
+      'application/x-player-inventory-slot-index',
+      String(inventorySlotIndex)
+    )
+    event.dataTransfer.setData('text/plain', String(inventorySlotIndex))
+  }
+
+  const handleQuickslotDragOver = (event: DragEvent) => {
+    const quickslotButton = getQuickslotButton(event.target)
+
+    if (!quickslotButton || !event.dataTransfer) {
+      return
+    }
+
+    const inventorySlotIndex = getDraggedInventorySlotIndex(event)
+    const inventory = getInventory()
+
+    if (inventorySlotIndex === undefined) {
+      return
+    }
+
+    const item = inventory.slots[inventorySlotIndex]
+
+    if (!item || !isLikelyConsumableInventoryItem(item)) {
+      return
+    }
+
+    event.preventDefault()
+    event.dataTransfer.dropEffect = 'move'
+  }
+
+  const handleQuickslotDrop = (event: DragEvent) => {
+    const quickslotButton = getQuickslotButton(event.target)
+
+    if (!quickslotButton) {
+      return
+    }
+
+    const quickslotIndex = getQuickslotIndexFromButton(quickslotButton)
+    const inventorySlotIndex = getDraggedInventorySlotIndex(event)
+    const inventory = getInventory()
+
+    if (inventorySlotIndex === undefined) {
+      return
+    }
+
+    const item = inventory.slots[inventorySlotIndex]
+
+    if (!item || !isLikelyConsumableInventoryItem(item)) {
+      return
+    }
+
+    event.preventDefault()
+    onRequestQuickslotChange(
+      setPlayerQuickslotAssignment({
+        quickslots: getQuickslots(),
+        quickslotIndex,
+        inventorySlotIndex
+      })
+    )
+  }
+
+  const handleQuickslotContextMenu = (event: MouseEvent) => {
+    const quickslotButton = getQuickslotButton(event.target)
+
+    if (!quickslotButton) {
+      return
+    }
+
+    event.preventDefault()
+    onRequestQuickslotChange(
+      clearPlayerQuickslotAssignment({
+        quickslots: getQuickslots(),
+        quickslotIndex: getQuickslotIndexFromButton(quickslotButton)
+      })
+    )
   }
 
   const syncResourceRow = (
@@ -216,43 +353,21 @@ export const createPlayerHudOverlay = ({
 
   const syncLayout = () => {
     const uiScale = getResponsiveUiScale()
+    const inventory = getInventory()
     const panelWidth = clamp(
       window.innerWidth - HUD_MARGIN * 2,
       HUD_PANEL_MIN_WIDTH,
       HUD_PANEL_MAX_WIDTH
     )
-    const panelHeight = clamp(
-      window.innerHeight - HUD_MARGIN * 2,
-      HUD_PANEL_MIN_HEIGHT,
-      HUD_PANEL_HEIGHT
-    )
 
-    setSpriteFrame(
-      panel,
-      HUD_PANEL_FRAME,
-      panelWidth / HUD_PANEL_FRAME.width,
-      panelHeight / HUD_PANEL_FRAME.height
-    )
     panel.style.width = `${panelWidth}px`
-    panel.style.height = `${panelHeight}px`
+    panel.style.height = 'auto'
     panel.style.left = '50%'
     panel.style.bottom = `${Math.round(HUD_MARGIN * uiScale)}px`
     panel.style.transformOrigin = 'center bottom'
     panel.style.transform = `translateX(-50%) scale(${
       uiScale * HUD_PANEL_SCALE_MULTIPLIER
     })`
-
-    setSpriteFrame(bagButton, BUTTON_SQUARE_FRAME)
-    bagButton.classList.toggle(
-      'player-hud-overlay__bag-button--active',
-      getIsInventoryOpen()
-    )
-    bagButton.setAttribute('aria-expanded', String(getIsInventoryOpen()))
-    bagButton.setAttribute(
-      'aria-label',
-      getIsInventoryOpen() ? '가방 닫기' : '가방 열기'
-    )
-    bagButton.title = getIsInventoryOpen() ? '가방 닫기' : '가방 열기'
 
     const nextExperienceToLevelUp = getPlayerExperienceToNextLevel(profile.level)
 
@@ -271,30 +386,81 @@ export const createPlayerHudOverlay = ({
     )
 
     for (let index = 0; index < skillButtons.length; index += 1) {
-      const skill = profile.skills[index]
       const skillButton = skillButtons[index]
+      const hotkeyLabel = skillHotkeyLabels[index]
+      const nameLabel = skillNameLabels[index]
+      const descriptionLabel = skillDescriptionLabels[index]
 
       setSpriteFrame(skillButton, BUTTON_SQUARE_FRAME)
-      skillButton.setAttribute('aria-label', skill.label)
-      skillButton.title = skill.description
-      skillHotkeyLabels[index].textContent = skill.hotkey
-      skillNameLabels[index].textContent = skill.label
-      skillDescriptionLabels[index].textContent = skill.description
+      setEmptySlotAppearance(skillButton)
+      skillButton.setAttribute('aria-label', `스킬 슬롯 ${index + 1} 비어있음`)
+      skillButton.title = `스킬 슬롯 ${index + 1} 비어있음`
+      hotkeyLabel.textContent = SKILL_HOTKEYS[index]
+      nameLabel.textContent = '비어있음'
+      descriptionLabel.textContent = ''
+    }
+
+    const quickslots = getQuickslots()
+
+    for (let index = 0; index < consumableButtons.length; index += 1) {
+      const consumableButton = consumableButtons[index]
+      const hotkeyLabel = consumableHotkeyLabels[index]
+      const nameLabel = consumableNameLabels[index]
+      const quantityLabel = consumableQuantityLabels[index]
+      const quickslot = quickslots.slots[index]
+      const item = quickslot ? inventory.slots[quickslot.inventorySlotIndex] : undefined
+      const isQuickslotItem = item ? isLikelyConsumableInventoryItem(item) : false
+
+      setSpriteFrame(consumableButton, BUTTON_SQUARE_FRAME)
+      setEmptySlotAppearance(consumableButton)
+      consumableButton.classList.toggle(
+        'player-hud-overlay__consumable-slot--filled',
+        Boolean(item && isQuickslotItem)
+      )
+      consumableButton.classList.toggle(
+        'player-hud-overlay__consumable-slot--empty',
+        !item || !isQuickslotItem
+      )
+      consumableButton.draggable = Boolean(item && isQuickslotItem)
+      if (item && isQuickslotItem) {
+        consumableButton.style.borderColor = 'rgba(91, 134, 214, 0.42)'
+        consumableButton.style.boxShadow =
+          'inset 0 1px 0 rgba(255, 255, 255, 0.7), 0 0 0 1px rgba(91, 134, 214, 0.08)'
+      } else {
+        consumableButton.style.borderColor = 'rgba(111, 89, 58, 0.34)'
+        consumableButton.style.boxShadow =
+          'inset 0 1px 0 rgba(255, 255, 255, 0.7)'
+      }
+      consumableButton.setAttribute(
+        'aria-label',
+        item && isQuickslotItem
+          ? `퀵슬롯 ${index + 1} ${item.label}${
+              item.quantity > 1 ? ` x${item.quantity}` : ''
+            }. 드래그해서 다른 칸으로 이동`
+          : `퀵슬롯 ${index + 1} 비어있음`
+      )
+      consumableButton.title = item && isQuickslotItem
+        ? `${item.label}${item.quantity > 1 ? ` x${item.quantity}` : ''}. 드래그해서 다른 칸으로 이동`
+        : `퀵슬롯 ${index + 1} 비어있음`
+      hotkeyLabel.textContent = QUICK_CONSUMABLE_HOTKEYS[index]
+      nameLabel.textContent = item && isQuickslotItem ? item.label : '비어있음'
+      quantityLabel.hidden = !(item && isQuickslotItem && item.quantity > 1)
+      quantityLabel.textContent =
+        item && isQuickslotItem && item.quantity > 1 ? `x${item.quantity}` : ''
     }
   }
 
-  const handleBagButtonClick = (event: MouseEvent) => {
-    event.preventDefault()
-    event.stopPropagation()
-
-    onRequestInventoryOpenChange(!getIsInventoryOpen())
-  }
-
-  bagButton.addEventListener('click', handleBagButtonClick)
+  consumableGrid.addEventListener('dragstart', handleQuickslotDragStart)
+  consumableGrid.addEventListener('dragover', handleQuickslotDragOver)
+  consumableGrid.addEventListener('drop', handleQuickslotDrop)
+  consumableGrid.addEventListener('contextmenu', handleQuickslotContextMenu)
 
   const destroy = () => {
-    bagButton.removeEventListener('click', handleBagButtonClick)
     overlayRoot.remove()
+    consumableGrid.removeEventListener('dragstart', handleQuickslotDragStart)
+    consumableGrid.removeEventListener('dragover', handleQuickslotDragOver)
+    consumableGrid.removeEventListener('drop', handleQuickslotDrop)
+    consumableGrid.removeEventListener('contextmenu', handleQuickslotContextMenu)
   }
 
   syncLayout()
@@ -329,32 +495,6 @@ const createResourceRow = (label: string): ResourceRow => {
   return {
     row
   }
-}
-
-const createBagIconSvg = (): SVGSVGElement => {
-  const namespace = 'http://www.w3.org/2000/svg'
-  const svg = document.createElementNS(namespace, 'svg')
-  const body = document.createElementNS(namespace, 'path')
-  const tie = document.createElementNS(namespace, 'path')
-  const handle = document.createElementNS(namespace, 'path')
-
-  svg.setAttribute('viewBox', '0 0 24 24')
-  svg.setAttribute('aria-hidden', 'true')
-  svg.setAttribute('focusable', 'false')
-
-  body.setAttribute('d', 'M7 8h10l2 4v8H5v-8l2-4z')
-  body.setAttribute('fill', 'currentColor')
-
-  tie.setAttribute('d', 'M9 7c0-1.7 1.3-3 3-3s3 1.3 3 3h-2c0-.6-.4-1-1-1s-1 .4-1 1H9z')
-  tie.setAttribute('fill', 'currentColor')
-
-  handle.setAttribute('d', 'M8 8h8v2H8z')
-  handle.setAttribute('fill', '#f4e7c5')
-  handle.setAttribute('opacity', '0.55')
-
-  svg.append(body, tie, handle)
-
-  return svg
 }
 
 const clamp = (value: number, min: number, max: number): number =>

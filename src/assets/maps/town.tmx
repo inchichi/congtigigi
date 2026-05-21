@@ -175,6 +175,18 @@
     <property name="type" value="character_bearded_apron_man"/>
    </properties>
   </object>
+  <object id="10" name="potion_merchant" type="character" x="480.467" y="515.737">
+   <properties>
+    <property name="controller.dialogueLines" type="list">
+     <item value="물약이 필요하면 여기로 와."/>
+     <item value="체력 물약과 마나 물약을 준비해뒀어."/>
+    </property>
+    <property name="controller.messageDurationSeconds" type="float" value="2.8"/>
+    <property name="controller.scriptId" value="reply-with-message"/>
+    <property name="displayText" value="물약상인"/>
+    <property name="type" value="character_villager_flower_dress"/>
+   </properties>
+  </object>
   <object id="3" name="wizard" type="character" x="831.323" y="542.823">
    <properties>
     <property name="type" value="character_wizard_purple"/>

@@ -23,6 +23,7 @@ const PANEL_MIN_WIDTH = 440
 const PANEL_MAX_WIDTH = 620
 const PANEL_MIN_HEIGHT = 340
 const PANEL_MAX_HEIGHT = 480
+const PANEL_MARGIN = 16
 
 export const createPlayerSkillOverlay = ({
   mountElement,
@@ -54,18 +55,30 @@ export const createPlayerSkillOverlay = ({
   const skillLevels: HTMLSpanElement[] = []
   const skillDescriptions: HTMLSpanElement[] = []
   const skillActions: HTMLSpanElement[] = []
+  let panelPosition = { left: 0, top: 0 }
+  let hasPanelPosition = false
+  let dragState:
+    | {
+        pointerId: number
+        offsetX: number
+        offsetY: number
+        width: number
+        height: number
+      }
+    | undefined
 
   overlayRoot.className = 'player-skill-overlay'
 
   backdropButton.type = 'button'
   backdropButton.className = 'player-skill-overlay__backdrop'
   backdropButton.hidden = true
-  backdropButton.setAttribute('aria-label', '스킬 창 닫기')
+  backdropButton.tabIndex = -1
+  backdropButton.setAttribute('aria-hidden', 'true')
 
   panel.className = 'player-skill-overlay__panel'
   panel.hidden = true
   panel.setAttribute('role', 'dialog')
-  panel.setAttribute('aria-modal', 'true')
+  panel.setAttribute('aria-modal', 'false')
   panel.setAttribute('aria-labelledby', 'player-skill-overlay-title')
 
   panelBody.className = 'player-skill-overlay__panel-body'
@@ -148,6 +161,69 @@ export const createPlayerSkillOverlay = ({
   overlayRoot.append(backdropButton, panel)
   mountElement.append(overlayRoot)
 
+  const clampPanelPosition = (
+    left: number,
+    top: number,
+    width: number,
+    height: number
+  ) => ({
+    left: clamp(left, PANEL_MARGIN, Math.max(PANEL_MARGIN, window.innerWidth - width - PANEL_MARGIN)),
+    top: clamp(top, PANEL_MARGIN, Math.max(PANEL_MARGIN, window.innerHeight - height - PANEL_MARGIN))
+  })
+
+  const startDragging = (event: PointerEvent) => {
+    if (event.button !== 0 || panel.hidden || !event.isPrimary) {
+      return
+    }
+
+    const target = event.target
+
+    if (!(target instanceof Element) || closeButton.contains(target)) {
+      return
+    }
+
+    const rect = panel.getBoundingClientRect()
+
+    dragState = {
+      pointerId: event.pointerId,
+      offsetX: event.clientX - rect.left,
+      offsetY: event.clientY - rect.top,
+      width: rect.width,
+      height: rect.height
+    }
+    hasPanelPosition = true
+    headerRow.classList.add('player-skill-overlay__header--dragging')
+    event.preventDefault()
+  }
+
+  const stopDragging = (pointerId?: number) => {
+    if (dragState && pointerId !== undefined && dragState.pointerId !== pointerId) {
+      return
+    }
+
+    dragState = undefined
+    headerRow.classList.remove('player-skill-overlay__header--dragging')
+  }
+
+  const handleDocumentPointerMove = (event: PointerEvent) => {
+    if (!dragState || event.pointerId !== dragState.pointerId) {
+      return
+    }
+
+    panelPosition = clampPanelPosition(
+      event.clientX - dragState.offsetX,
+      event.clientY - dragState.offsetY,
+      dragState.width,
+      dragState.height
+    )
+    panel.style.left = `${panelPosition.left}px`
+    panel.style.top = `${panelPosition.top}px`
+  }
+
+  const handleDocumentPointerUp = (event: PointerEvent) => {
+    stopDragging(event.pointerId)
+  }
+
   const syncLayout = () => {
     const isOpen = getIsOpen()
     const uiScale = getResponsiveUiScale()
@@ -157,6 +233,7 @@ export const createPlayerSkillOverlay = ({
     overlayRoot.setAttribute('aria-hidden', String(!isOpen))
 
     if (!isOpen) {
+      stopDragging()
       backdropButton.hidden = true
       panel.hidden = true
       return
@@ -166,13 +243,35 @@ export const createPlayerSkillOverlay = ({
     const availableHeight = Math.max(1, window.innerHeight - OVERLAY_MARGIN * 2)
     const panelWidth = clamp(availableWidth, PANEL_MIN_WIDTH, PANEL_MAX_WIDTH)
     const panelHeight = clamp(availableHeight, PANEL_MIN_HEIGHT, PANEL_MAX_HEIGHT)
+    const renderedWidth = panelWidth * uiScale
+    const renderedHeight = panelHeight * uiScale
+    const defaultPosition = clampPanelPosition(
+      (window.innerWidth - renderedWidth) / 2,
+      (window.innerHeight - renderedHeight) / 2,
+      renderedWidth,
+      renderedHeight
+    )
 
     backdropButton.hidden = false
     panel.hidden = false
     panel.style.width = `${panelWidth}px`
     panel.style.height = `${panelHeight}px`
-    panel.style.transformOrigin = 'center center'
-    panel.style.transform = `translate(-50%, -50%) scale(${uiScale})`
+    panel.style.transformOrigin = 'left top'
+    panel.style.transform = `scale(${uiScale})`
+
+    if (!hasPanelPosition) {
+      panelPosition = defaultPosition
+    } else {
+      panelPosition = clampPanelPosition(
+        panelPosition.left,
+        panelPosition.top,
+        renderedWidth,
+        renderedHeight
+      )
+    }
+
+    panel.style.left = `${panelPosition.left}px`
+    panel.style.top = `${panelPosition.top}px`
 
     infoName.textContent = profile.name
     infoJob.textContent = profile.job
@@ -256,18 +355,21 @@ export const createPlayerSkillOverlay = ({
   const handleBackdropClick = (event: MouseEvent) => {
     event.preventDefault()
     event.stopPropagation()
+    stopDragging()
     onRequestOpenChange(false)
   }
 
   const handleCloseButtonPointerDown = (event: PointerEvent) => {
     event.preventDefault()
     event.stopPropagation()
+    stopDragging()
     onRequestOpenChange(false)
   }
 
   const handleCloseButtonClick = (event: MouseEvent) => {
     event.preventDefault()
     event.stopPropagation()
+    stopDragging()
     onRequestOpenChange(false)
   }
 
@@ -283,6 +385,10 @@ export const createPlayerSkillOverlay = ({
 
   backdropButton.addEventListener('pointerdown', handleBackdropPointerDown)
   backdropButton.addEventListener('click', handleBackdropClick)
+  headerRow.addEventListener('pointerdown', startDragging)
+  document.addEventListener('pointermove', handleDocumentPointerMove)
+  document.addEventListener('pointerup', handleDocumentPointerUp)
+  document.addEventListener('pointercancel', handleDocumentPointerUp)
   closeButton.addEventListener('pointerdown', handleCloseButtonPointerDown)
   closeButton.addEventListener('click', handleCloseButtonClick)
   panel.addEventListener('click', handlePanelClick)
@@ -295,6 +401,10 @@ export const createPlayerSkillOverlay = ({
   const destroy = () => {
     backdropButton.removeEventListener('pointerdown', handleBackdropPointerDown)
     backdropButton.removeEventListener('click', handleBackdropClick)
+    headerRow.removeEventListener('pointerdown', startDragging)
+    document.removeEventListener('pointermove', handleDocumentPointerMove)
+    document.removeEventListener('pointerup', handleDocumentPointerUp)
+    document.removeEventListener('pointercancel', handleDocumentPointerUp)
     closeButton.removeEventListener('pointerdown', handleCloseButtonPointerDown)
     closeButton.removeEventListener('click', handleCloseButtonClick)
     panel.removeEventListener('click', handlePanelClick)

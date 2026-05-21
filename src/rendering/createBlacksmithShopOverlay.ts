@@ -262,12 +262,13 @@ export const createBlacksmithShopOverlay = ({
   backdropButton.type = 'button'
   backdropButton.className = 'blacksmith-shop-overlay__backdrop'
   backdropButton.hidden = true
-  backdropButton.setAttribute('aria-label', '대장장이 거래 닫기')
+  backdropButton.tabIndex = -1
+  backdropButton.setAttribute('aria-hidden', 'true')
 
   panel.className = 'blacksmith-shop-overlay__panel'
   panel.hidden = true
   panel.setAttribute('role', 'dialog')
-  panel.setAttribute('aria-modal', 'true')
+  panel.setAttribute('aria-modal', 'false')
   panel.setAttribute('aria-labelledby', 'blacksmith-shop-title')
 
   panelBody.className = 'blacksmith-shop-overlay__panel-body'
@@ -723,18 +724,6 @@ export const createBlacksmithShopOverlay = ({
     return true
   }
 
-  function handleBackdropClick(event: MouseEvent) {
-    event.preventDefault()
-    event.stopPropagation()
-    onRequestOpenChange(false)
-  }
-
-  function handleBackdropPointerDown(event: PointerEvent) {
-    event.preventDefault()
-    event.stopPropagation()
-    onRequestOpenChange(false)
-  }
-
   function handleCloseButtonClick(event: MouseEvent) {
     event.preventDefault()
     event.stopPropagation()
@@ -753,40 +742,14 @@ export const createBlacksmithShopOverlay = ({
     setServiceMode('menu')
   }
 
-  function handleGlobalCloseIntent(event: Event) {
-    if (!getIsOpen()) {
-      return
-    }
-
-    const target = event.target
-
-    if (!(target instanceof Node)) {
-      return
-    }
-
-    if (!panel.contains(target) || closeButton.contains(target)) {
-      event.preventDefault()
-      event.stopPropagation()
-      onRequestOpenChange(false)
-    }
-  }
-
-  backdropButton.addEventListener('click', handleBackdropClick)
-  backdropButton.addEventListener('pointerdown', handleBackdropPointerDown)
   closeButton.addEventListener('click', handleCloseButtonClick)
   closeButton.addEventListener('pointerdown', handleCloseButtonPointerDown)
   modeBackButton.addEventListener('click', handleModeBackButtonClick)
-  document.addEventListener('pointerdown', handleGlobalCloseIntent, true)
-  document.addEventListener('click', handleGlobalCloseIntent, true)
 
   const destroy = () => {
-    backdropButton.removeEventListener('click', handleBackdropClick)
-    backdropButton.removeEventListener('pointerdown', handleBackdropPointerDown)
     closeButton.removeEventListener('click', handleCloseButtonClick)
     closeButton.removeEventListener('pointerdown', handleCloseButtonPointerDown)
     modeBackButton.removeEventListener('click', handleModeBackButtonClick)
-    document.removeEventListener('pointerdown', handleGlobalCloseIntent, true)
-    document.removeEventListener('click', handleGlobalCloseIntent, true)
     overlayRoot.remove()
   }
 

@@ -1,31 +1,25 @@
 import type {
   PlayerEquipment,
-  PlayerEquipmentIconKey,
-  PlayerEquipmentSlotId
+  PlayerEquipmentIconKey
 } from '../game/playerEquipment'
 import {
   getPlayerEquipmentItemDefinitionById,
   getPlayerEquipmentSlotLabelById
 } from '../game/playerEquipment'
 import { getPlayerInventoryFilledSlotCount } from '../game/playerInventory'
-import { PLAYER_CHARACTER_APPEARANCE_TYPE } from '../game/characterState'
 import type { PlayerInventory } from '../game/playerInventory'
-import type { PlayerProfile } from '../game/playerProfile'
 import {
-  equipPlayerInventorySlot,
-  unequipPlayerEquipmentSlot
-} from '../game/playerLoadout'
-import {
-  PLAYER_MAX_LEVEL,
-  getPlayerJobDisplayName
-} from '../game/playerProfile'
+  findPlayerQuickslotIndexByInventorySlotIndex,
+  type PlayerQuickslots
+} from '../game/playerQuickslots'
+import { equipPlayerInventorySlot } from '../game/playerLoadout'
 import { getResponsiveUiScale } from './getResponsiveUiScale'
 
 type CreatePlayerInventoryOverlayInput = {
   mountElement: HTMLElement
-  profile: PlayerProfile
   getInventory: () => PlayerInventory
   getEquipment: () => PlayerEquipment
+  getQuickslots: () => PlayerQuickslots
   getIsOpen: () => boolean
   onRequestOpenChange: (isOpen: boolean) => void
   onRequestInventoryChange: (nextInventory: PlayerInventory) => void
@@ -56,56 +50,17 @@ const TINY_DUNGEON_TILESET_HEIGHT = 176
 const TOWN_TILESET_WIDTH = 256
 const TOWN_TILESET_HEIGHT = 2240
 const OVERLAY_MARGIN = 16
-const PLAYER_PORTRAIT_FRAME_BY_APPEARANCE_TYPE: Record<
-  string,
-  {
-    imageUrl: string
-    imageWidth: number
-    imageHeight: number
-    frame: { x: number; y: number; width: number; height: number }
-  }
-> = {
-  [PLAYER_CHARACTER_APPEARANCE_TYPE]: {
-    imageUrl: TINY_DUNGEON_TILESET_IMAGE_URL,
-    imageWidth: TINY_DUNGEON_TILESET_WIDTH,
-    imageHeight: TINY_DUNGEON_TILESET_HEIGHT,
-    frame: {
-      x: 32,
-      y: 128,
-      width: 16,
-      height: 16
-    }
-  }
-}
 const TINY_DUNGEON_WEAPON_FRAME = {
   x: 144,
   y: 144,
   width: 16,
   height: 16
 }
-const PANEL_INSET_FRAME = {
-  x: 200,
-  y: 294,
-  width: 93,
-  height: 94
-}
-const PANEL_LIGHT_FRAME = {
-  x: 190,
-  y: 200,
-  width: 93,
-  height: 94
-}
 const BUTTON_SQUARE_FRAME = {
   x: 293,
   y: 294,
   width: 45,
   height: 49
-}
-const ICON_CROSS_FRAME = {
-  x: 369,
-  y: 169,
-  width: 16,
-  height: 15
 }
 const ICON_CHECK_FRAME = {
   x: 369,
@@ -180,22 +135,22 @@ const EQUIPMENT_ICON_FRAME_BY_KEY: Record<
     frame: ICON_CHECK_FRAME
   }
 }
-const PANEL_MIN_SCALE = 5
-const PANEL_MAX_SCALE = 7
-const INVENTORY_SLOT_SCALE_THRESHOLD = 7
-const EQUIPMENT_SLOT_SCALE_THRESHOLD = 6
+const PANEL_MARGIN = 16
+type InventoryCategoryId = 'all' | 'equipment' | 'consumable' | 'other'
 
-const EQUIPMENT_SLOT_AREA_CLASS_BY_ID: Record<PlayerEquipmentSlotId, string> = {
-  weapon: 'player-inventory-overlay__equipment-slot--weapon',
-  armor: 'player-inventory-overlay__equipment-slot--armor',
-  boots: 'player-inventory-overlay__equipment-slot--boots',
-  accessory: 'player-inventory-overlay__equipment-slot--accessory'
-}
+const INVENTORY_CATEGORY_OPTIONS: Array<{
+  id: InventoryCategoryId
+  label: string
+}> = [
+  { id: 'equipment', label: '장비' },
+  { id: 'consumable', label: '소비' },
+  { id: 'other', label: '기타' }
+]
 
 export const createPlayerInventoryOverlay = ({
   mountElement,
-  profile,
   getInventory,
+  getQuickslots,
   getEquipment,
   getIsOpen,
   onRequestOpenChange,
@@ -210,58 +165,64 @@ export const createPlayerInventoryOverlay = ({
   const titleGroup = document.createElement('div')
   const titleElement = document.createElement('div')
   const summaryElement = document.createElement('div')
-  const equipmentSection = document.createElement('section')
-  const equipmentSectionHeader = document.createElement('div')
-  const equipmentSectionTitle = document.createElement('div')
-  const equipmentSectionSummary = document.createElement('div')
-  const equipmentLayout = document.createElement('div')
-  const equipmentCenterCard = document.createElement('div')
-  const equipmentCenterPreview = document.createElement('div')
-  const equipmentCenterPortrait = document.createElement('span')
-  const equipmentCenterPortraitWeapon = document.createElement('span')
-  const equipmentCenterPortraitArmor = document.createElement('span')
-  const equipmentCenterPortraitBoots = document.createElement('span')
-  const equipmentCenterPortraitAccessory = document.createElement('span')
-  const equipmentCenterDetails = document.createElement('div')
-  const equipmentCenterName = document.createElement('div')
-  const equipmentCenterJob = document.createElement('div')
-  const equipmentCenterLevel = document.createElement('div')
-  const equipmentCenterSet = document.createElement('div')
   const closeButton = document.createElement('button')
   const closeIcon = document.createElement('span')
+  const tabBar = document.createElement('div')
+  const tabButtons: HTMLButtonElement[] = []
   const slotGrid = document.createElement('div')
-  const footerElement = document.createElement('div')
+  const detailsPanel = document.createElement('section')
+  const detailsHeader = document.createElement('div')
+  const detailsIcon = document.createElement('span')
+  const detailsText = document.createElement('div')
+  const detailsName = document.createElement('div')
+  const detailsMeta = document.createElement('div')
+  const detailsDescription = document.createElement('div')
+  const detailsHint = document.createElement('div')
   const emptyStateElement = document.createElement('div')
-  const equipmentSlotCards: HTMLButtonElement[] = []
-  const equipmentSlotHeaderLabels: HTMLSpanElement[] = []
-  const equipmentSlotItemLabels: HTMLDivElement[] = []
-  const equipmentSlotDescriptionLabels: HTMLDivElement[] = []
-  const equipmentSlotLevelBadges: HTMLDivElement[] = []
-  const equipmentSlotIcons: HTMLSpanElement[] = []
   const slotButtons: HTMLButtonElement[] = []
   const slotIndexLabels: HTMLSpanElement[] = []
   const slotIcons: HTMLSpanElement[] = []
   const slotItemLabels: HTMLSpanElement[] = []
   const slotQuantityLabels: HTMLSpanElement[] = []
   const slotEmptyMarkers: HTMLSpanElement[] = []
+  const slotQuickslotBadges: HTMLSpanElement[] = []
   const initialInventory = getInventory()
-  const initialEquipment = getEquipment()
+  let selectedCategory: InventoryCategoryId = 'all'
+  let hoveredSlotIndex: number | undefined
+  let tooltipAnchor = {
+    x: 0,
+    y: 0
+  }
+  let panelPosition = { left: 0, top: 0 }
+  let hasPanelPosition = false
+  let dragState:
+    | {
+        pointerId: number
+        offsetX: number
+        offsetY: number
+        width: number
+        height: number
+      }
+    | undefined
 
   overlayRoot.className = 'player-inventory-overlay'
 
   backdropButton.type = 'button'
   backdropButton.className = 'player-inventory-overlay__backdrop'
   backdropButton.hidden = true
-  backdropButton.setAttribute('aria-label', '가방 닫기')
+  backdropButton.tabIndex = -1
+  backdropButton.setAttribute('aria-hidden', 'true')
 
   panel.id = 'player-inventory-panel'
   panel.className = 'player-inventory-overlay__panel'
   panel.hidden = true
   panel.setAttribute('role', 'dialog')
-  panel.setAttribute('aria-modal', 'true')
+  panel.setAttribute('aria-modal', 'false')
   panel.setAttribute('aria-labelledby', 'player-inventory-title')
 
   panelBody.className = 'player-inventory-overlay__panel-body'
+  panelBody.style.gridTemplateAreas = '"header" "tabs" "slots"'
+  panelBody.style.gridTemplateColumns = 'max-content'
   headerRow.className = 'player-inventory-overlay__header'
   titleGroup.className = 'player-inventory-overlay__title-group'
   titleElement.id = 'player-inventory-title'
@@ -270,127 +231,56 @@ export const createPlayerInventoryOverlay = ({
   summaryElement.className = 'player-inventory-overlay__summary'
   summaryElement.textContent = `${getPlayerInventoryFilledSlotCount(initialInventory)} / ${initialInventory.slots.length}칸 · ${formatGoldAmount(initialInventory.gold)}`
 
-  equipmentSection.className = 'player-inventory-overlay__equipment-section'
-  equipmentSectionHeader.className = 'player-inventory-overlay__equipment-header'
-  equipmentSectionTitle.className = 'player-inventory-overlay__equipment-title'
-  equipmentSectionTitle.textContent = '장비'
-  equipmentSectionSummary.className =
-    'player-inventory-overlay__equipment-summary'
-  equipmentSectionSummary.textContent = '기본 장비'
-
-  equipmentLayout.className = 'player-inventory-overlay__equipment-layout'
-  equipmentLayout.setAttribute('role', 'list')
-
-  equipmentCenterCard.className = 'player-inventory-overlay__equipment-center'
-  equipmentCenterPreview.className =
-    'player-inventory-overlay__equipment-center-preview'
-  equipmentCenterPortrait.className =
-    'player-inventory-overlay__equipment-center-portrait'
-  equipmentCenterPortraitWeapon.className =
-    'player-inventory-overlay__equipment-center-gear player-inventory-overlay__equipment-center-gear--weapon'
-  equipmentCenterPortraitArmor.className =
-    'player-inventory-overlay__equipment-center-gear player-inventory-overlay__equipment-center-gear--armor'
-  equipmentCenterPortraitBoots.className =
-    'player-inventory-overlay__equipment-center-gear player-inventory-overlay__equipment-center-gear--boots'
-  equipmentCenterPortraitAccessory.className =
-    'player-inventory-overlay__equipment-center-gear player-inventory-overlay__equipment-center-gear--accessory'
-  equipmentCenterDetails.className =
-    'player-inventory-overlay__equipment-center-details'
-  equipmentCenterName.className = 'player-inventory-overlay__equipment-center-name'
-  equipmentCenterName.textContent = profile.name
-  equipmentCenterJob.className = 'player-inventory-overlay__equipment-center-job'
-  equipmentCenterJob.textContent = getPlayerJobDisplayName(profile)
-  equipmentCenterLevel.className =
-    'player-inventory-overlay__equipment-center-level'
-  equipmentCenterLevel.textContent =
-    profile.level >= PLAYER_MAX_LEVEL
-      ? `레벨 ${profile.level} · MAX`
-      : `레벨 ${profile.level}`
-  equipmentCenterSet.className = 'player-inventory-overlay__equipment-center-set'
-  equipmentCenterSet.textContent = initialEquipment.setName
-
   closeButton.type = 'button'
-  closeButton.className = 'player-inventory-overlay__close'
+  closeButton.className = 'player-inventory-overlay__close player-stat-overlay__close'
   closeButton.setAttribute('aria-label', '가방 닫기')
   closeButton.title = '가방 닫기 (Esc)'
 
-  closeIcon.className = 'player-inventory-overlay__close-icon'
+  closeIcon.className = 'player-inventory-overlay__close-icon player-stat-overlay__close-icon'
+  closeIcon.textContent = '×'
   closeIcon.setAttribute('aria-hidden', 'true')
 
-  slotGrid.className = 'player-inventory-overlay__slot-grid'
-  slotGrid.style.gap = '12px'
+  tabBar.className = 'player-inventory-overlay__tab-bar'
+  for (const option of INVENTORY_CATEGORY_OPTIONS) {
+    const tabButton = document.createElement('button')
 
-  footerElement.className = 'player-inventory-overlay__footer'
-  footerElement.textContent = 'I, Esc로 닫기 · 클릭으로 착용/해제'
+    tabButton.type = 'button'
+    tabButton.className = 'player-inventory-overlay__tab'
+    tabButton.textContent = option.label
+    tabButton.dataset.playerInventoryCategoryId = option.id
+    tabButton.setAttribute('aria-pressed', String(option.id === selectedCategory))
+    tabButton.addEventListener('click', (event) => {
+      event.preventDefault()
+      event.stopPropagation()
+      selectedCategory = option.id
+      syncFrame()
+    })
 
-  emptyStateElement.className = 'player-inventory-overlay__empty-state'
-  emptyStateElement.textContent = '아직 아이템이 없습니다'
-
-  for (const slot of initialEquipment.slots) {
-    const slotCard = document.createElement('button')
-    const slotHeaderLabel = document.createElement('span')
-    const slotItemLabel = document.createElement('div')
-    const slotDescriptionLabel = document.createElement('div')
-    const slotLevelBadge = document.createElement('div')
-    const slotIcon = document.createElement('span')
-
-    slotCard.className = 'player-inventory-overlay__equipment-slot'
-    slotCard.classList.add(EQUIPMENT_SLOT_AREA_CLASS_BY_ID[slot.id])
-    slotCard.type = 'button'
-    slotCard.dataset.playerEquipmentSlotId = slot.id
-    slotCard.setAttribute('role', 'listitem')
-    slotCard.setAttribute('aria-label', `${slot.label} 장비칸`)
-
-    slotHeaderLabel.className = 'player-inventory-overlay__equipment-slot-label'
-    slotHeaderLabel.textContent = slot.label
-
-    slotItemLabel.className = 'player-inventory-overlay__equipment-slot-item'
-    slotItemLabel.textContent = slot.item?.label ?? '비어 있음'
-
-    slotDescriptionLabel.className =
-      'player-inventory-overlay__equipment-slot-description'
-    slotDescriptionLabel.textContent = slot.item?.description ?? '가방에서 장착하세요'
-
-    slotLevelBadge.className = 'player-inventory-overlay__equipment-slot-level'
-    slotLevelBadge.textContent = `레벨 ${slot.item?.level ?? '-'}`
-
-    slotIcon.className = 'player-inventory-overlay__equipment-slot-icon'
-    slotIcon.setAttribute('aria-hidden', 'true')
-
-    slotCard.append(
-      slotIcon,
-      slotHeaderLabel,
-      slotItemLabel,
-      slotDescriptionLabel,
-      slotLevelBadge
-    )
-    equipmentLayout.append(slotCard)
-
-    equipmentSlotCards.push(slotCard)
-    equipmentSlotHeaderLabels.push(slotHeaderLabel)
-    equipmentSlotItemLabels.push(slotItemLabel)
-    equipmentSlotDescriptionLabels.push(slotDescriptionLabel)
-    equipmentSlotLevelBadges.push(slotLevelBadge)
-    equipmentSlotIcons.push(slotIcon)
+    tabBar.append(tabButton)
+    tabButtons.push(tabButton)
   }
 
-  equipmentLayout.append(equipmentCenterCard)
-  equipmentCenterPreview.append(
-    equipmentCenterPortrait,
-    equipmentCenterPortraitWeapon,
-    equipmentCenterPortraitArmor,
-    equipmentCenterPortraitBoots,
-    equipmentCenterPortraitAccessory
-  )
-  equipmentCenterDetails.append(
-    equipmentCenterName,
-    equipmentCenterJob,
-    equipmentCenterLevel,
-    equipmentCenterSet
-  )
-  equipmentCenterCard.append(equipmentCenterPreview, equipmentCenterDetails)
-  equipmentSectionHeader.append(equipmentSectionTitle, equipmentSectionSummary)
-  equipmentSection.append(equipmentSectionHeader, equipmentLayout)
+  slotGrid.className = 'player-inventory-overlay__slot-grid'
+  slotGrid.style.gap = '1px'
+
+  detailsPanel.className = 'player-inventory-overlay__tooltip'
+  detailsPanel.setAttribute('role', 'tooltip')
+  detailsHeader.className = 'player-inventory-overlay__tooltip-header'
+  detailsIcon.className = 'player-inventory-overlay__tooltip-icon'
+  detailsIcon.setAttribute('aria-hidden', 'true')
+  detailsText.className = 'player-inventory-overlay__tooltip-text'
+  detailsName.className = 'player-inventory-overlay__tooltip-name'
+  detailsMeta.className = 'player-inventory-overlay__tooltip-meta'
+  detailsDescription.className = 'player-inventory-overlay__tooltip-description'
+  detailsHint.className = 'player-inventory-overlay__tooltip-hint'
+  detailsText.append(detailsName, detailsMeta, detailsDescription, detailsHint)
+  detailsHeader.append(detailsIcon, detailsText)
+  detailsPanel.append(detailsHeader)
+  detailsPanel.hidden = true
+  detailsPanel.setAttribute('aria-hidden', 'true')
+
+  emptyStateElement.className = 'player-inventory-overlay__empty-state'
+  emptyStateElement.textContent = '이 탭에는 아이템이 없습니다'
 
   for (let index = 0; index < initialInventory.slots.length; index += 1) {
     const slotButton = document.createElement('button')
@@ -399,14 +289,17 @@ export const createPlayerInventoryOverlay = ({
     const slotItemLabel = document.createElement('span')
     const slotQuantityLabel = document.createElement('span')
     const slotEmptyMarker = document.createElement('span')
+    const slotQuickslotBadge = document.createElement('span')
 
     slotButton.type = 'button'
     slotButton.className = 'player-inventory-overlay__slot'
     slotButton.dataset.playerInventorySlotIndex = String(index)
     slotButton.setAttribute('aria-label', `빈 가방 칸 ${index + 1}`)
+    slotButton.draggable = false
 
     slotIndexLabel.className = 'player-inventory-overlay__slot-index'
     slotIndexLabel.textContent = String(index + 1).padStart(2, '0')
+    slotIndexLabel.hidden = true
 
     slotIcon.className = 'player-inventory-overlay__slot-icon'
     slotIcon.setAttribute('aria-hidden', 'true')
@@ -419,13 +312,19 @@ export const createPlayerInventoryOverlay = ({
 
     slotEmptyMarker.className = 'player-inventory-overlay__slot-empty-marker'
     slotEmptyMarker.setAttribute('aria-hidden', 'true')
+    slotEmptyMarker.hidden = true
+
+    slotQuickslotBadge.className = 'player-inventory-overlay__slot-quickslot-badge'
+    slotQuickslotBadge.hidden = true
+    slotQuickslotBadge.setAttribute('aria-hidden', 'true')
 
     slotButton.append(
       slotEmptyMarker,
       slotIndexLabel,
       slotIcon,
       slotItemLabel,
-      slotQuantityLabel
+      slotQuantityLabel,
+      slotQuickslotBadge
     )
     slotGrid.append(slotButton)
 
@@ -435,34 +334,180 @@ export const createPlayerInventoryOverlay = ({
     slotItemLabels.push(slotItemLabel)
     slotQuantityLabels.push(slotQuantityLabel)
     slotEmptyMarkers.push(slotEmptyMarker)
+    slotQuickslotBadges.push(slotQuickslotBadge)
   }
 
   titleGroup.append(titleElement, summaryElement)
   headerRow.append(titleGroup, closeButton)
   closeButton.append(closeIcon)
-  panelBody.append(
-    headerRow,
-    equipmentSection,
-    slotGrid,
-    emptyStateElement,
-    footerElement
-  )
+  panelBody.append(headerRow, tabBar, slotGrid, emptyStateElement)
   panel.append(panelBody)
-  overlayRoot.append(backdropButton, panel)
+  overlayRoot.append(backdropButton, panel, detailsPanel)
   mountElement.append(overlayRoot)
 
-  const setSpriteFrame = (
-    element: HTMLElement,
-    frame: { x: number; y: number; width: number; height: number },
-    scale: number
-  ) => {
-    element.style.backgroundImage = `url(${UI_SPRITESHEET_IMAGE_URL})`
+  const clampPanelPosition = (
+    left: number,
+    top: number,
+    width: number,
+    height: number
+  ) => ({
+    left: clamp(
+      left,
+      PANEL_MARGIN,
+      Math.max(PANEL_MARGIN, window.innerWidth - width - PANEL_MARGIN)
+    ),
+    top: clamp(
+      top,
+      PANEL_MARGIN,
+      Math.max(PANEL_MARGIN, window.innerHeight - height - PANEL_MARGIN)
+    )
+  })
+
+  const stopDragging = (pointerId?: number) => {
+    if (dragState && pointerId !== undefined && dragState.pointerId !== pointerId) {
+      return
+    }
+
+    dragState = undefined
+    headerRow.classList.remove('player-inventory-overlay__header--dragging')
+  }
+
+  const startDragging = (event: PointerEvent) => {
+    if (event.button !== 0 || panel.hidden || !event.isPrimary) {
+      return
+    }
+
+    const target = event.target
+
+    if (!(target instanceof Element) || closeButton.contains(target)) {
+      return
+    }
+
+    const rect = panel.getBoundingClientRect()
+
+    dragState = {
+      pointerId: event.pointerId,
+      offsetX: event.clientX - rect.left,
+      offsetY: event.clientY - rect.top,
+      width: rect.width,
+      height: rect.height
+    }
+    hasPanelPosition = true
+    headerRow.classList.add('player-inventory-overlay__header--dragging')
+    event.preventDefault()
+  }
+
+  const handleDocumentPointerMove = (event: PointerEvent) => {
+    if (dragState && event.pointerId === dragState.pointerId) {
+      panelPosition = clampPanelPosition(
+        event.clientX - dragState.offsetX,
+        event.clientY - dragState.offsetY,
+        dragState.width,
+        dragState.height
+      )
+      panel.style.left = `${panelPosition.left}px`
+      panel.style.top = `${panelPosition.top}px`
+      return
+    }
+
+    const slotButton = getInventorySlotButton(event.target)
+
+    if (!slotButton) {
+      if (hoveredSlotIndex !== undefined) {
+        hideTooltip()
+      }
+      return
+    }
+
+    const slotIndex = Number(slotButton.dataset.playerInventorySlotIndex)
+
+    if (Number.isNaN(slotIndex)) {
+      hideTooltip()
+      return
+    }
+
+    hoveredSlotIndex = slotIndex
+    tooltipAnchor = {
+      x: event.clientX,
+      y: event.clientY
+    }
+    syncTooltip()
+  }
+
+  const handleDocumentPointerUp = (event: PointerEvent) => {
+    stopDragging(event.pointerId)
+  }
+
+  const setEmptySlotAppearance = (element: HTMLElement) => {
+    element.style.backgroundImage = 'none'
     element.style.backgroundRepeat = 'no-repeat'
-    element.style.backgroundPosition = `-${frame.x * scale}px -${frame.y * scale}px`
-    element.style.backgroundSize = `${UI_SPRITESHEET_WIDTH * scale}px ${UI_SPRITESHEET_HEIGHT * scale}px`
-    element.style.width = `${frame.width * scale}px`
-    element.style.height = `${frame.height * scale}px`
-    element.style.imageRendering = 'pixelated'
+    element.style.backgroundPosition = '0 0'
+    element.style.backgroundSize = '100% 100%'
+    element.style.backgroundColor = '#fff9ee'
+    element.style.border = '1px solid rgba(111, 89, 58, 0.42)'
+    element.style.boxShadow = '0 0 0 1px rgba(255, 255, 255, 0.12)'
+  }
+
+  const setCardDimensions = (
+    element: HTMLElement,
+    width: number,
+    height: number
+  ) => {
+    element.style.width = `${width}px`
+    element.style.height = `${height}px`
+  }
+
+  const isLikelyConsumableInventoryItem = (item: {
+    id: string
+    label: string
+  }): boolean => {
+    if (getPlayerEquipmentItemDefinitionById(item.id)) {
+      return false
+    }
+
+    return /potion|elixir|antidote|herb|food|drink|scroll|물약|포션|회복|음료/.test(
+      `${item.label} ${item.id}`.toLowerCase()
+    )
+  }
+
+  const getInventoryItemCategory = (item: {
+    id: string
+    label: string
+  }): InventoryCategoryId => {
+    if (getPlayerEquipmentItemDefinitionById(item.id)) {
+      return 'equipment'
+    }
+
+    if (isLikelyConsumableInventoryItem(item)) {
+      return 'consumable'
+    }
+
+    return 'other'
+  }
+
+  const getInventoryCategoryLabel = (
+    category: InventoryCategoryId
+  ): string => {
+    switch (category) {
+      case 'all':
+        return '전체'
+      case 'equipment':
+        return '장비'
+      case 'consumable':
+        return '소비'
+      case 'other':
+        return '기타'
+    }
+  }
+
+  const getInventorySlotButton = (target: EventTarget | null) => {
+    if (!(target instanceof Element)) {
+      return undefined
+    }
+
+    return target.closest('button[data-player-inventory-slot-index]') as
+      | HTMLButtonElement
+      | undefined
   }
 
   const setBackgroundFrame = (
@@ -514,53 +559,124 @@ export const createPlayerInventoryOverlay = ({
     )
   }
 
-  const renderPlayerPortrait = (scale: number) => {
-    setBackgroundFrame(
-      equipmentCenterPortrait,
-      PLAYER_PORTRAIT_FRAME_BY_APPEARANCE_TYPE[
-        PLAYER_CHARACTER_APPEARANCE_TYPE
-      ],
-      scale
-    )
-  }
-
-  const renderEquipmentPreviewIcon = (
+  const renderInventorySlotIcon = (
     element: HTMLElement,
-    itemId: string | undefined,
+    item:
+      | {
+          id: string
+          label: string
+          quantity: number
+        }
+      | undefined,
     scale: number
   ) => {
-    if (!itemId) {
+    if (!item) {
       clearFrame(element)
       return
     }
 
-    const definition = getPlayerEquipmentItemDefinitionById(itemId)
+    const definition = getPlayerEquipmentItemDefinitionById(item.id)
 
-    if (!definition) {
-      clearFrame(element)
+    if (definition) {
+      renderEquipmentIcon(element, item.id, scale)
       return
     }
 
     setBackgroundFrame(
       element,
-      EQUIPMENT_ICON_FRAME_BY_KEY[definition.icon.key],
-      scale * definition.icon.scale
+      EQUIPMENT_ICON_FRAME_BY_KEY[
+        isLikelyConsumableInventoryItem(item)
+          ? 'ui-circle-beige'
+          : 'ui-check-beige'
+      ],
+      scale * 0.96
     )
   }
 
-  const setPreviewPosition = (
-    element: HTMLElement,
-    leftPercent: number,
-    topPercent: number,
-    rotation = 0
-  ) => {
-    element.style.left = `${leftPercent}%`
-    element.style.top = `${topPercent}%`
-    element.style.transform = `translate(-50%, -50%) rotate(${rotation}rad)`
+  const hideTooltip = () => {
+    hoveredSlotIndex = undefined
+    detailsPanel.hidden = true
+    detailsPanel.setAttribute('aria-hidden', 'true')
+    detailsIcon.hidden = true
   }
 
-  setSpriteFrame(closeButton, BUTTON_SQUARE_FRAME, 1.2)
-  setSpriteFrame(closeIcon, ICON_CROSS_FRAME, 2)
+  const syncTooltip = () => {
+    const inventory = getInventory()
+    const quickslots = getQuickslots()
+
+    if (
+      hoveredSlotIndex === undefined ||
+      hoveredSlotIndex < 0 ||
+      hoveredSlotIndex >= inventory.slots.length
+    ) {
+      hideTooltip()
+      return
+    }
+
+    const selectedSlot = inventory.slots[hoveredSlotIndex]
+
+    if (
+      !selectedSlot ||
+      (selectedCategory !== 'all' &&
+        getInventoryItemCategory(selectedSlot) !== selectedCategory)
+    ) {
+      hideTooltip()
+      return
+    }
+
+    const selectedDefinition = getPlayerEquipmentItemDefinitionById(
+      selectedSlot.id
+    )
+    const selectedCategoryLabel = getInventoryCategoryLabel(
+      getInventoryItemCategory(selectedSlot)
+    )
+    const selectedQuickslotIndex = findPlayerQuickslotIndexByInventorySlotIndex(
+      quickslots,
+      hoveredSlotIndex
+    )
+
+    detailsName.textContent = selectedSlot.label
+    detailsMeta.textContent = `${selectedCategoryLabel}${selectedSlot.quantity > 1 ? ` · x${selectedSlot.quantity}` : ''}${selectedQuickslotIndex !== undefined && isLikelyConsumableInventoryItem(selectedSlot) ? ` · 퀵슬롯 ${selectedQuickslotIndex + 1}` : ''}`
+    detailsDescription.textContent =
+      selectedDefinition?.description ??
+      (isLikelyConsumableInventoryItem(selectedSlot)
+        ? '회복 아이템입니다.'
+        : '기타 아이템입니다.')
+    detailsHint.textContent = selectedDefinition
+      ? `장비창으로 드래그해서 ${getPlayerEquipmentSlotLabelById(selectedDefinition.slotId)}에 장착`
+      : isLikelyConsumableInventoryItem(selectedSlot)
+        ? '퀵슬롯으로 드래그해서 등록'
+        : '드래그해서 이동할 수 있습니다'
+
+    detailsIcon.hidden = true
+    detailsPanel.hidden = false
+    detailsPanel.setAttribute('aria-hidden', 'false')
+    detailsPanel.style.visibility = 'hidden'
+    detailsPanel.style.left = '0px'
+    detailsPanel.style.top = '0px'
+
+    const tooltipRect = detailsPanel.getBoundingClientRect()
+    const maxLeft = Math.max(
+      OVERLAY_MARGIN,
+      window.innerWidth - tooltipRect.width - OVERLAY_MARGIN
+    )
+    const maxTop = Math.max(
+      OVERLAY_MARGIN,
+      window.innerHeight - tooltipRect.height - OVERLAY_MARGIN
+    )
+
+    detailsPanel.style.left = `${clamp(
+      tooltipAnchor.x + 14,
+      OVERLAY_MARGIN,
+      maxLeft
+    )}px`
+    detailsPanel.style.top = `${clamp(
+      tooltipAnchor.y + 12,
+      OVERLAY_MARGIN,
+      maxTop
+    )}px`
+    detailsPanel.style.visibility = 'visible'
+  }
 
   const syncLayout = () => {
     const isOpen = getIsOpen()
@@ -571,125 +687,33 @@ export const createPlayerInventoryOverlay = ({
     overlayRoot.setAttribute('aria-hidden', String(!isOpen))
 
     if (!isOpen) {
+      stopDragging()
       backdropButton.hidden = true
       panel.hidden = true
+      hideTooltip()
       return
     }
-
-    const availableWidth = Math.max(
-      1,
-      window.innerWidth - OVERLAY_MARGIN * 2
-    )
-    const availableHeight = Math.max(
-      1,
-      window.innerHeight - OVERLAY_MARGIN * 2
-    )
-    const panelScale = clamp(
-      Math.floor(
-        Math.min(
-          availableWidth / PANEL_INSET_FRAME.width,
-          availableHeight / PANEL_INSET_FRAME.height
-        )
-      ),
-      PANEL_MIN_SCALE,
-      PANEL_MAX_SCALE
-    )
-    const inventorySlotScale = panelScale >= INVENTORY_SLOT_SCALE_THRESHOLD ? 2 : 1
-    const equipmentSlotScale = panelScale >= EQUIPMENT_SLOT_SCALE_THRESHOLD ? 2 : 1.75
-    const centerCardScale = panelScale >= EQUIPMENT_SLOT_SCALE_THRESHOLD ? 2 : 1.5
+    const inventorySlotScale = 0.92
 
     backdropButton.hidden = false
     panel.hidden = false
-    panel.style.transformOrigin = 'center center'
-    panel.style.transform = `translate(-50%, -50%) scale(${uiScale})`
+    panel.style.transformOrigin = 'left top'
+    panel.style.transform = `scale(${uiScale})`
+    panel.style.backgroundImage = 'none'
+    panel.style.backgroundRepeat = 'no-repeat'
+    panel.style.backgroundPosition = '0 0'
+    panel.style.backgroundSize = '100% 100%'
+    panel.style.width = 'max-content'
+    panel.style.height = 'max-content'
+    panelBody.style.width = 'max-content'
+    panelBody.style.height = 'max-content'
+    panelBody.style.gridTemplateColumns = 'max-content'
 
     const inventory = getInventory()
-    const equipment = getEquipment()
-    const getEquippedItemIdBySlotId = (slotId: PlayerEquipmentSlotId) =>
-      equipment.slots.find((slot) => slot.id === slotId)?.item?.id
-    setSpriteFrame(panel, PANEL_INSET_FRAME, panelScale)
-    panel.style.width = `${PANEL_INSET_FRAME.width * panelScale}px`
-    panel.style.height = `${PANEL_INSET_FRAME.height * panelScale}px`
+    const quickslots = getQuickslots()
+    const filledSlotCount = getPlayerInventoryFilledSlotCount(inventory)
 
-    setSpriteFrame(equipmentCenterCard, PANEL_LIGHT_FRAME, centerCardScale)
-    equipmentCenterCard.style.width = `${PANEL_LIGHT_FRAME.width * centerCardScale}px`
-    equipmentCenterCard.style.height = `${PANEL_LIGHT_FRAME.height * centerCardScale}px`
-    equipmentCenterPreview.style.height = `${Math.round(
-      (centerCardScale >= 2 ? 108 : 96)
-    )}px`
-    renderPlayerPortrait(centerCardScale >= 2 ? 4 : 3.5)
-    setPreviewPosition(equipmentCenterPortrait, 50, 52)
-    renderEquipmentPreviewIcon(
-      equipmentCenterPortraitWeapon,
-      getEquippedItemIdBySlotId('weapon'),
-      centerCardScale >= 2 ? 1.8 : 1.6
-    )
-    renderEquipmentPreviewIcon(
-      equipmentCenterPortraitArmor,
-      getEquippedItemIdBySlotId('armor'),
-      centerCardScale >= 2 ? 1.6 : 1.4
-    )
-    renderEquipmentPreviewIcon(
-      equipmentCenterPortraitBoots,
-      getEquippedItemIdBySlotId('boots'),
-      centerCardScale >= 2 ? 1.5 : 1.25
-    )
-    renderEquipmentPreviewIcon(
-      equipmentCenterPortraitAccessory,
-      getEquippedItemIdBySlotId('accessory'),
-      centerCardScale >= 2 ? 1.5 : 1.25
-    )
-    // Front-facing portrait reads better with the weapon on the viewer-left side.
-    setPreviewPosition(equipmentCenterPortraitWeapon, 32, 62, -0.55)
-    setPreviewPosition(equipmentCenterPortraitArmor, 50, 29)
-    setPreviewPosition(equipmentCenterPortraitBoots, 50, 84)
-    setPreviewPosition(equipmentCenterPortraitAccessory, 41, 54)
-
-    equipmentSectionSummary.textContent = `${equipment.setName} • 레벨 ${equipment.level}`
-    equipmentCenterName.textContent = profile.name
-    equipmentCenterJob.textContent = getPlayerJobDisplayName(profile)
-    equipmentCenterLevel.textContent =
-      profile.level >= PLAYER_MAX_LEVEL
-        ? `레벨 ${profile.level} · MAX`
-        : `레벨 ${profile.level}`
-    equipmentCenterSet.textContent = equipment.setName
-
-    for (let index = 0; index < equipmentSlotCards.length; index += 1) {
-      const slot = equipment.slots[index]
-      const slotLabel = getPlayerEquipmentSlotLabelById(slot.id)
-      const slotCard = equipmentSlotCards[index]
-      const slotHeaderLabel = equipmentSlotHeaderLabels[index]
-      const slotItemLabel = equipmentSlotItemLabels[index]
-      const slotDescriptionLabel = equipmentSlotDescriptionLabels[index]
-      const slotLevelBadge = equipmentSlotLevelBadges[index]
-      const slotIcon = equipmentSlotIcons[index]
-      const slotItem = slot.item
-
-      setSpriteFrame(slotCard, BUTTON_SQUARE_FRAME, equipmentSlotScale)
-      slotCard.style.padding = `${8 * equipmentSlotScale}px ${10 * equipmentSlotScale}px ${9 * equipmentSlotScale}px`
-      slotCard.style.fontSize = equipmentSlotScale === 2 ? '0.74rem' : '0.7rem'
-      slotCard.classList.toggle(
-        'player-inventory-overlay__equipment-slot--empty',
-        slotItem === undefined
-      )
-      slotCard.setAttribute(
-        'aria-label',
-        slotItem
-          ? `${slotLabel} ${slotItem.label}. 클릭하면 해제`
-          : `${slotLabel} 비어 있음. 가방에서 장착`
-      )
-      slotCard.title = slotItem
-        ? `${slotLabel} ${slotItem.label}. 클릭하면 해제`
-        : `${slotLabel} 비어 있음. 가방에서 장착`
-
-      slotHeaderLabel.textContent = slotLabel
-      slotItemLabel.textContent = slotItem ? slotItem.label : '비어 있음'
-      slotDescriptionLabel.textContent = slotItem
-        ? slotItem.description
-        : '가방에서 장착하세요'
-      slotLevelBadge.textContent = slotItem ? `레벨 ${slotItem.level}` : '--'
-      renderEquipmentIcon(slotIcon, slotItem?.id, equipmentSlotScale)
-    }
+    let visibleSlotCount = 0
 
     for (let index = 0; index < slotButtons.length; index += 1) {
       const slotButton = slotButtons[index]
@@ -698,24 +722,74 @@ export const createPlayerInventoryOverlay = ({
       const slotItemLabel = slotItemLabels[index]
       const slotQuantityLabel = slotQuantityLabels[index]
       const slotEmptyMarker = slotEmptyMarkers[index]
+      const slotQuickslotBadge = slotQuickslotBadges[index]
       const slot = inventory.slots[index]
       const slotDefinition = slot
         ? getPlayerEquipmentItemDefinitionById(slot.id)
         : undefined
+      const slotCategory = slot ? getInventoryItemCategory(slot) : undefined
+      const assignedQuickslotIndex = findPlayerQuickslotIndexByInventorySlotIndex(
+        quickslots,
+        index
+      )
+      const isDraggableSlot = Boolean(
+        slot && (slotDefinition || isLikelyConsumableInventoryItem(slot))
+      )
+      const isConsumableSlot = Boolean(
+        slot && !slotDefinition && isLikelyConsumableInventoryItem(slot)
+      )
+      const isVisible =
+        selectedCategory === 'all'
+          ? true
+          : slot !== undefined && slotCategory === selectedCategory
 
-      setSpriteFrame(slotButton, BUTTON_SQUARE_FRAME, inventorySlotScale)
-      setSpriteFrame(slotEmptyMarker, ICON_CIRCLE_FRAME, inventorySlotScale)
-      slotButton.style.padding = `${8 * inventorySlotScale}px ${10 * inventorySlotScale}px ${9 * inventorySlotScale}px`
-      slotButton.style.fontSize = inventorySlotScale === 2 ? '0.9rem' : '0.78rem'
+      setEmptySlotAppearance(slotButton)
+      setCardDimensions(
+        slotButton,
+        BUTTON_SQUARE_FRAME.width * inventorySlotScale,
+        BUTTON_SQUARE_FRAME.height * inventorySlotScale
+      )
+      slotButton.hidden = !isVisible
+      if (assignedQuickslotIndex !== undefined && isConsumableSlot) {
+        slotButton.style.borderColor = 'rgba(91, 134, 214, 0.42)'
+        slotButton.style.boxShadow =
+          'inset 0 1px 0 rgba(255, 255, 255, 0.7), 0 0 0 1px rgba(91, 134, 214, 0.08)'
+      } else {
+        slotButton.style.borderColor = 'rgba(111, 89, 58, 0.34)'
+        slotButton.style.boxShadow =
+          'inset 0 1px 0 rgba(255, 255, 255, 0.7)'
+      }
+      slotButton.style.padding = `${2 * inventorySlotScale}px ${3 * inventorySlotScale}px ${3 * inventorySlotScale}px`
+      slotButton.style.fontSize =
+        inventorySlotScale >= 1.2 ? '0.66rem' : '0.62rem'
       slotButton.classList.toggle(
         'player-inventory-overlay__slot--equippable',
         Boolean(slotDefinition)
       )
+      slotButton.classList.toggle(
+        'player-inventory-overlay__slot--draggable',
+        isDraggableSlot
+      )
+      slotButton.classList.toggle(
+        'player-inventory-overlay__slot--assigned',
+        assignedQuickslotIndex !== undefined && isConsumableSlot
+      )
+      slotButton.draggable = isDraggableSlot && isVisible
       const targetSlotLabel = slotDefinition
         ? getPlayerEquipmentSlotLabelById(slotDefinition.slotId)
         : undefined
+      const quickslotHint =
+        assignedQuickslotIndex !== undefined && isConsumableSlot
+          ? ` · 퀵슬롯 ${assignedQuickslotIndex + 1}에 등록됨`
+          : ''
+      const equipmentDragHint = slotDefinition
+        ? ` · 장비창으로 드래그해서 ${targetSlotLabel}에 장착`
+        : ''
+      const consumableDragHint = isConsumableSlot
+        ? ' · 드래그해서 퀵슬롯에 등록'
+        : ''
 
-      slotIndexLabel.textContent = String(index + 1).padStart(2, '0')
+      slotIndexLabel.hidden = true
       slotButton.classList.toggle(
         'player-inventory-overlay__slot--filled',
         slot !== undefined
@@ -728,40 +802,79 @@ export const createPlayerInventoryOverlay = ({
         'aria-label',
         slot
           ? slotDefinition
-            ? `${slot.label}${slot.quantity > 1 ? ` x${slot.quantity}` : ''}. 클릭하면 ${targetSlotLabel}에 장착`
-            : `${slot.label}${slot.quantity > 1 ? ` x${slot.quantity}` : ''}`
+            ? `${slot.label}${slot.quantity > 1 ? ` x${slot.quantity}` : ''}. 클릭하면 ${targetSlotLabel}에 장착${equipmentDragHint}`
+            : `${slot.label}${slot.quantity > 1 ? ` x${slot.quantity}` : ''}${quickslotHint}${consumableDragHint}`
           : `빈 가방 칸 ${index + 1}`
       )
-      slotButton.title = slot
-        ? slotDefinition
-          ? `${slot.label}${slot.quantity > 1 ? ` x${slot.quantity}` : ''}. 클릭하면 ${targetSlotLabel}에 장착`
-          : `${slot.label}${slot.quantity > 1 ? ` x${slot.quantity}` : ''}`
-        : `빈 가방 칸 ${index + 1}`
+      slotButton.title = ''
+
+      if (slot && isVisible) {
+        visibleSlotCount += 1
+      }
 
       if (slot) {
-        slotItemLabel.hidden = false
-        slotItemLabel.textContent = slot.label
         slotQuantityLabel.hidden = slot.quantity <= 1
         slotQuantityLabel.textContent = slot.quantity > 1 ? `x${slot.quantity}` : ''
+        slotItemLabel.hidden = true
+        slotItemLabel.textContent = ''
         slotEmptyMarker.hidden = true
-        if (slotDefinition) {
-          renderEquipmentIcon(slotIcon, slot.id, inventorySlotScale)
-        } else {
-          clearFrame(slotIcon)
-        }
+        slotQuickslotBadge.hidden = !(assignedQuickslotIndex !== undefined && isConsumableSlot)
+        slotQuickslotBadge.textContent =
+          assignedQuickslotIndex !== undefined && isConsumableSlot
+            ? String(assignedQuickslotIndex + 1)
+            : ''
+        renderInventorySlotIcon(slotIcon, slot, inventorySlotScale)
       } else {
         slotItemLabel.hidden = true
         slotItemLabel.textContent = ''
         slotQuantityLabel.hidden = true
         slotQuantityLabel.textContent = ''
-        slotEmptyMarker.hidden = false
+        slotEmptyMarker.hidden = true
+        slotQuickslotBadge.hidden = true
+        slotQuickslotBadge.textContent = ''
         clearFrame(slotIcon)
       }
     }
-    const filledSlotCount = getPlayerInventoryFilledSlotCount(inventory)
+
+    panel.style.left = `${PANEL_MARGIN}px`
+    panel.style.top = `${PANEL_MARGIN}px`
+    const measuredRect = panel.getBoundingClientRect()
+    const renderedWidth = measuredRect.width
+    const renderedHeight = measuredRect.height
+    const defaultPosition = clampPanelPosition(
+      (window.innerWidth - renderedWidth) / 2,
+      (window.innerHeight - renderedHeight) / 2,
+      renderedWidth,
+      renderedHeight
+    )
+
+    if (!hasPanelPosition) {
+      panelPosition = defaultPosition
+    } else {
+      panelPosition = clampPanelPosition(
+        panelPosition.left,
+        panelPosition.top,
+        renderedWidth,
+        renderedHeight
+      )
+    }
+
+    panel.style.left = `${panelPosition.left}px`
+    panel.style.top = `${panelPosition.top}px`
+
+    syncTooltip()
+
+    for (const tabButton of tabButtons) {
+      const isActive =
+        tabButton.dataset.playerInventoryCategoryId === selectedCategory
+
+      tabButton.classList.toggle('player-inventory-overlay__tab--active', isActive)
+      tabButton.setAttribute('aria-pressed', String(isActive))
+    }
 
     summaryElement.textContent = `${filledSlotCount} / ${inventory.slots.length}칸 · ${formatGoldAmount(inventory.gold)}`
-    emptyStateElement.hidden = filledSlotCount > 0
+    emptyStateElement.hidden =
+      selectedCategory === 'all' || visibleSlotCount > 0
   }
 
   const handleInventorySlotClick = (slotIndex: number) => {
@@ -772,26 +885,74 @@ export const createPlayerInventoryOverlay = ({
     })
 
     if (!nextState) {
+      syncFrame()
       return
     }
 
     onRequestEquipmentChange(nextState.equipment)
     onRequestInventoryChange(nextState.inventory)
+    syncFrame()
   }
 
-  const handleEquipmentSlotClick = (slotId: PlayerEquipmentSlotId) => {
-    const nextState = unequipPlayerEquipmentSlot({
-      equipment: getEquipment(),
-      inventory: getInventory(),
-      slotId
-    })
+  const handleSlotGridPointerOver = (event: PointerEvent) => {
+    const slotButton = getInventorySlotButton(event.target)
 
-    if (!nextState) {
+    if (!slotButton) {
       return
     }
 
-    onRequestEquipmentChange(nextState.equipment)
-    onRequestInventoryChange(nextState.inventory)
+    const slotIndex = Number(slotButton.dataset.playerInventorySlotIndex)
+
+    if (Number.isNaN(slotIndex)) {
+      return
+    }
+
+    hoveredSlotIndex = slotIndex
+    tooltipAnchor = {
+      x: event.clientX,
+      y: event.clientY
+    }
+    syncTooltip()
+  }
+
+  const handleSlotGridPointerMove = (event: PointerEvent) => {
+    const slotButton = getInventorySlotButton(event.target)
+
+    if (!slotButton) {
+      return
+    }
+
+    const slotIndex = Number(slotButton.dataset.playerInventorySlotIndex)
+
+    if (Number.isNaN(slotIndex)) {
+      return
+    }
+
+    hoveredSlotIndex = slotIndex
+    tooltipAnchor = {
+      x: event.clientX,
+      y: event.clientY
+    }
+    syncTooltip()
+  }
+
+  const handleSlotGridPointerOut = (event: PointerEvent) => {
+    const slotButton = getInventorySlotButton(event.target)
+
+    if (!slotButton) {
+      return
+    }
+
+    const relatedTarget = event.relatedTarget
+
+    if (
+      relatedTarget instanceof Node &&
+      slotButton.contains(relatedTarget)
+    ) {
+      return
+    }
+
+    hideTooltip()
   }
 
   const handlePanelClick = (event: MouseEvent) => {
@@ -818,89 +979,97 @@ export const createPlayerInventoryOverlay = ({
 
       return
     }
+  }
 
-    const equipmentButton = target.closest(
-      'button[data-player-equipment-slot-id]'
-    ) as HTMLButtonElement | null
+  const handleSlotGridDragStart = (event: DragEvent) => {
+    const slotButton = getInventorySlotButton(event.target)
 
-    if (!equipmentButton) {
+    if (!slotButton || !event.dataTransfer) {
       return
     }
 
-    event.preventDefault()
-    event.stopPropagation()
-    const slotId = equipmentButton.dataset.playerEquipmentSlotId as
-      | PlayerEquipmentSlotId
-      | undefined
+    const slotIndex = Number(slotButton.dataset.playerInventorySlotIndex)
+    const slot = getInventory().slots[slotIndex]
+    const slotDefinition = slot ? getPlayerEquipmentItemDefinitionById(slot.id) : undefined
+    const isConsumableSlot = Boolean(
+      slot && !slotDefinition && isLikelyConsumableInventoryItem(slot)
+    )
 
-    if (slotId) {
-      handleEquipmentSlotClick(slotId)
+    if (!slot || (!slotDefinition && !isConsumableSlot)) {
+      event.preventDefault()
+      return
     }
+
+    event.dataTransfer.effectAllowed = 'move'
+    event.dataTransfer.setData('application/x-player-drag-origin', 'inventory')
+    event.dataTransfer.setData(
+      'application/x-player-inventory-slot-index',
+      String(slotIndex)
+    )
+    event.dataTransfer.setData('text/plain', String(slotIndex))
   }
 
   const handleBackdropClick = (event: MouseEvent) => {
     event.preventDefault()
     event.stopPropagation()
+    stopDragging()
     onRequestOpenChange(false)
   }
 
   const handleBackdropPointerDown = (event: PointerEvent) => {
     event.preventDefault()
     event.stopPropagation()
+    stopDragging()
     onRequestOpenChange(false)
   }
 
   const handleCloseButtonClick = (event: MouseEvent) => {
     event.preventDefault()
     event.stopPropagation()
+    stopDragging()
     onRequestOpenChange(false)
   }
 
   const handleCloseButtonPointerDown = (event: PointerEvent) => {
     event.preventDefault()
     event.stopPropagation()
+    stopDragging()
     onRequestOpenChange(false)
   }
 
   backdropButton.addEventListener('click', handleBackdropClick)
   backdropButton.addEventListener('pointerdown', handleBackdropPointerDown)
+  headerRow.addEventListener('pointerdown', startDragging)
+  slotGrid.addEventListener('dragstart', handleSlotGridDragStart)
+  slotGrid.addEventListener('pointerover', handleSlotGridPointerOver)
+  slotGrid.addEventListener('pointermove', handleSlotGridPointerMove)
+  slotGrid.addEventListener('pointerout', handleSlotGridPointerOut)
+  document.addEventListener('pointermove', handleDocumentPointerMove)
+  document.addEventListener('pointerup', handleDocumentPointerUp)
+  document.addEventListener('pointercancel', handleDocumentPointerUp)
   closeButton.addEventListener('click', handleCloseButtonClick)
   closeButton.addEventListener('pointerdown', handleCloseButtonPointerDown)
   panel.addEventListener('click', handlePanelClick)
-
-  const handleGlobalCloseIntent = (event: Event) => {
-    if (!getIsOpen()) {
-      return
-    }
-
-    const target = event.target
-
-    if (!(target instanceof Node)) {
-      return
-    }
-
-    if (!panel.contains(target) || closeButton.contains(target)) {
-      event.preventDefault()
-      event.stopPropagation()
-      onRequestOpenChange(false)
-    }
-  }
-
-  document.addEventListener('pointerdown', handleGlobalCloseIntent, true)
-  document.addEventListener('click', handleGlobalCloseIntent, true)
 
   const syncFrame = () => {
     syncLayout()
   }
 
   const destroy = () => {
+    stopDragging()
     backdropButton.removeEventListener('click', handleBackdropClick)
     backdropButton.removeEventListener('pointerdown', handleBackdropPointerDown)
+    headerRow.removeEventListener('pointerdown', startDragging)
+    slotGrid.removeEventListener('dragstart', handleSlotGridDragStart)
+    slotGrid.removeEventListener('pointerover', handleSlotGridPointerOver)
+    slotGrid.removeEventListener('pointermove', handleSlotGridPointerMove)
+    slotGrid.removeEventListener('pointerout', handleSlotGridPointerOut)
+    document.removeEventListener('pointermove', handleDocumentPointerMove)
+    document.removeEventListener('pointerup', handleDocumentPointerUp)
+    document.removeEventListener('pointercancel', handleDocumentPointerUp)
     closeButton.removeEventListener('click', handleCloseButtonClick)
     closeButton.removeEventListener('pointerdown', handleCloseButtonPointerDown)
     panel.removeEventListener('click', handlePanelClick)
-    document.removeEventListener('pointerdown', handleGlobalCloseIntent, true)
-    document.removeEventListener('click', handleGlobalCloseIntent, true)
     overlayRoot.remove()
   }
 
