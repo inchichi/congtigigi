@@ -1,6 +1,10 @@
 import {
+  BLACKSMITH_NPC_ID,
+  POTION_MERCHANT_NPC_ID,
   QUEST_DEFINITIONS,
+  WIZARD_NPC_ID,
   abandonQuest,
+  formatQuestText,
   getQuestDefinition,
   getQuestProgress,
   setQuestTrackerVisible,
@@ -14,6 +18,7 @@ type CreateQuestLogOverlayInput = {
   mountElement: HTMLElement
   getIsOpen: () => boolean
   getQuestLog: () => QuestLogState
+  getPlayerName: () => string
   onRequestOpenChange: (isOpen: boolean) => void
   onQuestLogChange: (nextQuestLog: QuestLogState) => void
 }
@@ -29,11 +34,37 @@ const TINY_DUNGEON_TILESET_IMAGE_URL = new URL(
 ).href
 const TINY_DUNGEON_TILESET_WIDTH = 192
 const TINY_DUNGEON_TILESET_HEIGHT = 176
-const WIZARD_PORTRAIT_FRAME = {
+type QuestGiverPortraitFrame = {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+const WIZARD_PORTRAIT_FRAME: QuestGiverPortraitFrame = {
   x: 0,
   y: 112,
   width: 16,
   height: 16
+}
+const BLACKSMITH_PORTRAIT_FRAME: QuestGiverPortraitFrame = {
+  x: 32,
+  y: 112,
+  width: 16,
+  height: 16
+}
+const POTION_MERCHANT_PORTRAIT_FRAME: QuestGiverPortraitFrame = {
+  x: 48,
+  y: 128,
+  width: 16,
+  height: 16
+}
+export const QUEST_GIVER_PORTRAIT_FRAME_BY_NPC_ID: Partial<Record<
+  string,
+  QuestGiverPortraitFrame
+>> = {
+  [WIZARD_NPC_ID]: WIZARD_PORTRAIT_FRAME,
+  [BLACKSMITH_NPC_ID]: BLACKSMITH_PORTRAIT_FRAME,
+  [POTION_MERCHANT_NPC_ID]: POTION_MERCHANT_PORTRAIT_FRAME
 }
 const PORTRAIT_SCALE = 4
 
@@ -41,6 +72,7 @@ export const createQuestLogOverlay = ({
   mountElement,
   getIsOpen,
   getQuestLog,
+  getPlayerName,
   onRequestOpenChange,
   onQuestLogChange
 }: CreateQuestLogOverlayInput): QuestLogOverlay => {
@@ -260,11 +292,18 @@ export const createQuestLogOverlay = ({
       return
     }
 
-    setPortraitFrame(portrait)
+    setPortraitFrame(portrait, getQuestGiverPortraitFrame(definition.giverNpcId))
     detailTitle.textContent = definition.title
     detailMeta.textContent = `[${definition.giverName}] ${definition.regionName}`
-    requestText.textContent = definition.requestText
-    guideText.textContent = definition.guideText
+    const questTextContext = {
+      playerName: getPlayerName()
+    }
+
+    requestText.textContent = formatQuestText(
+      definition.requestText,
+      questTextContext
+    )
+    guideText.textContent = formatQuestText(definition.guideText, questTextContext)
     trackerToggleButton.classList.toggle(
       'quest-log-overlay__tracker-toggle--active',
       quest.trackerVisible
@@ -351,11 +390,19 @@ const getVisibleQuestDefinitions = (
     return quest.status === 'active' || quest.status === 'ready-to-turn-in'
   })
 
-const setPortraitFrame = (element: HTMLElement) => {
+export const getQuestGiverPortraitFrame = (
+  npcId: string
+): QuestGiverPortraitFrame =>
+  QUEST_GIVER_PORTRAIT_FRAME_BY_NPC_ID[npcId] ?? WIZARD_PORTRAIT_FRAME
+
+const setPortraitFrame = (
+  element: HTMLElement,
+  frame: QuestGiverPortraitFrame
+) => {
   element.style.backgroundImage = `url(${TINY_DUNGEON_TILESET_IMAGE_URL})`
   element.style.backgroundRepeat = 'no-repeat'
-  element.style.backgroundPosition = `-${WIZARD_PORTRAIT_FRAME.x * PORTRAIT_SCALE}px -${WIZARD_PORTRAIT_FRAME.y * PORTRAIT_SCALE}px`
+  element.style.backgroundPosition = `-${frame.x * PORTRAIT_SCALE}px -${frame.y * PORTRAIT_SCALE}px`
   element.style.backgroundSize = `${TINY_DUNGEON_TILESET_WIDTH * PORTRAIT_SCALE}px ${TINY_DUNGEON_TILESET_HEIGHT * PORTRAIT_SCALE}px`
-  element.style.width = `${WIZARD_PORTRAIT_FRAME.width * PORTRAIT_SCALE}px`
-  element.style.height = `${WIZARD_PORTRAIT_FRAME.height * PORTRAIT_SCALE}px`
+  element.style.width = `${frame.width * PORTRAIT_SCALE}px`
+  element.style.height = `${frame.height * PORTRAIT_SCALE}px`
 }

@@ -1,119 +1,257 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  BLACKSMITH_PREPARATION_QUEST_ID,
   FIRST_SLIME_HUNT_OBJECTIVE_ID,
   FIRST_SLIME_HUNT_QUEST_ID,
+  FINAL_SUPPLIES_QUEST_ID,
+  PIG_BOSS_THREAT_QUEST_ID,
+  PIG_TROUBLE_QUEST_ID,
+  POTION_SURVIVAL_BASICS_QUEST_ID,
+  QUEST_DEFINITIONS,
+  SLIME_BOSS_SHADOW_QUEST_ID,
   abandonQuest,
   completeQuest,
   createInitialQuestLog,
-  getQuestNpcBadgeKind,
+  formatQuestText,
+  getNextQuestInteractionForNpc,
+  getQuestNpcBadgeKindForNpc,
   getQuestProgress,
   getVisibleQuestTrackers,
   hideVisibleQuestTrackers,
+  recordItemUseQuestProgress,
+  recordMonsterDefeatQuestProgress,
   recordQuestObjectiveProgress,
+  recordSceneEnterQuestProgress,
+  recordShopOpenQuestProgress,
+  recordTalkQuestProgress,
   setQuestTrackerVisible,
   startQuest
 } from './questLog'
 
+const WIZARD_NPC_ID = 'wizard'
+const POTION_MERCHANT_NPC_ID = 'potion_merchant'
+
+const completeQuestById = (questLog = createInitialQuestLog(), questId: string) =>
+  completeQuest(
+    recordQuestObjectiveProgress(
+      startQuest(questLog, questId),
+      questId,
+      FIRST_SLIME_HUNT_OBJECTIVE_ID,
+      99
+    ),
+    questId
+  ).nextQuestLog
+
 describe('questLog', () => {
-  it('starts the first slime hunt from the wizard with tracker visible', () => {
-    const questLog = startQuest(
-      createInitialQuestLog(),
-      FIRST_SLIME_HUNT_QUEST_ID
-    )
-    const quest = getQuestProgress(questLog, FIRST_SLIME_HUNT_QUEST_ID)
+  it('registers the full beginner quest arc with stable q001-q008 ids', () => {
+    expect(QUEST_DEFINITIONS.map((definition) => definition.id)).toEqual([
+      FIRST_SLIME_HUNT_QUEST_ID,
+      POTION_SURVIVAL_BASICS_QUEST_ID,
+      PIG_TROUBLE_QUEST_ID,
+      BLACKSMITH_PREPARATION_QUEST_ID,
+      'q005-investigate-cave-entrance',
+      SLIME_BOSS_SHADOW_QUEST_ID,
+      FINAL_SUPPLIES_QUEST_ID,
+      PIG_BOSS_THREAT_QUEST_ID
+    ])
+    expect(QUEST_DEFINITIONS.every((definition) => definition.regionName === '티르코네일 마을')).toBe(true)
+    expect(JSON.stringify(QUEST_DEFINITIONS)).not.toContain('준수')
+  })
 
-    expect(quest.status).toBe('active')
-    expect(quest.trackerVisible).toBe(true)
+  it('starts only unlocked quests and exposes the next NPC quest interaction', () => {
+    let questLog = createInitialQuestLog()
+
+    expect(
+      getNextQuestInteractionForNpc(questLog, WIZARD_NPC_ID)
+    ).toMatchObject({
+      action: 'start',
+      questId: FIRST_SLIME_HUNT_QUEST_ID
+    })
+    expect(startQuest(questLog, POTION_SURVIVAL_BASICS_QUEST_ID)).toBe(questLog)
+
+    questLog = startQuest(questLog, FIRST_SLIME_HUNT_QUEST_ID)
+    questLog = recordQuestObjectiveProgress(
+      questLog,
+      FIRST_SLIME_HUNT_QUEST_ID,
+      FIRST_SLIME_HUNT_OBJECTIVE_ID,
+      3
+    )
+    questLog = completeQuest(questLog, FIRST_SLIME_HUNT_QUEST_ID).nextQuestLog
+
+    expect(
+      getNextQuestInteractionForNpc(questLog, POTION_MERCHANT_NPC_ID)
+    ).toMatchObject({
+      action: 'start',
+      questId: POTION_SURVIVAL_BASICS_QUEST_ID
+    })
+  })
+
+  it('tracks the first slime hunt and toggles the tracker independently', () => {
+    let questLog = startQuest(createInitialQuestLog(), FIRST_SLIME_HUNT_QUEST_ID)
+
     expect(getVisibleQuestTrackers(questLog)).toEqual([
       {
         questId: FIRST_SLIME_HUNT_QUEST_ID,
         text: '첫 사냥: 말캉이 처치 0/3'
       }
     ])
-  })
 
-  it('tracks slime defeats and becomes ready to turn in at three defeats', () => {
-    let questLog = startQuest(
-      createInitialQuestLog(),
-      FIRST_SLIME_HUNT_QUEST_ID
-    )
+    questLog = recordMonsterDefeatQuestProgress(questLog, {
+      sceneId: 'hunting-ground',
+      appearanceType: 'monster_slime'
+    })
+    questLog = setQuestTrackerVisible(questLog, FIRST_SLIME_HUNT_QUEST_ID, false)
 
-    questLog = recordQuestObjectiveProgress(
-      questLog,
-      FIRST_SLIME_HUNT_QUEST_ID,
-      FIRST_SLIME_HUNT_OBJECTIVE_ID
-    )
-    questLog = recordQuestObjectiveProgress(
-      questLog,
-      FIRST_SLIME_HUNT_QUEST_ID,
-      FIRST_SLIME_HUNT_OBJECTIVE_ID
-    )
-    questLog = recordQuestObjectiveProgress(
-      questLog,
-      FIRST_SLIME_HUNT_QUEST_ID,
-      FIRST_SLIME_HUNT_OBJECTIVE_ID
-    )
-    questLog = recordQuestObjectiveProgress(
-      questLog,
-      FIRST_SLIME_HUNT_QUEST_ID,
-      FIRST_SLIME_HUNT_OBJECTIVE_ID
-    )
-
-    const quest = getQuestProgress(questLog, FIRST_SLIME_HUNT_QUEST_ID)
-
-    expect(quest.status).toBe('ready-to-turn-in')
-    expect(quest.objectives[FIRST_SLIME_HUNT_OBJECTIVE_ID]).toBe(3)
-    expect(getVisibleQuestTrackers(questLog)).toEqual([
-      {
-        questId: FIRST_SLIME_HUNT_QUEST_ID,
-        text: '첫 사냥: 마법사에게 돌아가기'
-      }
-    ])
-  })
-
-  it('toggles tracker visibility without changing quest progress', () => {
-    const activeQuestLog = startQuest(
-      createInitialQuestLog(),
-      FIRST_SLIME_HUNT_QUEST_ID
-    )
-    const hiddenQuestLog = setQuestTrackerVisible(
-      activeQuestLog,
-      FIRST_SLIME_HUNT_QUEST_ID,
-      false
-    )
-    const visibleQuestLog = setQuestTrackerVisible(
-      hiddenQuestLog,
-      FIRST_SLIME_HUNT_QUEST_ID,
-      true
-    )
-
-    expect(getVisibleQuestTrackers(hiddenQuestLog)).toEqual([])
+    expect(getVisibleQuestTrackers(questLog)).toEqual([])
     expect(
-      getQuestProgress(hiddenQuestLog, FIRST_SLIME_HUNT_QUEST_ID).status
-    ).toBe('active')
-    expect(getVisibleQuestTrackers(visibleQuestLog)).toEqual([
-      {
-        questId: FIRST_SLIME_HUNT_QUEST_ID,
-        text: '첫 사냥: 말캉이 처치 0/3'
-      }
-    ])
-  })
+      getQuestProgress(questLog, FIRST_SLIME_HUNT_QUEST_ID).objectives[
+        FIRST_SLIME_HUNT_OBJECTIVE_ID
+      ]
+    ).toBe(1)
 
-  it('hides visible trackers from the tracker close button without changing quest progress', () => {
-    const activeQuestLog = startQuest(
-      createInitialQuestLog(),
-      FIRST_SLIME_HUNT_QUEST_ID
+    questLog = hideVisibleQuestTrackers(
+      setQuestTrackerVisible(questLog, FIRST_SLIME_HUNT_QUEST_ID, true)
     )
-    const hiddenQuestLog = hideVisibleQuestTrackers(activeQuestLog)
 
-    expect(getVisibleQuestTrackers(hiddenQuestLog)).toEqual([])
-    expect(
-      getQuestProgress(hiddenQuestLog, FIRST_SLIME_HUNT_QUEST_ID).status
-    ).toBe('active')
+    expect(getQuestProgress(questLog, FIRST_SLIME_HUNT_QUEST_ID).status).toBe(
+      'active'
+    )
   })
 
-  it('abandons only the selected quest and removes it from the tracker', () => {
+  it('records item-use, shop-open, scene-enter, talk, and boss objectives', () => {
+    let questLog = completeQuestById(undefined, FIRST_SLIME_HUNT_QUEST_ID)
+
+    questLog = startQuest(questLog, POTION_SURVIVAL_BASICS_QUEST_ID)
+    questLog = recordItemUseQuestProgress(questLog, 'health-potion')
+    expect(
+      getQuestProgress(questLog, POTION_SURVIVAL_BASICS_QUEST_ID).status
+    ).toBe('ready-to-turn-in')
+    questLog = completeQuest(questLog, POTION_SURVIVAL_BASICS_QUEST_ID).nextQuestLog
+
+    questLog = startQuest(questLog, PIG_TROUBLE_QUEST_ID)
+    questLog = recordMonsterDefeatQuestProgress(questLog, {
+      sceneId: 'hunting-ground',
+      appearanceType: 'monster_pig'
+    })
+    questLog = recordMonsterDefeatQuestProgress(questLog, {
+      sceneId: 'hunting-ground',
+      appearanceType: 'monster_pig'
+    })
+    expect(getQuestProgress(questLog, PIG_TROUBLE_QUEST_ID).status).toBe(
+      'ready-to-turn-in'
+    )
+    questLog = completeQuest(questLog, PIG_TROUBLE_QUEST_ID).nextQuestLog
+
+    questLog = startQuest(questLog, BLACKSMITH_PREPARATION_QUEST_ID)
+    questLog = recordShopOpenQuestProgress(questLog, 'blacksmith')
+    expect(
+      getQuestProgress(questLog, BLACKSMITH_PREPARATION_QUEST_ID).status
+    ).toBe('ready-to-turn-in')
+    questLog = completeQuest(questLog, BLACKSMITH_PREPARATION_QUEST_ID)
+      .nextQuestLog
+
+    questLog = startQuest(questLog, 'q005-investigate-cave-entrance')
+    questLog = recordSceneEnterQuestProgress(questLog, 'cave')
+    expect(
+      getQuestProgress(questLog, 'q005-investigate-cave-entrance').status
+    ).toBe('ready-to-turn-in')
+    questLog = completeQuest(questLog, 'q005-investigate-cave-entrance')
+      .nextQuestLog
+
+    questLog = startQuest(questLog, SLIME_BOSS_SHADOW_QUEST_ID)
+    questLog = recordMonsterDefeatQuestProgress(questLog, {
+      sceneId: 'cave',
+      appearanceType: 'monster_slime'
+    })
+    expect(getQuestProgress(questLog, SLIME_BOSS_SHADOW_QUEST_ID).status).toBe(
+      'ready-to-turn-in'
+    )
+    questLog = completeQuest(questLog, SLIME_BOSS_SHADOW_QUEST_ID).nextQuestLog
+
+    questLog = startQuest(questLog, FINAL_SUPPLIES_QUEST_ID)
+    questLog = recordTalkQuestProgress(questLog, POTION_MERCHANT_NPC_ID)
+    expect(getQuestProgress(questLog, FINAL_SUPPLIES_QUEST_ID).status).toBe(
+      'ready-to-turn-in'
+    )
+    questLog = completeQuest(questLog, FINAL_SUPPLIES_QUEST_ID).nextQuestLog
+
+    questLog = startQuest(questLog, PIG_BOSS_THREAT_QUEST_ID)
+    questLog = recordMonsterDefeatQuestProgress(questLog, {
+      sceneId: 'cave',
+      appearanceType: 'monster_pig'
+    })
+    expect(getQuestProgress(questLog, PIG_BOSS_THREAT_QUEST_ID).status).toBe(
+      'ready-to-turn-in'
+    )
+  })
+
+  it('returns item rewards and grants all rewards once', () => {
+    let questLog = completeQuestById(undefined, FIRST_SLIME_HUNT_QUEST_ID)
+
+    questLog = startQuest(questLog, POTION_SURVIVAL_BASICS_QUEST_ID)
+    questLog = recordItemUseQuestProgress(questLog, 'health-potion')
+
+    const completedResult = completeQuest(
+      questLog,
+      POTION_SURVIVAL_BASICS_QUEST_ID
+    )
+    const repeatedResult = completeQuest(
+      completedResult.nextQuestLog,
+      POTION_SURVIVAL_BASICS_QUEST_ID
+    )
+
+    expect(completedResult).toMatchObject({
+      didComplete: true,
+      goldReward: 0,
+      experienceReward: 30,
+      itemRewards: [
+        {
+          id: 'health-potion',
+          label: '체력 회복 포션',
+          quantity: 5
+        },
+        {
+          id: 'mana-potion',
+          label: '마나 회복 포션',
+          quantity: 3
+        }
+      ]
+    })
+    expect(repeatedResult).toMatchObject({
+      didComplete: false,
+      goldReward: 0,
+      experienceReward: 0,
+      itemRewards: []
+    })
+  })
+
+  it('returns npc badge state for unlocked and ready quests', () => {
+    let questLog = createInitialQuestLog()
+
+    expect(getQuestNpcBadgeKindForNpc(questLog, WIZARD_NPC_ID)).toBe('new')
+    expect(
+      getQuestNpcBadgeKindForNpc(questLog, POTION_MERCHANT_NPC_ID)
+    ).toBeUndefined()
+
+    questLog = startQuest(questLog, FIRST_SLIME_HUNT_QUEST_ID)
+    questLog = recordQuestObjectiveProgress(
+      questLog,
+      FIRST_SLIME_HUNT_QUEST_ID,
+      FIRST_SLIME_HUNT_OBJECTIVE_ID,
+      3
+    )
+
+    expect(getQuestNpcBadgeKindForNpc(questLog, WIZARD_NPC_ID)).toBe('finish')
+
+    questLog = completeQuest(questLog, FIRST_SLIME_HUNT_QUEST_ID).nextQuestLog
+
+    expect(getQuestNpcBadgeKindForNpc(questLog, POTION_MERCHANT_NPC_ID)).toBe(
+      'new'
+    )
+  })
+
+  it('abandons only the selected quest and resets its objectives', () => {
     const activeQuestLog = recordQuestObjectiveProgress(
       startQuest(createInitialQuestLog(), FIRST_SLIME_HUNT_QUEST_ID),
       FIRST_SLIME_HUNT_QUEST_ID,
@@ -136,73 +274,9 @@ describe('questLog', () => {
     expect(getVisibleQuestTrackers(abandonedQuestLog)).toEqual([])
   })
 
-  it('returns npc badge kinds for quest state', () => {
-    const notStartedQuestLog = createInitialQuestLog()
-    const activeQuestLog = startQuest(
-      notStartedQuestLog,
-      FIRST_SLIME_HUNT_QUEST_ID
+  it('formats quest dialogue with the current player name placeholder', () => {
+    expect(formatQuestText('잘했다, {playerName}.', { playerName: '루아' })).toBe(
+      '잘했다, 루아.'
     )
-    let readyQuestLog = activeQuestLog
-
-    readyQuestLog = recordQuestObjectiveProgress(
-      readyQuestLog,
-      FIRST_SLIME_HUNT_QUEST_ID,
-      FIRST_SLIME_HUNT_OBJECTIVE_ID,
-      3
-    )
-
-    expect(
-      getQuestNpcBadgeKind(notStartedQuestLog, FIRST_SLIME_HUNT_QUEST_ID)
-    ).toBe('new')
-    expect(
-      getQuestNpcBadgeKind(activeQuestLog, FIRST_SLIME_HUNT_QUEST_ID)
-    ).toBeUndefined()
-    expect(
-      getQuestNpcBadgeKind(readyQuestLog, FIRST_SLIME_HUNT_QUEST_ID)
-    ).toBe('finish')
-    expect(
-      getQuestNpcBadgeKind(
-        completeQuest(readyQuestLog, FIRST_SLIME_HUNT_QUEST_ID).nextQuestLog,
-        FIRST_SLIME_HUNT_QUEST_ID
-      )
-    ).toBeUndefined()
-  })
-
-  it('completes once and returns the reward once', () => {
-    const activeQuestLog = startQuest(
-      createInitialQuestLog(),
-      FIRST_SLIME_HUNT_QUEST_ID
-    )
-    const readyQuestLog = recordQuestObjectiveProgress(
-      activeQuestLog,
-      FIRST_SLIME_HUNT_QUEST_ID,
-      FIRST_SLIME_HUNT_OBJECTIVE_ID,
-      3
-    )
-    const completedResult = completeQuest(
-      readyQuestLog,
-      FIRST_SLIME_HUNT_QUEST_ID
-    )
-    const repeatedResult = completeQuest(
-      completedResult.nextQuestLog,
-      FIRST_SLIME_HUNT_QUEST_ID
-    )
-
-    expect(completedResult).toMatchObject({
-      didComplete: true,
-      goldReward: 100,
-      experienceReward: 60
-    })
-    expect(
-      getQuestProgress(completedResult.nextQuestLog, FIRST_SLIME_HUNT_QUEST_ID)
-    ).toMatchObject({
-      status: 'completed',
-      trackerVisible: false
-    })
-    expect(repeatedResult).toMatchObject({
-      didComplete: false,
-      goldReward: 0,
-      experienceReward: 0
-    })
   })
 })

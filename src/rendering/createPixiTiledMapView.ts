@@ -31,7 +31,7 @@ import {
 import { processInteractionEvents } from '../game/interaction/processInteractionEvents'
 import { usePlayerQuickslotConsumable } from '../game/playerConsumables'
 import type { PlayerEquipment } from '../game/playerEquipment'
-import type { PlayerInventory } from '../game/playerInventory'
+import type { PlayerInventory, PlayerInventoryItem } from '../game/playerInventory'
 import type { PlayerProfile } from '../game/playerProfile'
 import {
   clearPlayerQuickslotAssignment,
@@ -49,12 +49,18 @@ import {
   type PlayerControlBindings
 } from '../game/playerControls'
 import {
-  FIRST_SLIME_HUNT_OBJECTIVE_ID,
-  FIRST_SLIME_HUNT_QUEST_ID,
+  QUEST_GIVER_NPC_IDS,
   completeQuest,
-  getQuestNpcBadgeKind,
-  recordQuestObjectiveProgress,
+  formatQuestTextLines,
+  getNextQuestInteractionForNpc,
+  getQuestNpcBadgeKindForNpc,
+  recordItemUseQuestProgress,
+  recordMonsterDefeatQuestProgress,
+  recordShopOpenQuestProgress,
+  recordTalkQuestProgress,
   startQuest,
+  type CompleteQuestResult,
+  type QuestItemReward,
   type QuestLogState
 } from '../game/questLog'
 import {
@@ -127,6 +133,7 @@ type CreatePixiTiledMapViewInput = {
   questLog: QuestLogState
   merchantInventory: PlayerInventory
   potionMerchantInventory: PlayerInventory
+  sceneId: string
   sceneIntroMessage: string
   cameraTargetCharacterId: string
   characterSpriteSheet: {
@@ -500,6 +507,7 @@ const PLAYER_ATTACK_ROTATION_OFFSET = 1.15
 const PLAYER_ATTACK_SCALE_BOOST = 0.06
 const PLAYER_ATTACK_SLASH_EFFECT_SCALE_X = 0.23
 const PLAYER_ATTACK_SLASH_EFFECT_SCALE_Y = 0.23
+const PLAYER_ATTACK_SLASH_EFFECT_ANIMATION_SPEED = 0.6
 const PLAYER_WEAPON_PLACEMENT_RIGHT = {
   x: 23,
   y: 21,
@@ -518,11 +526,10 @@ const PORTAL_INSIDE_WORLD_SCALE = 0.08
 const SCENE_INTRO_VISIBLE_DURATION_MILLISECONDS = 3000
 const PLAYER_ATTACK_DURATION_MILLISECONDS = 320
 const PLAYER_ATTACK_COOLDOWN_MILLISECONDS = 300
-const WIZARD_NPC_ID = 'wizard'
 const QUEST_DIALOGUE_DURATION_MILLISECONDS = 3600
-const QUEST_START_TEXT = '퀘스트 시작: 첫 사냥'
-const QUEST_OBJECTIVE_COMPLETE_TEXT = '퀘스트 목표 완료!\n마법사에게 돌아가기'
-const QUEST_COMPLETE_TEXT = '퀘스트 완료: 첫 사냥\n100골드 · 경험치 60'
+const QUEST_START_TEXT = '퀘스트 시작!'
+const QUEST_OBJECTIVE_COMPLETE_TEXT = '퀘스트 목표 완료!'
+const QUEST_COMPLETE_TEXT = '퀘스트 완료!'
 const QUEST_BADGE_SCALE = 0.16
 const QUEST_BADGE_Y_OFFSET = 10
 type MonsterAppearanceType =
@@ -645,6 +652,7 @@ export const createPixiTiledMapView = async ({
   questLog,
   merchantInventory,
   potionMerchantInventory,
+  sceneId,
   sceneIntroMessage,
   cameraTargetCharacterId,
   characterSpriteSheet,
@@ -1066,10 +1074,14 @@ export const createPixiTiledMapView = async ({
 
     slashSprite.label = 'character:player:slash-effect'
     slashSprite.anchor.set(0.5)
-    slashSprite.animationSpeed = 0.8
+    slashSprite.animationSpeed = PLAYER_ATTACK_SLASH_EFFECT_ANIMATION_SPEED
     slashSprite.loop = false
     slashSprite.roundPixels = true
-    slashSprite.rotation = isHorizontalSlash ? 0 : Math.PI / 2
+    slashSprite.rotation = isHorizontalSlash
+      ? 0
+      : character.facing === 'up'
+        ? -Math.PI / 2
+        : Math.PI / 2
     slashSprite.position.set(
       character.position.x * map.tileWidth + characterPixelWidth / 2,
       character.position.y * map.tileHeight + characterPixelHeight / 2 - 1
@@ -1168,6 +1180,11 @@ export const createPixiTiledMapView = async ({
     }
 
     isBlacksmithShopOpen = nextIsOpen
+    if (nextIsOpen) {
+      setQuestLogWithObjectiveFeedback(
+        recordShopOpenQuestProgress(currentQuestLog, 'blacksmith')
+      )
+    }
     syncPlayerUiOverlays()
   }
   const setPotionShopOpen = (nextIsOpen: boolean) => {
@@ -1181,6 +1198,11 @@ export const createPixiTiledMapView = async ({
     }
 
     isPotionShopOpen = nextIsOpen
+    if (nextIsOpen) {
+      setQuestLogWithObjectiveFeedback(
+        recordShopOpenQuestProgress(currentQuestLog, 'potion')
+      )
+    }
     syncPlayerUiOverlays()
   }
   const setPauseMenuOpen = (nextIsOpen: boolean) => {
@@ -1221,6 +1243,35 @@ export const createPixiTiledMapView = async ({
     questTrackerOverlay.syncFrame()
     syncQuestNpcBadges()
   }
+  const setQuestLogWithObjectiveFeedback = (nextQuestLog: QuestLogState) => {
+    const previousQuestLog = currentQuestLog
+
+    if (previousQuestLog === nextQuestLog) {
+      return
+    }
+
+    const didCompleteObjective = Object.entries(
+      previousQuestLog.progressByQuestId
+    ).some(([questId, previousQuest]) => {
+      const nextQuest = nextQuestLog.progressByQuestId[questId]
+
+      return (
+        previousQuest.status === 'active' &&
+        nextQuest?.status === 'ready-to-turn-in'
+      )
+    })
+
+    setQuestLog(nextQuestLog)
+
+    if (didCompleteObjective) {
+      showCharacterDamageText(
+        PLAYER_CHARACTER_ID,
+        QUEST_OBJECTIVE_COMPLETE_TEXT,
+        DAMAGE_TEXT_DURATION_MILLISECONDS,
+        LEVEL_UP_TEXT_STYLE
+      )
+    }
+  }
   const grantPlayerExperienceReward = (experienceReward: number) => {
     const nextPlayerProgress = grantPlayerExperience(
       playerProfile,
@@ -1246,6 +1297,41 @@ export const createPixiTiledMapView = async ({
     }
 
     return nextPlayerProgress
+  }
+  const grantQuestCompletionRewards = (result: CompleteQuestResult) => {
+    if (!result.didComplete) {
+      return
+    }
+
+    if (result.goldReward > 0) {
+      currentPlayerInventory = {
+        ...currentPlayerInventory,
+        gold: currentPlayerInventory.gold + result.goldReward
+      }
+      onPlayerInventoryChange(currentPlayerInventory)
+    }
+
+    if (result.itemRewards.length > 0) {
+      currentPlayerInventory = addQuestItemRewardsToInventory(
+        currentPlayerInventory,
+        result.itemRewards
+      )
+      onPlayerInventoryChange(currentPlayerInventory)
+    }
+
+    grantPlayerExperienceReward(result.experienceReward)
+    showCharacterDamageText(
+      PLAYER_CHARACTER_ID,
+      QUEST_COMPLETE_TEXT,
+      DAMAGE_TEXT_DURATION_MILLISECONDS,
+      LEVEL_UP_TEXT_STYLE
+    )
+    syncPlayerUiOverlays()
+  }
+  const handleConsumableUsed = (itemId: string) => {
+    setQuestLogWithObjectiveFeedback(
+      recordItemUseQuestProgress(currentQuestLog, itemId)
+    )
   }
   handleMapOverlayExpandedChange = (nextIsExpanded: boolean) => {
     if (nextIsExpanded) {
@@ -1337,12 +1423,15 @@ export const createPixiTiledMapView = async ({
       doCollisionRectsIntersect(characterRect, createCollisionRectFromPortal(portal))
     )
   }
-  const handleFirstSlimeHuntInteractionEvents = (
+  const handleQuestInteractionEvents = (
     events: GameEvent[],
     now: number
-  ) => {
+  ): GameEvent[] => {
+    const unhandledEvents: GameEvent[] = []
+
     for (const event of events) {
       if (event.kind !== 'interaction-requested') {
+        unhandledEvents.push(event)
         continue
       }
 
@@ -1351,16 +1440,20 @@ export const createPixiTiledMapView = async ({
       )
 
       if (!sourceCharacter) {
+        unhandledEvents.push(event)
         continue
       }
 
       const targetCharacter = resolveCharacterInteractionTarget({
         sourceCharacter,
         targetCharacters: characterStates,
-        canReceiveInteraction: (character) => character.id === WIZARD_NPC_ID
+        canReceiveInteraction: (character) =>
+          getNextQuestInteractionForNpc(currentQuestLog, character.id) !==
+          undefined
       })
 
       if (!targetCharacter) {
+        unhandledEvents.push(event)
         continue
       }
 
@@ -1371,24 +1464,34 @@ export const createPixiTiledMapView = async ({
         continue
       }
 
-      handleWizardQuestInteraction()
+      handleQuestNpcInteraction(targetCharacter)
       interactionLockUntilByCharacterPair.set(
         lockKey,
         now + QUEST_DIALOGUE_DURATION_MILLISECONDS
       )
     }
-  }
-  const handleWizardQuestInteraction = () => {
-    const firstSlimeHuntQuest =
-      currentQuestLog.progressByQuestId[FIRST_SLIME_HUNT_QUEST_ID]
 
-    switch (firstSlimeHuntQuest.status) {
-      case 'not-started':
-        setQuestLog(startQuest(currentQuestLog, FIRST_SLIME_HUNT_QUEST_ID))
-        showCharacterMessage(
-          WIZARD_NPC_ID,
-          '사냥터의 말캉이들이 이상하게 늘어나고 있어.\n초보자라도 괜찮아. 말캉이 3마리만 처치하고 돌아와 줄래?',
-          QUEST_DIALOGUE_DURATION_MILLISECONDS
+    return unhandledEvents
+  }
+  const handleQuestNpcInteraction = (targetCharacter: CharacterState) => {
+    const interaction = getNextQuestInteractionForNpc(
+      currentQuestLog,
+      targetCharacter.id
+    )
+
+    if (!interaction) {
+      return
+    }
+
+    switch (interaction.action) {
+      case 'start': {
+        let nextQuestLog = startQuest(currentQuestLog, interaction.questId)
+
+        nextQuestLog = recordTalkQuestProgress(nextQuestLog, targetCharacter.id)
+        setQuestLogWithObjectiveFeedback(nextQuestLog)
+        showQuestDialogue(
+          targetCharacter.id,
+          interaction.definition.startDialogueLines
         )
         showCharacterDamageText(
           PLAYER_CHARACTER_ID,
@@ -1396,49 +1499,47 @@ export const createPixiTiledMapView = async ({
           DAMAGE_TEXT_DURATION_MILLISECONDS,
           LEVEL_UP_TEXT_STYLE
         )
-        return
-      case 'active':
-        showCharacterMessage(
-          WIZARD_NPC_ID,
-          '아직 말캉이 기운이 남아 있어.\n사냥터에서 말캉이 3마리를 처치하고 돌아와.',
-          QUEST_DIALOGUE_DURATION_MILLISECONDS
-        )
-        return
-      case 'ready-to-turn-in': {
-        const result = completeQuest(currentQuestLog, FIRST_SLIME_HUNT_QUEST_ID)
-
-        setQuestLog(result.nextQuestLog)
-        showCharacterMessage(
-          WIZARD_NPC_ID,
-          '돌아왔구나. 말캉이 기운이 확실히 줄었어.\n고마워. 진짜 모험가의 첫걸음이라고 할 수 있겠네.',
-          QUEST_DIALOGUE_DURATION_MILLISECONDS
-        )
-
-        if (!result.didComplete) {
-          return
-        }
-
-        currentPlayerInventory = {
-          ...currentPlayerInventory,
-          gold: currentPlayerInventory.gold + result.goldReward
-        }
-        onPlayerInventoryChange(currentPlayerInventory)
-        grantPlayerExperienceReward(result.experienceReward)
-        showCharacterDamageText(
-          PLAYER_CHARACTER_ID,
-          QUEST_COMPLETE_TEXT,
-          DAMAGE_TEXT_DURATION_MILLISECONDS,
-          LEVEL_UP_TEXT_STYLE
-        )
-        syncPlayerUiOverlays()
+        maybeOpenQuestNpcShop(targetCharacter.id)
         return
       }
-      case 'completed':
-        showCharacterMessage(
-          WIZARD_NPC_ID,
-          '마을이 조금 조용해졌어. 네가 도와준 덕분이야.',
-          QUEST_DIALOGUE_DURATION_MILLISECONDS
+      case 'active': {
+        setQuestLogWithObjectiveFeedback(
+          recordTalkQuestProgress(currentQuestLog, targetCharacter.id)
         )
+        showQuestDialogue(
+          targetCharacter.id,
+          interaction.definition.activeDialogueLines
+        )
+        maybeOpenQuestNpcShop(targetCharacter.id)
+        return
+      }
+      case 'complete': {
+        const result = completeQuest(currentQuestLog, interaction.questId)
+        const completionLines = interaction.definition.arcCompletionMessage
+          ? [
+              ...interaction.definition.completionDialogueLines,
+              interaction.definition.arcCompletionMessage
+            ]
+          : interaction.definition.completionDialogueLines
+
+        setQuestLog(result.nextQuestLog)
+        showQuestDialogue(targetCharacter.id, completionLines)
+        grantQuestCompletionRewards(result)
+      }
+    }
+  }
+  const showQuestDialogue = (characterId: string, lines: string[]) => {
+    showCharacterMessage(
+      characterId,
+      formatQuestTextLines(lines, {
+        playerName: playerProfile.name
+      }).join('\n'),
+      QUEST_DIALOGUE_DURATION_MILLISECONDS
+    )
+  }
+  const maybeOpenQuestNpcShop = (npcId: string) => {
+    if (npcId === BLACKSMITH_SHOP_NPC_ID) {
+      setBlacksmithShopOpen(true)
     }
   }
   playerHudOverlay = createPlayerHudOverlay({
@@ -1474,7 +1575,8 @@ export const createPixiTiledMapView = async ({
     onRequestProfileChange: (nextProfile) => {
       Object.assign(playerProfile, nextProfile)
       syncPlayerUiOverlays()
-    }
+    },
+    onConsumableUsed: handleConsumableUsed
   })
   playerEquipmentOverlay = createPlayerEquipmentOverlay({
     mountElement,
@@ -1566,6 +1668,7 @@ export const createPixiTiledMapView = async ({
     mountElement,
     getIsOpen: () => isQuestLogOpen,
     getQuestLog: () => currentQuestLog,
+    getPlayerName: () => playerProfile.name,
     onRequestOpenChange: setQuestLogOpen,
     onQuestLogChange: setQuestLog
   })
@@ -1841,7 +1944,9 @@ export const createPixiTiledMapView = async ({
             text: `Lv ${character.level}`
           })
     const questBadge =
-      character.id === WIZARD_NPC_ID
+      QUEST_GIVER_NPC_IDS.includes(
+        character.id as (typeof QUEST_GIVER_NPC_IDS)[number]
+      )
         ? createQuestBadgeSprite(questNewTexture)
         : undefined
     container.label = `character:${character.id}:container`
@@ -2204,29 +2309,28 @@ export const createPixiTiledMapView = async ({
   }
 
   const syncQuestNpcBadges = () => {
-    const wizardRenderNode = renderedCharacters.get(WIZARD_NPC_ID)
+    for (const npcId of QUEST_GIVER_NPC_IDS) {
+      const renderNode = renderedCharacters.get(npcId)
 
-    if (!wizardRenderNode?.questBadge) {
-      return
+      if (!renderNode?.questBadge) {
+        continue
+      }
+
+      const badgeKind = getQuestNpcBadgeKindForNpc(currentQuestLog, npcId)
+
+      if (!badgeKind) {
+        renderNode.questBadge.visible = false
+        continue
+      }
+
+      renderNode.questBadge.visible = true
+      renderNode.questBadge.texture =
+        badgeKind === 'new' ? questNewTexture : questFinTexture
+      renderNode.questBadge.position.set(
+        Math.round(renderNode.sprite.width / 2),
+        -QUEST_BADGE_Y_OFFSET
+      )
     }
-
-    const badgeKind = getQuestNpcBadgeKind(
-      currentQuestLog,
-      FIRST_SLIME_HUNT_QUEST_ID
-    )
-
-    if (!badgeKind) {
-      wizardRenderNode.questBadge.visible = false
-      return
-    }
-
-    wizardRenderNode.questBadge.visible = true
-    wizardRenderNode.questBadge.texture =
-      badgeKind === 'new' ? questNewTexture : questFinTexture
-    wizardRenderNode.questBadge.position.set(
-      Math.round(wizardRenderNode.sprite.width / 2),
-      -QUEST_BADGE_Y_OFFSET
-    )
   }
 
   const syncPlayerNameBadge = (
@@ -3118,32 +3222,13 @@ export const createPixiTiledMapView = async ({
     if (isMonsterDefeated(nextCombatState)) {
       if (character.appearanceType === MONSTER_SLIME_APPEARANCE_TYPE) {
         gameSoundEffects.play('slimeDeath')
-        const currentFirstSlimeHuntQuest =
-          currentQuestLog.progressByQuestId[FIRST_SLIME_HUNT_QUEST_ID]
-        const nextQuestLog = recordQuestObjectiveProgress(
-          currentQuestLog,
-          FIRST_SLIME_HUNT_QUEST_ID,
-          FIRST_SLIME_HUNT_OBJECTIVE_ID
-        )
-        const nextFirstSlimeHuntQuest =
-          nextQuestLog.progressByQuestId[FIRST_SLIME_HUNT_QUEST_ID]
-
-        if (nextQuestLog !== currentQuestLog) {
-          const didCompleteObjective =
-            currentFirstSlimeHuntQuest.status === 'active' &&
-            nextFirstSlimeHuntQuest.status === 'ready-to-turn-in'
-
-          setQuestLog(nextQuestLog)
-          if (didCompleteObjective) {
-            showCharacterDamageText(
-              PLAYER_CHARACTER_ID,
-              QUEST_OBJECTIVE_COMPLETE_TEXT,
-              DAMAGE_TEXT_DURATION_MILLISECONDS,
-              LEVEL_UP_TEXT_STYLE
-            )
-          }
-        }
       }
+      setQuestLogWithObjectiveFeedback(
+        recordMonsterDefeatQuestProgress(currentQuestLog, {
+          sceneId,
+          appearanceType: character.appearanceType
+        })
+      )
       character.blocksMovement = false
       monsterPatrolStates.delete(characterId)
       monsterContactDamageLockedUntilById.delete(characterId)
@@ -4025,8 +4110,10 @@ export const createPixiTiledMapView = async ({
       resolveMonsterGoldDropPickups()
       syncActiveMonsterGoldDrops(now)
 
-      const interactionEvents = gameEventQueue.drain()
-      handleFirstSlimeHuntInteractionEvents(interactionEvents, now)
+      const interactionEvents = handleQuestInteractionEvents(
+        gameEventQueue.drain(),
+        now
+      )
 
       const emittedEvents = processInteractionEvents({
         events: interactionEvents,
@@ -4263,6 +4350,7 @@ export const createPixiTiledMapView = async ({
       currentPlayerInventory = nextState.inventory
       Object.assign(playerProfile, nextState.profile)
       onPlayerInventoryChange(nextState.inventory)
+      handleConsumableUsed(assignedItem.id)
 
       if (nextState.inventory.slots[assignedInventorySlotIndex] === undefined) {
         currentPlayerQuickslots = clearPlayerQuickslotAssignment({
@@ -4812,6 +4900,109 @@ const resolveTilesetLocalIdByType = (
   }
 
   return Number(entry[0])
+}
+
+const STACKABLE_QUEST_REWARD_ITEM_IDS = new Set([
+  'health-potion',
+  'mana-potion'
+])
+
+const addQuestItemRewardsToInventory = (
+  inventory: PlayerInventory,
+  itemRewards: QuestItemReward[]
+): PlayerInventory => {
+  let nextInventory = inventory
+
+  for (const itemReward of itemRewards) {
+    nextInventory = addQuestItemRewardToInventory(nextInventory, itemReward)
+  }
+
+  return nextInventory
+}
+
+const addQuestItemRewardToInventory = (
+  inventory: PlayerInventory,
+  itemReward: QuestItemReward
+): PlayerInventory => {
+  if (STACKABLE_QUEST_REWARD_ITEM_IDS.has(itemReward.id)) {
+    const stackSlotIndex = inventory.slots.findIndex(
+      (item) => item?.id === itemReward.id
+    )
+
+    if (stackSlotIndex >= 0) {
+      const slots = [...inventory.slots]
+      const stack = slots[stackSlotIndex] as PlayerInventoryItem
+
+      slots[stackSlotIndex] = {
+        ...stack,
+        quantity: stack.quantity + itemReward.quantity
+      }
+
+      return {
+        ...inventory,
+        slots
+      }
+    }
+
+    return addQuestRewardAsNewInventorySlot(inventory, itemReward)
+  }
+
+  return addQuestRewardAsNewInventorySlots(inventory, itemReward)
+}
+
+const addQuestRewardAsNewInventorySlot = (
+  inventory: PlayerInventory,
+  itemReward: QuestItemReward
+): PlayerInventory => {
+  const emptySlotIndex = inventory.slots.findIndex((item) => item === undefined)
+
+  if (emptySlotIndex < 0) {
+    return inventory
+  }
+
+  const slots = [...inventory.slots]
+
+  slots[emptySlotIndex] = {
+    id: itemReward.id,
+    label: itemReward.label,
+    quantity: itemReward.quantity
+  }
+
+  return {
+    ...inventory,
+    slots
+  }
+}
+
+const addQuestRewardAsNewInventorySlots = (
+  inventory: PlayerInventory,
+  itemReward: QuestItemReward
+): PlayerInventory => {
+  let nextInventory = inventory
+
+  for (let quantity = 0; quantity < itemReward.quantity; quantity += 1) {
+    const emptySlotIndex = nextInventory.slots.findIndex(
+      (item) => item === undefined
+    )
+
+    if (emptySlotIndex < 0) {
+      return nextInventory
+    }
+
+    const slots = [...nextInventory.slots]
+
+    slots[emptySlotIndex] = {
+      id: itemReward.id,
+      label: itemReward.label,
+      quantity: 1
+    }
+    nextInventory = {
+      ...nextInventory,
+      slots
+    }
+  }
+
+  return nextInventory
 }
 
 const createDepthSortedTileSprite = (
