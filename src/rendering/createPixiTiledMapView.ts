@@ -40,12 +40,14 @@ import {
   type PlayerQuickslots
 } from '../game/playerQuickslots'
 import {
-  completeFirstSlimeHuntQuest,
-  getFirstSlimeHuntQuestNpcBadgeKind,
-  recordFirstSlimeHuntSlimeDefeat,
-  startFirstSlimeHuntQuest,
-  type FirstSlimeHuntQuestState
-} from '../game/firstSlimeHuntQuest'
+  FIRST_SLIME_HUNT_OBJECTIVE_ID,
+  FIRST_SLIME_HUNT_QUEST_ID,
+  completeQuest,
+  getQuestNpcBadgeKind,
+  recordQuestObjectiveProgress,
+  startQuest,
+  type QuestLogState
+} from '../game/questLog'
 import {
   getPlayerMovementSpeedTilesPerSecond,
   getPlayerPhysicalAttackPower,
@@ -101,6 +103,7 @@ import {
   createPauseMenuOverlay,
   type AudioSettings
 } from './createPauseMenuOverlay'
+import { createQuestLogOverlay } from './createQuestLogOverlay'
 import { createQuestTrackerOverlay } from './createQuestTrackerOverlay'
 
 type CreatePixiTiledMapViewInput = {
@@ -111,7 +114,7 @@ type CreatePixiTiledMapViewInput = {
   playerEquipment: PlayerEquipment
   playerInventory: PlayerInventory
   playerQuickslots: PlayerQuickslots
-  firstSlimeHuntQuest: FirstSlimeHuntQuestState
+  questLog: QuestLogState
   merchantInventory: PlayerInventory
   potionMerchantInventory: PlayerInventory
   sceneIntroMessage: string
@@ -125,7 +128,7 @@ type CreatePixiTiledMapViewInput = {
   onPlayerInventoryChange: (nextInventory: PlayerInventory) => void
   onPlayerEquipmentChange: (nextEquipment: PlayerEquipment) => void
   onPlayerQuickslotsChange: (nextQuickslots: PlayerQuickslots) => void
-  onFirstSlimeHuntQuestChange: (nextQuest: FirstSlimeHuntQuestState) => void
+  onQuestLogChange: (nextQuestLog: QuestLogState) => void
   onMerchantInventoryChange: (nextInventory: PlayerInventory) => void
   onPotionMerchantInventoryChange: (nextInventory: PlayerInventory) => void
   audioSettings: AudioSettings
@@ -601,7 +604,7 @@ export const createPixiTiledMapView = async ({
   playerEquipment,
   playerInventory,
   playerQuickslots,
-  firstSlimeHuntQuest,
+  questLog,
   merchantInventory,
   potionMerchantInventory,
   sceneIntroMessage,
@@ -612,7 +615,7 @@ export const createPixiTiledMapView = async ({
   onPlayerInventoryChange,
   onPlayerEquipmentChange,
   onPlayerQuickslotsChange,
-  onFirstSlimeHuntQuestChange,
+  onQuestLogChange,
   onMerchantInventoryChange,
   onPotionMerchantInventoryChange,
   audioSettings,
@@ -738,7 +741,7 @@ export const createPixiTiledMapView = async ({
   let currentPlayerEquipment = playerEquipment
   let currentPlayerInventory = playerInventory
   let currentPlayerQuickslots = playerQuickslots
-  let currentFirstSlimeHuntQuest = firstSlimeHuntQuest
+  let currentQuestLog = questLog
   let currentBlacksmithInventory = merchantInventory
   let currentPotionMerchantInventory = potionMerchantInventory
   let playerAttackStartedAtMilliseconds: number | undefined
@@ -766,6 +769,7 @@ export const createPixiTiledMapView = async ({
   let isPlayerStatOpen = false
   let isPlayerEquipmentOpen = false
   let isPlayerSkillOpen = false
+  let isQuestLogOpen = false
   let isBlacksmithShopOpen = false
   let isPotionShopOpen = false
   let isPauseMenuOpen = false
@@ -798,6 +802,13 @@ export const createPixiTiledMapView = async ({
     destroy: () => {}
   }
   let playerSkillOverlay: {
+    syncFrame: () => void
+    destroy: () => void
+  } = {
+    syncFrame: () => {},
+    destroy: () => {}
+  }
+  let questLogOverlay: {
     syncFrame: () => void
     destroy: () => void
   } = {
@@ -936,6 +947,7 @@ export const createPixiTiledMapView = async ({
     playerEquipmentOverlay.syncFrame()
     playerStatOverlay.syncFrame()
     playerSkillOverlay.syncFrame()
+    questLogOverlay.syncFrame()
     playerShopOverlay.syncFrame()
     potionShopOverlay.syncFrame()
     pauseMenuOverlay.syncFrame()
@@ -1130,12 +1142,21 @@ export const createPixiTiledMapView = async ({
     isPlayerSkillOpen = nextIsOpen
     syncPlayerUiOverlays()
   }
+  const setQuestLogOpen = (nextIsOpen: boolean) => {
+    if (isQuestLogOpen === nextIsOpen) {
+      return
+    }
+
+    isQuestLogOpen = nextIsOpen
+    syncPlayerUiOverlays()
+  }
   const setBlacksmithShopOpen = (nextIsOpen: boolean) => {
     if (isBlacksmithShopOpen === nextIsOpen) {
       return
     }
 
     if (nextIsOpen) {
+      isQuestLogOpen = false
       isPotionShopOpen = false
     }
 
@@ -1148,6 +1169,7 @@ export const createPixiTiledMapView = async ({
     }
 
     if (nextIsOpen) {
+      isQuestLogOpen = false
       isBlacksmithShopOpen = false
     }
 
@@ -1165,6 +1187,7 @@ export const createPixiTiledMapView = async ({
       isPlayerStatOpen = false
       isPlayerEquipmentOpen = false
       isPlayerSkillOpen = false
+      isQuestLogOpen = false
       isBlacksmithShopOpen = false
       isPotionShopOpen = false
       mapOverlay.setExpanded(false)
@@ -1179,13 +1202,14 @@ export const createPixiTiledMapView = async ({
     onAudioSettingsChange(currentAudioSettings)
     pauseMenuOverlay.syncFrame()
   }
-  const setFirstSlimeHuntQuest = (nextQuest: FirstSlimeHuntQuestState) => {
-    if (currentFirstSlimeHuntQuest === nextQuest) {
+  const setQuestLog = (nextQuestLog: QuestLogState) => {
+    if (currentQuestLog === nextQuestLog) {
       return
     }
 
-    currentFirstSlimeHuntQuest = nextQuest
-    onFirstSlimeHuntQuestChange(nextQuest)
+    currentQuestLog = nextQuestLog
+    onQuestLogChange(nextQuestLog)
+    questLogOverlay.syncFrame()
     questTrackerOverlay.syncFrame()
     syncQuestNpcBadges()
   }
@@ -1221,6 +1245,7 @@ export const createPixiTiledMapView = async ({
       isPlayerStatOpen = false
       isPlayerEquipmentOpen = false
       isPlayerSkillOpen = false
+      isQuestLogOpen = false
       isBlacksmithShopOpen = false
       isPotionShopOpen = false
       isPauseMenuOpen = false
@@ -1235,6 +1260,7 @@ export const createPixiTiledMapView = async ({
       !isPlayerStatOpen &&
       !isPlayerEquipmentOpen &&
       !isPlayerSkillOpen &&
+      !isQuestLogOpen &&
       !isBlacksmithShopOpen &&
       !isPotionShopOpen &&
       !isPauseMenuOpen &&
@@ -1247,6 +1273,7 @@ export const createPixiTiledMapView = async ({
     isPlayerStatOpen = false
     isPlayerEquipmentOpen = false
     isPlayerSkillOpen = false
+    isQuestLogOpen = false
     isBlacksmithShopOpen = false
     isPotionShopOpen = false
     isPauseMenuOpen = false
@@ -1325,11 +1352,12 @@ export const createPixiTiledMapView = async ({
     }
   }
   const handleWizardQuestInteraction = () => {
-    switch (currentFirstSlimeHuntQuest.status) {
+    const firstSlimeHuntQuest =
+      currentQuestLog.progressByQuestId[FIRST_SLIME_HUNT_QUEST_ID]
+
+    switch (firstSlimeHuntQuest.status) {
       case 'not-started':
-        setFirstSlimeHuntQuest(
-          startFirstSlimeHuntQuest(currentFirstSlimeHuntQuest)
-        )
+        setQuestLog(startQuest(currentQuestLog, FIRST_SLIME_HUNT_QUEST_ID))
         showCharacterMessage(
           WIZARD_NPC_ID,
           '사냥터의 말캉이들이 이상하게 늘어나고 있어.\n초보자라도 괜찮아. 말캉이 3마리만 처치하고 돌아와 줄래?',
@@ -1350,9 +1378,9 @@ export const createPixiTiledMapView = async ({
         )
         return
       case 'ready-to-turn-in': {
-        const result = completeFirstSlimeHuntQuest(currentFirstSlimeHuntQuest)
+        const result = completeQuest(currentQuestLog, FIRST_SLIME_HUNT_QUEST_ID)
 
-        setFirstSlimeHuntQuest(result.nextQuest)
+        setQuestLog(result.nextQuestLog)
         showCharacterMessage(
           WIZARD_NPC_ID,
           '돌아왔구나. 말캉이 기운이 확실히 줄었어.\n고마워. 진짜 모험가의 첫걸음이라고 할 수 있겠네.',
@@ -1501,9 +1529,17 @@ export const createPixiTiledMapView = async ({
     onRequestOpenChange: setPauseMenuOpen,
     onAudioSettingsChange: updateCurrentAudioSettings
   })
+  questLogOverlay = createQuestLogOverlay({
+    mountElement,
+    getIsOpen: () => isQuestLogOpen,
+    getQuestLog: () => currentQuestLog,
+    onRequestOpenChange: setQuestLogOpen,
+    onQuestLogChange: setQuestLog
+  })
   questTrackerOverlay = createQuestTrackerOverlay({
     mountElement,
-    getQuest: () => currentFirstSlimeHuntQuest
+    getQuestLog: () => currentQuestLog,
+    onQuestLogChange: setQuestLog
   })
 
   const syncRuntimeWarningBanner = () => {
@@ -2141,8 +2177,9 @@ export const createPixiTiledMapView = async ({
       return
     }
 
-    const badgeKind = getFirstSlimeHuntQuestNpcBadgeKind(
-      currentFirstSlimeHuntQuest
+    const badgeKind = getQuestNpcBadgeKind(
+      currentQuestLog,
+      FIRST_SLIME_HUNT_QUEST_ID
     )
 
     if (!badgeKind) {
@@ -2927,16 +2964,22 @@ export const createPixiTiledMapView = async ({
     if (isMonsterDefeated(nextCombatState)) {
       if (character.appearanceType === MONSTER_SLIME_APPEARANCE_TYPE) {
         gameSoundEffects.play('slimeDeath')
-        const nextQuest = recordFirstSlimeHuntSlimeDefeat(
-          currentFirstSlimeHuntQuest
+        const currentFirstSlimeHuntQuest =
+          currentQuestLog.progressByQuestId[FIRST_SLIME_HUNT_QUEST_ID]
+        const nextQuestLog = recordQuestObjectiveProgress(
+          currentQuestLog,
+          FIRST_SLIME_HUNT_QUEST_ID,
+          FIRST_SLIME_HUNT_OBJECTIVE_ID
         )
+        const nextFirstSlimeHuntQuest =
+          nextQuestLog.progressByQuestId[FIRST_SLIME_HUNT_QUEST_ID]
 
-        if (nextQuest !== currentFirstSlimeHuntQuest) {
+        if (nextQuestLog !== currentQuestLog) {
           const didCompleteObjective =
             currentFirstSlimeHuntQuest.status === 'active' &&
-            nextQuest.status === 'ready-to-turn-in'
+            nextFirstSlimeHuntQuest.status === 'ready-to-turn-in'
 
-          setFirstSlimeHuntQuest(nextQuest)
+          setQuestLog(nextQuestLog)
           if (didCompleteObjective) {
             showCharacterDamageText(
               PLAYER_CHARACTER_ID,
@@ -3903,6 +3946,8 @@ export const createPixiTiledMapView = async ({
       event.code === 'KeyU' || event.key.toLowerCase() === 'u'
     const isSkillToggleKey =
       event.code === 'KeyK' || event.key.toLowerCase() === 'k'
+    const isQuestLogToggleKey =
+      event.code === 'KeyB' || event.key.toLowerCase() === 'b'
     const isMapToggleKey =
       event.code === 'KeyM' || event.key.toLowerCase() === 'm'
 
@@ -3981,6 +4026,15 @@ export const createPixiTiledMapView = async ({
       if (!event.repeat) {
         event.preventDefault()
         setPlayerSkillOpen(!isPlayerSkillOpen)
+      }
+
+      return
+    }
+
+    if (isQuestLogToggleKey) {
+      if (!event.repeat) {
+        event.preventDefault()
+        setQuestLogOpen(!isQuestLogOpen)
       }
 
       return
@@ -4151,6 +4205,7 @@ export const createPixiTiledMapView = async ({
     undefined,
     UPDATE_PRIORITY.UTILITY
   )
+  app.ticker.add(questLogOverlay.syncFrame, undefined, UPDATE_PRIORITY.UTILITY)
   app.ticker.add(playerShopOverlay.syncFrame, undefined, UPDATE_PRIORITY.UTILITY)
   app.ticker.add(pauseMenuOverlay.syncFrame, undefined, UPDATE_PRIORITY.UTILITY)
   app.ticker.add(questTrackerOverlay.syncFrame, undefined, UPDATE_PRIORITY.UTILITY)
@@ -4165,6 +4220,7 @@ export const createPixiTiledMapView = async ({
   playerEquipmentOverlay.syncFrame()
   playerStatOverlay.syncFrame()
   playerSkillOverlay.syncFrame()
+  questLogOverlay.syncFrame()
   playerShopOverlay.syncFrame()
   pauseMenuOverlay.syncFrame()
   questTrackerOverlay.syncFrame()
@@ -4189,6 +4245,7 @@ export const createPixiTiledMapView = async ({
     app.ticker.remove(playerEquipmentOverlay.syncFrame)
     app.ticker.remove(playerStatOverlay.syncFrame)
     app.ticker.remove(playerSkillOverlay.syncFrame)
+    app.ticker.remove(questLogOverlay.syncFrame)
     app.ticker.remove(playerShopOverlay.syncFrame)
     app.ticker.remove(pauseMenuOverlay.syncFrame)
     app.ticker.remove(questTrackerOverlay.syncFrame)
@@ -4222,6 +4279,7 @@ export const createPixiTiledMapView = async ({
     playerEquipmentOverlay.destroy()
     playerStatOverlay.destroy()
     playerSkillOverlay.destroy()
+    questLogOverlay.destroy()
     playerShopOverlay.destroy()
     potionShopOverlay.destroy()
     pauseMenuOverlay.destroy()
