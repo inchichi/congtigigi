@@ -5,52 +5,70 @@ import {
   type PlayerInventory,
   type PlayerInventoryItem
 } from './playerInventory'
-import {
-  getPlayerEquipmentItemDefinitionById,
-  type PlayerEquipmentItemDefinition
-} from './playerEquipment'
-import { getPotionShopItemDefinitionById } from './potionShop'
+import { getPlayerEquipmentItemDefinitionById } from './playerEquipment'
 
-export type BlacksmithInventory = PlayerInventory
+export type PotionShopInventory = PlayerInventory
 
-export type BlacksmithShopTransactionResult = {
+export type PotionShopTransactionResult = {
   ok: boolean
   playerInventory: PlayerInventory
   merchantInventory: PlayerInventory
   message: string
 }
 
-type CreateInitialBlacksmithInventoryInput = {
+type CreateInitialPotionInventoryInput = {
   slotCount?: number
   gold?: number
 }
 
-type BuyBlacksmithShopItemInput = {
+type BuyPotionShopItemInput = {
   playerInventory: PlayerInventory
   merchantInventory: PlayerInventory
   merchantSlotIndex: number
 }
 
-type SellBlacksmithShopItemInput = {
+type SellPotionShopItemInput = {
   playerInventory: PlayerInventory
   merchantInventory: PlayerInventory
   playerSlotIndex: number
 }
 
-const DEFAULT_BLACKSMITH_INVENTORY_SLOT_COUNT = 12
-const DEFAULT_BLACKSMITH_INVENTORY_GOLD = 1_000_000_000_000_000
-const BLACKSMITH_SALE_RATIO = 0.5
-const BLACKSMITH_INITIAL_STOCK_ITEM_IDS = [
-  'bronze-sword',
-  'iron-armor',
-  'leather-boots',
-  'smith-charm'
-] as const
+type PotionShopItemDefinition = {
+  id: 'health-potion' | 'mana-potion'
+  label: string
+  description: string
+  price: number
+}
 
-export const createInitialBlacksmithInventory = ({
-  slotCount = DEFAULT_BLACKSMITH_INVENTORY_SLOT_COUNT,
-  gold = DEFAULT_BLACKSMITH_INVENTORY_GOLD
-}: CreateInitialBlacksmithInventoryInput = {}): BlacksmithInventory => {
+const DEFAULT_POTION_INVENTORY_SLOT_COUNT = 12
+const DEFAULT_POTION_INVENTORY_GOLD = 1_000_000_000_000_000
+const POTION_SALE_RATIO = 0.5
+const DEFAULT_POTION_STOCK_QUANTITY = 30
+const POTION_ITEM_DEFINITIONS: PotionShopItemDefinition[] = [
+  {
+    id: 'health-potion',
+    label: '체력 회복 포션',
+    description: '체력을 회복하는 물약',
+    price: 10
+  },
+  {
+    id: 'mana-potion',
+    label: '마나 회복 포션',
+    description: '마나를 회복하는 물약',
+    price: 15
+  }
+]
+const POTION_INITIAL_STOCK_ITEM_IDS = POTION_ITEM_DEFINITIONS.map(
+  (definition) => definition.id
+)
+const POTION_ITEM_DEFINITION_BY_ID: Map<string, PotionShopItemDefinition> = new Map(
+  POTION_ITEM_DEFINITIONS.map((definition) => [definition.id, definition] as const)
+)
+
+export const createInitialPotionInventory = ({
+  slotCount = DEFAULT_POTION_INVENTORY_SLOT_COUNT,
+  gold = DEFAULT_POTION_INVENTORY_GOLD
+}: CreateInitialPotionInventoryInput = {}): PotionShopInventory => {
   const slots: Array<PlayerInventoryItem | undefined> = Array.from(
     { length: slotCount },
     () => undefined
@@ -58,20 +76,20 @@ export const createInitialBlacksmithInventory = ({
 
   for (
     let index = 0;
-    index < slotCount && index < BLACKSMITH_INITIAL_STOCK_ITEM_IDS.length;
+    index < slotCount && index < POTION_INITIAL_STOCK_ITEM_IDS.length;
     index += 1
   ) {
-    const itemDefinition = getPlayerEquipmentItemDefinitionById(
-      BLACKSMITH_INITIAL_STOCK_ITEM_IDS[index]
+    const itemDefinition = getPotionShopItemDefinitionById(
+      POTION_INITIAL_STOCK_ITEM_IDS[index]
     )
 
     if (!itemDefinition) {
       throw new Error(
-        `Missing blacksmith stock item definition for ${BLACKSMITH_INITIAL_STOCK_ITEM_IDS[index]}`
+        `Missing potion stock item definition for ${POTION_INITIAL_STOCK_ITEM_IDS[index]}`
       )
     }
 
-    slots[index] = createPlayerInventoryItemFromEquipmentDefinition(
+    slots[index] = createPlayerInventoryItemFromPotionDefinition(
       itemDefinition
     )
   }
@@ -82,45 +100,47 @@ export const createInitialBlacksmithInventory = ({
   }
 }
 
-export const getBlacksmithShopItemPriceById = (
+export const getPotionShopItemDefinitionById = (
   itemId: string
-): number | undefined => getPlayerEquipmentItemDefinitionById(itemId)?.price
+): PotionShopItemDefinition | undefined => POTION_ITEM_DEFINITION_BY_ID.get(itemId)
 
-export const getBlacksmithShopBuyPriceById = getBlacksmithShopItemPriceById
+export const getPotionShopBuyPriceById = (
+  itemId: string
+): number | undefined => getPotionShopItemDefinitionById(itemId)?.price
 
-export const getBlacksmithShopSellPriceById = (
+export const getPotionShopSellPriceById = (
   itemId: string
 ): number | undefined => {
-  const buyPrice = getBlacksmithShopTradeItemPriceById(itemId)
+  const buyPrice = getPotionShopTradeItemPriceById(itemId)
 
   if (buyPrice === undefined) {
     return undefined
   }
 
-  return Math.max(1, Math.floor(buyPrice * BLACKSMITH_SALE_RATIO))
+  return Math.max(1, Math.floor(buyPrice * POTION_SALE_RATIO))
 }
 
-export const buyBlacksmithShopItem = ({
+export const buyPotionShopItem = ({
   playerInventory,
   merchantInventory,
   merchantSlotIndex
-}: BuyBlacksmithShopItemInput): BlacksmithShopTransactionResult => {
+}: BuyPotionShopItemInput): PotionShopTransactionResult => {
   assertInventorySlotIndex(merchantInventory, merchantSlotIndex)
 
   const merchantItem = merchantInventory.slots[merchantSlotIndex]
 
   if (!merchantItem) {
-    return createBlacksmithShopTransactionFailure({
+    return createPotionShopTransactionFailure({
       playerInventory,
       merchantInventory,
       message: '재고가 없습니다.'
     })
   }
 
-  const itemPrice = getBlacksmithShopItemPriceById(merchantItem.id)
+  const itemPrice = getPotionShopBuyPriceById(merchantItem.id)
 
   if (itemPrice === undefined) {
-    return createBlacksmithShopTransactionFailure({
+    return createPotionShopTransactionFailure({
       playerInventory,
       merchantInventory,
       message: '이 상점에서는 판매하지 않는 아이템입니다.'
@@ -128,7 +148,7 @@ export const buyBlacksmithShopItem = ({
   }
 
   if (playerInventory.gold < itemPrice) {
-    return createBlacksmithShopTransactionFailure({
+    return createPotionShopTransactionFailure({
       playerInventory,
       merchantInventory,
       message: '돈이 부족합니다.'
@@ -140,7 +160,7 @@ export const buyBlacksmithShopItem = ({
   )
 
   if (emptyPlayerSlotIndex === undefined) {
-    return createBlacksmithShopTransactionFailure({
+    return createPotionShopTransactionFailure({
       playerInventory,
       merchantInventory,
       message: '인벤토리가 가득 찼습니다.'
@@ -171,27 +191,27 @@ export const buyBlacksmithShopItem = ({
   }
 }
 
-export const sellBlacksmithShopItem = ({
+export const sellPotionShopItem = ({
   playerInventory,
   merchantInventory,
   playerSlotIndex
-}: SellBlacksmithShopItemInput): BlacksmithShopTransactionResult => {
+}: SellPotionShopItemInput): PotionShopTransactionResult => {
   assertInventorySlotIndex(playerInventory, playerSlotIndex)
 
   const playerItem = playerInventory.slots[playerSlotIndex]
 
   if (!playerItem) {
-    return createBlacksmithShopTransactionFailure({
+    return createPotionShopTransactionFailure({
       playerInventory,
       merchantInventory,
       message: '판매할 아이템이 없습니다.'
     })
   }
 
-  const itemPrice = getBlacksmithShopSellPriceById(playerItem.id)
+  const itemPrice = getPotionShopSellPriceById(playerItem.id)
 
   if (itemPrice === undefined) {
-    return createBlacksmithShopTransactionFailure({
+    return createPotionShopTransactionFailure({
       playerInventory,
       merchantInventory,
       message: '이 상점에서는 매입하지 않는 아이템입니다.'
@@ -199,7 +219,7 @@ export const sellBlacksmithShopItem = ({
   }
 
   if (merchantInventory.gold < itemPrice) {
-    return createBlacksmithShopTransactionFailure({
+    return createPotionShopTransactionFailure({
       playerInventory,
       merchantInventory,
       message: '상점 보유금이 부족합니다.'
@@ -226,18 +246,18 @@ export const sellBlacksmithShopItem = ({
   }
 }
 
-const getBlacksmithShopTradeItemPriceById = (
+const getPotionShopTradeItemPriceById = (
   itemId: string
 ): number | undefined =>
-  getPlayerEquipmentItemDefinitionById(itemId)?.price ??
-  getPotionShopItemDefinitionById(itemId)?.price
+  getPotionShopItemDefinitionById(itemId)?.price ??
+  getPlayerEquipmentItemDefinitionById(itemId)?.price
 
-const createPlayerInventoryItemFromEquipmentDefinition = (
-  definition: PlayerEquipmentItemDefinition
+const createPlayerInventoryItemFromPotionDefinition = (
+  definition: PotionShopItemDefinition
 ): PlayerInventoryItem => ({
   id: definition.id,
   label: definition.label,
-  quantity: 1
+  quantity: DEFAULT_POTION_STOCK_QUANTITY
 })
 
 const clonePlayerInventoryItem = (
@@ -252,11 +272,11 @@ const withInventoryGold = (
   inventory: PlayerInventory,
   gold: number
 ): PlayerInventory => ({
-  gold,
-  slots: [...inventory.slots]
+  ...inventory,
+  gold
 })
 
-const createBlacksmithShopTransactionFailure = ({
+const createPotionShopTransactionFailure = ({
   playerInventory,
   merchantInventory,
   message
@@ -264,7 +284,7 @@ const createBlacksmithShopTransactionFailure = ({
   playerInventory: PlayerInventory
   merchantInventory: PlayerInventory
   message: string
-}): BlacksmithShopTransactionResult => ({
+}): PotionShopTransactionResult => ({
   ok: false,
   playerInventory,
   merchantInventory,

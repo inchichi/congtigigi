@@ -151,13 +151,13 @@ describe('buyBlacksmithShopItem', () => {
 })
 
 describe('sellBlacksmithShopItem', () => {
-  it('moves an item from the player inventory into the merchant inventory', () => {
+  it('converts a potion sale into gold without changing merchant stock', () => {
     const playerInventory = setPlayerInventorySlot({
       inventory: createInitialPlayerInventory({ slotCount: 2, gold: 1000 }),
       slotIndex: 0,
       item: {
-        id: 'bronze-sword',
-        label: '청동 검',
+        id: 'health-potion',
+        label: '체력 회복 포션',
         quantity: 1
       }
     })
@@ -175,11 +175,11 @@ describe('sellBlacksmithShopItem', () => {
     expect(result).toEqual({
       ok: true,
       playerInventory: {
-        gold: 1160,
+        gold: 1005,
         slots: [undefined, undefined]
       },
       merchantInventory: {
-        gold: 4840,
+        gold: 4995,
         slots: [
           {
             id: 'bronze-sword',
@@ -201,11 +201,7 @@ describe('sellBlacksmithShopItem', () => {
             label: '수호 부적',
             quantity: 1
           },
-          {
-            id: 'bronze-sword',
-            label: '청동 검',
-            quantity: 1
-          },
+          undefined,
           undefined
         ]
       },
@@ -213,7 +209,7 @@ describe('sellBlacksmithShopItem', () => {
     })
   })
 
-  it('rejects sales for items the blacksmith does not buy', () => {
+  it('rejects sales for unknown items', () => {
     const playerInventory = setPlayerInventorySlot({
       inventory: createInitialPlayerInventory({ slotCount: 2, gold: 1000 }),
       slotIndex: 0,

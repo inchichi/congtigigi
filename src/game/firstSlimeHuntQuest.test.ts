@@ -5,6 +5,7 @@ import {
   FIRST_SLIME_HUNT_REWARD_GOLD,
   completeFirstSlimeHuntQuest,
   createInitialFirstSlimeHuntQuest,
+  getFirstSlimeHuntQuestNpcBadgeKind,
   getFirstSlimeHuntTrackerText,
   recordFirstSlimeHuntSlimeDefeat,
   startFirstSlimeHuntQuest
@@ -22,6 +23,30 @@ describe('firstSlimeHuntQuest', () => {
     const quest = startFirstSlimeHuntQuest(createInitialFirstSlimeHuntQuest())
 
     expect(quest.status).toBe('active')
+  })
+
+  it('returns npc badge kinds for quest state', () => {
+    expect(
+      getFirstSlimeHuntQuestNpcBadgeKind(createInitialFirstSlimeHuntQuest())
+    ).toBe('new')
+    expect(
+      getFirstSlimeHuntQuestNpcBadgeKind({
+        ...createInitialFirstSlimeHuntQuest(),
+        status: 'active'
+      })
+    ).toBeUndefined()
+    expect(
+      getFirstSlimeHuntQuestNpcBadgeKind({
+        ...createInitialFirstSlimeHuntQuest(),
+        status: 'ready-to-turn-in'
+      })
+    ).toBe('finish')
+    expect(
+      getFirstSlimeHuntQuestNpcBadgeKind({
+        ...createInitialFirstSlimeHuntQuest(),
+        status: 'completed'
+      })
+    ).toBeUndefined()
   })
 
   it('tracks slime defeats while active', () => {

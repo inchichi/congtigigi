@@ -4,6 +4,7 @@ import {
   type PlayerEquipmentIconKey,
   type PlayerEquipmentSlotId
 } from '../game/playerEquipment'
+import { getPotionShopItemDefinitionById } from '../game/potionShop'
 import {
   buyBlacksmithShopItem,
   getBlacksmithShopBuyPriceById,
@@ -705,37 +706,41 @@ export const createBlacksmithShopOverlay = ({
     counterInventory: PlayerInventory
     counterHasSpace: boolean
   }): boolean {
-    const itemDefinition = item
+    const equipmentDefinition = item
       ? getPlayerEquipmentItemDefinitionById(item.id)
       : undefined
-    const itemCategory = itemDefinition?.slotId ?? 'other'
+    const potionDefinition = item
+      ? getPotionShopItemDefinitionById(item.id)
+      : undefined
+    const renderDefinition = equipmentDefinition ?? potionDefinition
+    const itemCategory = equipmentDefinition?.slotId ?? 'other'
 
-    if (!item || (selectedCategory !== 'all' && selectedCategory !== itemCategory)) {
+    if (
+      !item ||
+      !renderDefinition ||
+      (selectedCategory !== 'all' && selectedCategory !== itemCategory)
+    ) {
       row.button.hidden = true
       return false
     }
 
     row.button.hidden = false
 
-    const renderDefinition = itemDefinition
-
-    if (!renderDefinition) {
+    if (equipmentDefinition) {
+      renderEquipmentIcon(row.icon, equipmentDefinition, ROW_ICON_SCALE)
+      row.name.textContent = equipmentDefinition.label
+      row.meta.textContent =
+        kind === 'buy'
+          ? `구매 · ${getPlayerEquipmentSlotLabelById(equipmentDefinition.slotId)} · 레벨 ${equipmentDefinition.level}`
+          : `판매 · ${getPlayerEquipmentSlotLabelById(equipmentDefinition.slotId)} · 레벨 ${equipmentDefinition.level}`
+    } else {
       setGenericIcon(row.icon)
-      row.name.textContent = item.label
-      row.meta.textContent = '기타 · 거래 불가'
-      row.price.textContent = '--'
-      row.button.disabled = true
-      row.button.classList.add('blacksmith-shop-overlay__row--disabled')
-      row.button.title = '이 아이템은 이 상점에서 취급하지 않습니다.'
-      return true
+      row.name.textContent = potionDefinition?.label ?? item.label
+      row.meta.textContent =
+        kind === 'buy'
+          ? '구매 · 거래 불가'
+          : `판매 · 소비품 · ${potionDefinition?.description ?? item.label}`
     }
-
-    renderEquipmentIcon(row.icon, renderDefinition, ROW_ICON_SCALE)
-    row.name.textContent = renderDefinition.label
-    row.meta.textContent =
-      kind === 'buy'
-        ? `구매 · ${getPlayerEquipmentSlotLabelById(renderDefinition.slotId)} · 레벨 ${renderDefinition.level}`
-        : `판매 · ${getPlayerEquipmentSlotLabelById(renderDefinition.slotId)} · 레벨 ${renderDefinition.level}`
 
     if (kind === 'buy') {
       const price = getBlacksmithShopBuyPriceById(renderDefinition.id)
@@ -756,7 +761,7 @@ export const createBlacksmithShopOverlay = ({
     }
 
     const price = getBlacksmithShopSellPriceById(renderDefinition.id)
-    const canSell = price !== undefined && counterInventory.gold >= price && counterHasSpace
+    const canSell = price !== undefined && counterInventory.gold >= price
 
     row.price.textContent = price !== undefined ? formatGoldAmount(price) : '--'
     row.button.disabled = !canSell
@@ -765,9 +770,7 @@ export const createBlacksmithShopOverlay = ({
       ? `${renderDefinition.label} 판매`
       : price === undefined
         ? '판매할 수 없는 아이템입니다.'
-        : !counterHasSpace
-          ? '상점 재고가 가득 찼습니다.'
-          : '상점 보유금이 부족합니다.'
+        : '상점 보유금이 부족합니다.'
     return true
   }
 
@@ -821,11 +824,14 @@ const renderEquipmentIcon = (
 }
 
 const setGenericIcon = (element: HTMLElement) => {
-  setBackgroundFrame(
-    element,
-    EQUIPMENT_ICON_FRAME_BY_KEY['ui-circle-beige'],
-    0.95
-  )
+  element.style.backgroundImage = 'none'
+  element.style.backgroundPosition = '0 0'
+  element.style.backgroundSize = 'auto'
+  element.style.backgroundColor = 'rgba(141, 110, 49, 0.18)'
+  element.style.border = '1px solid rgba(111, 89, 58, 0.42)'
+  element.style.borderRadius = '50%'
+  element.style.width = '16px'
+  element.style.height = '16px'
 }
 
 const setPortraitFrame = (

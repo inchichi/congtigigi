@@ -60,6 +60,30 @@ const TINY_DUNGEON_WEAPON_FRAME = {
   width: 16,
   height: 16
 }
+const TINY_DUNGEON_CONSUMABLE_ICON_FRAMES = {
+  'health-potion': {
+    imageUrl: TINY_DUNGEON_TILESET_IMAGE_URL,
+    imageWidth: TINY_DUNGEON_TILESET_WIDTH,
+    imageHeight: TINY_DUNGEON_TILESET_HEIGHT,
+    frame: {
+      x: 112,
+      y: 144,
+      width: 16,
+      height: 16
+    }
+  },
+  'mana-potion': {
+    imageUrl: TINY_DUNGEON_TILESET_IMAGE_URL,
+    imageWidth: TINY_DUNGEON_TILESET_WIDTH,
+    imageHeight: TINY_DUNGEON_TILESET_HEIGHT,
+    frame: {
+      x: 128,
+      y: 144,
+      width: 16,
+      height: 16
+    }
+  }
+} as const
 const BUTTON_SQUARE_FRAME = {
   x: 293,
   y: 294,
@@ -604,6 +628,36 @@ export const createPlayerInventoryOverlay = ({
     element.style.imageRendering = 'pixelated'
   }
 
+  const getConsumableIconFrame = (itemId: string) => {
+    switch (itemId) {
+      case 'health-potion':
+        return TINY_DUNGEON_CONSUMABLE_ICON_FRAMES['health-potion']
+      case 'mana-potion':
+        return TINY_DUNGEON_CONSUMABLE_ICON_FRAMES['mana-potion']
+      default:
+        return undefined
+    }
+  }
+
+  const renderConsumableIcon = (
+    element: HTMLElement,
+    itemId: string | undefined,
+    scale: number
+  ) => {
+    const frame = itemId === undefined ? undefined : getConsumableIconFrame(itemId)
+
+    if (frame) {
+      setBackgroundFrame(element, frame, scale)
+      return
+    }
+
+    setBackgroundFrame(
+      element,
+      EQUIPMENT_ICON_FRAME_BY_KEY['ui-circle-beige'],
+      scale
+    )
+  }
+
   const clearFrame = (element: HTMLElement) => {
     element.hidden = true
     element.style.backgroundImage = 'none'
@@ -656,13 +710,14 @@ export const createPlayerInventoryOverlay = ({
       return
     }
 
+    if (isLikelyConsumableInventoryItem(item)) {
+      renderConsumableIcon(element, item.id, scale * 0.96)
+      return
+    }
+
     setBackgroundFrame(
       element,
-      EQUIPMENT_ICON_FRAME_BY_KEY[
-        isLikelyConsumableInventoryItem(item)
-          ? 'ui-circle-beige'
-          : 'ui-check-beige'
-      ],
+      EQUIPMENT_ICON_FRAME_BY_KEY['ui-check-beige'],
       scale * 0.96
     )
   }
@@ -723,7 +778,15 @@ export const createPlayerInventoryOverlay = ({
         ? '퀵슬롯으로 드래그해서 등록 · 더블클릭하면 사용'
         : '드래그해서 이동할 수 있습니다'
 
-    detailsIcon.hidden = true
+    if (selectedDefinition) {
+      renderEquipmentIcon(detailsIcon, selectedSlot.id, 1.02)
+      detailsIcon.hidden = false
+    } else if (isLikelyConsumableInventoryItem(selectedSlot)) {
+      renderConsumableIcon(detailsIcon, selectedSlot.id, 1.02)
+      detailsIcon.hidden = false
+    } else {
+      clearFrame(detailsIcon)
+    }
     detailsPanel.hidden = false
     detailsPanel.style.display = 'grid'
     detailsPanel.setAttribute('aria-hidden', 'false')

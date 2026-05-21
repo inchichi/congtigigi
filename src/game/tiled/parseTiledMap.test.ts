@@ -18,6 +18,11 @@ const huntingGroundMapXml = readFileSync(
   'utf8'
 )
 
+const caveMapXml = readFileSync(
+  new URL('../../assets/maps/cave.tmx', import.meta.url),
+  'utf8'
+)
+
 const townTilesetXml = readFileSync(
   new URL('../../assets/tilesets/town-32.tsx', import.meta.url),
   'utf8'
@@ -259,6 +264,87 @@ describe('parseTiledMap', () => {
         targetSceneId: 'town',
         targetSpawnTileX: 46,
         targetSpawnTileY: 17
+      }
+    })
+    expect(map.eventLayers[1].events[1]).toMatchObject({
+      id: 10,
+      name: 'cave_entrance',
+      className: 'portal',
+      x: 1568,
+      y: 320,
+      width: 32,
+      height: 64,
+      visible: true,
+      properties: {
+        appearanceType: 'cave_entrance',
+        targetFacing: 'left',
+        targetSceneId: 'cave',
+        targetSpawnTileX: 2,
+        targetSpawnTileY: 10
+      }
+    })
+  })
+
+  it('parses the cave TMX map', () => {
+    const map = parseTiledMap({
+      mapXml: caveMapXml,
+      externalTilesets: {
+        '../tilesets/town-32.tsx': townTilesetXml
+      }
+    })
+
+    expect(map.width).toBe(34)
+    expect(map.height).toBe(34)
+    expect(map.pixelWidth).toBe(1088)
+    expect(map.pixelHeight).toBe(1088)
+    expect(map.layers).toHaveLength(1)
+    expect(map.eventLayers.map((layer) => layer.name)).toEqual([
+      'characters',
+      'portals'
+    ])
+    expect(map.eventLayers[0].events).toHaveLength(2)
+    expect(map.eventLayers[0].events).toMatchObject([
+      {
+        id: 5,
+        name: '꿀꿀이-보스',
+        className: 'character',
+        width: 32,
+        height: 32,
+        visible: true,
+        properties: {
+          blocksMovement: true,
+          'monster.level': 3,
+          type: 'monster_pig'
+        },
+        appearanceType: 'monster_pig'
+      },
+      {
+        id: 6,
+        name: '말캉이-보스',
+        className: 'character',
+        width: 32,
+        height: 32,
+        visible: true,
+        properties: {
+          blocksMovement: true,
+          'monster.level': 1,
+          type: 'monster_slime'
+        },
+        appearanceType: 'monster_slime'
+      }
+    ])
+    expect(map.eventLayers[1].events[0]).toMatchObject({
+      id: 4,
+      name: 'return_gate',
+      className: 'portal',
+      width: 32,
+      height: 64,
+      properties: {
+        appearanceType: 'stairs_stone_step_base_00',
+        targetFacing: 'right',
+        targetSceneId: 'hunting-ground',
+        targetSpawnTileX: 43,
+        targetSpawnTileY: 10
       }
     })
   })

@@ -15,6 +15,19 @@ describe('monsterCombat', () => {
     })
   })
 
+  it('applies boss multipliers to monster combat state', () => {
+    expect(
+      createMonsterCombatState(3, {
+        hpMultiplier: 2,
+        damageMultiplier: 2
+      })
+    ).toEqual({
+      maxHp: 32,
+      currentHp: 32,
+      contactDamage: 4
+    })
+  })
+
   it('clamps monster damage to zero and keeps defeated state stable', () => {
     const initialState = createMonsterCombatState(1)
     const damagedState = applyMonsterDamage(initialState, 99)

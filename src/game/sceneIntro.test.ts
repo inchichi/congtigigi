@@ -11,6 +11,10 @@ describe('getSceneIntroMessage', () => {
     expect(getSceneIntroMessage('hunting-ground')).toBe('슬라임 숲')
   })
 
+  it('returns the cave intro text', () => {
+    expect(getSceneIntroMessage('cave')).toBe('동굴')
+  })
+
   it('returns an empty string for unknown scenes', () => {
     expect(getSceneIntroMessage('unknown-scene')).toBe('')
   })

@@ -220,6 +220,14 @@ export const createPlayerEquipmentOverlay = ({
   const equipmentCenterSet = document.createElement('div')
   const closeButton = document.createElement('button')
   const closeIcon = document.createElement('span')
+  const tooltipPanel = document.createElement('div')
+  const tooltipHeader = document.createElement('div')
+  const tooltipIcon = document.createElement('span')
+  const tooltipText = document.createElement('div')
+  const tooltipName = document.createElement('div')
+  const tooltipMeta = document.createElement('div')
+  const tooltipDescription = document.createElement('div')
+  const tooltipHint = document.createElement('div')
   const equipmentSlotCards: HTMLButtonElement[] = []
   const equipmentSlotHeaderLabels: HTMLSpanElement[] = []
   const equipmentSlotItemLabels: HTMLDivElement[] = []
@@ -227,6 +235,17 @@ export const createPlayerEquipmentOverlay = ({
   const equipmentSlotLevelBadges: HTMLDivElement[] = []
   const equipmentSlotIcons: HTMLSpanElement[] = []
   const initialEquipment = getEquipment()
+  let hoveredEquipmentSlotIndex: number | undefined
+  let lastPointerPosition:
+    | {
+        x: number
+        y: number
+      }
+    | undefined
+  let tooltipAnchor = {
+    x: 0,
+    y: 0
+  }
   let panelPosition = { left: 0, top: 0 }
   let hasPanelPosition = false
   let dragState:
@@ -314,6 +333,23 @@ export const createPlayerEquipmentOverlay = ({
   closeIcon.textContent = '×'
   closeIcon.setAttribute('aria-hidden', 'true')
 
+  tooltipPanel.className = 'player-inventory-overlay__tooltip'
+  tooltipPanel.hidden = true
+  tooltipPanel.setAttribute('aria-hidden', 'true')
+  tooltipPanel.style.display = 'none'
+
+  tooltipHeader.className = 'player-inventory-overlay__tooltip-header'
+  tooltipIcon.className = 'player-inventory-overlay__tooltip-icon'
+  tooltipIcon.setAttribute('aria-hidden', 'true')
+  tooltipText.className = 'player-inventory-overlay__tooltip-text'
+  tooltipName.className = 'player-inventory-overlay__tooltip-name'
+  tooltipMeta.className = 'player-inventory-overlay__tooltip-meta'
+  tooltipDescription.className = 'player-inventory-overlay__tooltip-description'
+  tooltipHint.className = 'player-inventory-overlay__tooltip-hint'
+  tooltipText.append(tooltipName, tooltipMeta, tooltipDescription, tooltipHint)
+  tooltipHeader.append(tooltipIcon, tooltipText)
+  tooltipPanel.append(tooltipHeader)
+
   for (const slot of initialEquipment.slots) {
     const slotCard = document.createElement('button')
     const slotHeaderLabel = document.createElement('span')
@@ -365,6 +401,9 @@ export const createPlayerEquipmentOverlay = ({
     equipmentSlotIcons.push(slotIcon)
     slotCard.addEventListener('dragover', handleEquipmentLayoutDragOver)
     slotCard.addEventListener('drop', handleEquipmentLayoutDrop)
+    slotCard.addEventListener('pointerenter', showTooltipForEquipmentSlot)
+    slotCard.addEventListener('pointermove', showTooltipForEquipmentSlot)
+    slotCard.addEventListener('pointerleave', hideTooltip)
   }
 
   equipmentLayout.append(equipmentCenterCard)
@@ -392,7 +431,7 @@ export const createPlayerEquipmentOverlay = ({
   closeButton.append(closeIcon)
   panelBody.append(headerRow, equipmentSection, footerElement)
   panel.append(panelBody)
-  overlayRoot.append(backdropButton, panel)
+  overlayRoot.append(backdropButton, panel, tooltipPanel)
   mountElement.append(overlayRoot)
 
   const clampPanelPosition = (
@@ -476,6 +515,13 @@ export const createPlayerEquipmentOverlay = ({
     element.style.boxShadow = '0 0 0 1px rgba(255, 255, 255, 0.12)'
   }
 
+  const hasInventoryDragData = (dataTransfer: DataTransfer): boolean =>
+    Array.from(dataTransfer.types).some((type) =>
+      type === 'application/x-player-drag-origin' ||
+      type === 'application/x-player-inventory-slot-index' ||
+      type === 'text/plain'
+    )
+
   const setCardDimensions = (
     element: HTMLElement,
     width: number,
@@ -494,6 +540,10 @@ export const createPlayerEquipmentOverlay = ({
       | HTMLButtonElement
       | undefined
   }
+
+  const getEquipmentSlotIndexFromButton = (
+    button: HTMLButtonElement
+  ): number => equipmentSlotCards.indexOf(button)
 
   const setBackgroundFrame = (
     element: HTMLElement,
@@ -578,6 +628,109 @@ export const createPlayerEquipmentOverlay = ({
     )
   }
 
+  function hideTooltip() {
+    hoveredEquipmentSlotIndex = undefined
+    tooltipPanel.hidden = true
+    tooltipPanel.style.display = 'none'
+    tooltipPanel.setAttribute('aria-hidden', 'true')
+    tooltipIcon.hidden = true
+  }
+
+  const syncTooltip = () => {
+    const equipment = getEquipment()
+
+    if (
+      hoveredEquipmentSlotIndex === undefined ||
+      hoveredEquipmentSlotIndex < 0 ||
+      hoveredEquipmentSlotIndex >= equipment.slots.length
+    ) {
+      hideTooltip()
+      return
+    }
+
+    const slot = equipment.slots[hoveredEquipmentSlotIndex]
+    const slotLabel = slot.label
+    const slotItem = slot.item
+
+    tooltipName.textContent = slotItem
+      ? slotItem.label
+      : `${slotLabel} 비어 있음`
+    tooltipMeta.textContent = slotItem
+      ? `${slotLabel} · 레벨 ${slotItem.level}`
+      : slotLabel
+    tooltipDescription.textContent = slotItem
+      ? slotItem.description
+      : '가방에서 장착하세요'
+    tooltipHint.textContent = slotItem
+      ? '클릭하면 해제'
+      : `가방에서 드래그해서 ${slotLabel}에 장착`
+
+    if (slotItem) {
+      renderEquipmentIcon(tooltipIcon, slotItem.id, 1.1)
+    } else {
+      clearFrame(tooltipIcon)
+    }
+
+    tooltipPanel.hidden = false
+    tooltipPanel.style.display = 'grid'
+    tooltipPanel.setAttribute('aria-hidden', 'false')
+    tooltipPanel.style.visibility = 'hidden'
+    tooltipPanel.style.left = '0px'
+    tooltipPanel.style.top = '0px'
+
+    const tooltipRect = tooltipPanel.getBoundingClientRect()
+    const maxLeft = Math.max(
+      PANEL_MARGIN,
+      window.innerWidth - tooltipRect.width - PANEL_MARGIN
+    )
+    const maxTop = Math.max(
+      PANEL_MARGIN,
+      window.innerHeight - tooltipRect.height - PANEL_MARGIN
+    )
+
+    tooltipPanel.style.left = `${clamp(
+      tooltipAnchor.x + 14,
+      PANEL_MARGIN,
+      maxLeft
+    )}px`
+    tooltipPanel.style.top = `${clamp(
+      tooltipAnchor.y + 12,
+      PANEL_MARGIN,
+      maxTop
+    )}px`
+    tooltipPanel.style.visibility = 'visible'
+  }
+
+  function showTooltipForEquipmentSlot(event: PointerEvent) {
+    const slotButton =
+      event.currentTarget instanceof HTMLButtonElement
+        ? event.currentTarget
+        : undefined
+
+    if (!slotButton) {
+      hideTooltip()
+      return
+    }
+
+    const slotIndex = getEquipmentSlotIndexFromButton(slotButton)
+
+    if (slotIndex < 0) {
+      hideTooltip()
+      return
+    }
+
+    hoveredEquipmentSlotIndex = slotIndex
+    lastPointerPosition = {
+      x: event.clientX,
+      y: event.clientY
+    }
+    tooltipAnchor = {
+      x: event.clientX,
+      y: event.clientY
+    }
+    syncTooltip()
+  }
+
   const setPreviewPosition = (
     element: HTMLElement,
     leftPercent: number,
@@ -601,6 +754,7 @@ export const createPlayerEquipmentOverlay = ({
       stopDragging()
       backdropButton.hidden = true
       panel.hidden = true
+      hideTooltip()
       return
     }
 
@@ -749,6 +903,10 @@ export const createPlayerEquipmentOverlay = ({
         clearFrame(slotIcon)
       }
     }
+
+    if (hoveredEquipmentSlotIndex !== undefined && lastPointerPosition) {
+      syncTooltip()
+    }
   }
 
   const handleEquipmentSlotClick = (slotId: PlayerEquipmentSlotId) => {
@@ -795,25 +953,7 @@ export const createPlayerEquipmentOverlay = ({
       return
     }
 
-    if (event.dataTransfer.getData('application/x-player-drag-origin') !== 'inventory') {
-      return
-    }
-
-    const slotIndexText =
-      event.dataTransfer.getData('application/x-player-inventory-slot-index') ||
-      event.dataTransfer.getData('text/plain')
-    const slotIndex = Number(slotIndexText)
-
-    if (Number.isNaN(slotIndex)) {
-      return
-    }
-
-    const inventoryItem = getInventory().slots[slotIndex]
-    const inventoryDefinition = inventoryItem
-      ? getPlayerEquipmentItemDefinitionById(inventoryItem.id)
-      : undefined
-
-    if (!inventoryDefinition) {
+    if (!hasInventoryDragData(event.dataTransfer)) {
       return
     }
 
@@ -907,6 +1047,7 @@ export const createPlayerEquipmentOverlay = ({
   closeButton.addEventListener('click', handleCloseButtonClick)
   closeButton.addEventListener('pointerdown', handleCloseButtonPointerDown)
   panel.addEventListener('click', handlePanelClick)
+  panel.addEventListener('pointerleave', hideTooltip)
 
   const syncFrame = () => {
     syncLayout()
@@ -923,9 +1064,13 @@ export const createPlayerEquipmentOverlay = ({
     closeButton.removeEventListener('click', handleCloseButtonClick)
     closeButton.removeEventListener('pointerdown', handleCloseButtonPointerDown)
     panel.removeEventListener('click', handlePanelClick)
+    panel.removeEventListener('pointerleave', hideTooltip)
     for (const slotCard of equipmentSlotCards) {
       slotCard.removeEventListener('dragover', handleEquipmentLayoutDragOver)
       slotCard.removeEventListener('drop', handleEquipmentLayoutDrop)
+      slotCard.removeEventListener('pointerenter', showTooltipForEquipmentSlot)
+      slotCard.removeEventListener('pointermove', showTooltipForEquipmentSlot)
+      slotCard.removeEventListener('pointerleave', hideTooltip)
     }
     overlayRoot.remove()
   }

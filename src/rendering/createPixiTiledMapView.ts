@@ -31,12 +31,17 @@ import {
   type GameEvent
 } from '../game/events/createGameEventQueue'
 import { processInteractionEvents } from '../game/interaction/processInteractionEvents'
+import { usePlayerQuickslotConsumable } from '../game/playerConsumables'
 import type { PlayerEquipment } from '../game/playerEquipment'
 import type { PlayerInventory } from '../game/playerInventory'
 import type { PlayerProfile } from '../game/playerProfile'
-import type { PlayerQuickslots } from '../game/playerQuickslots'
+import {
+  clearPlayerQuickslotAssignment,
+  type PlayerQuickslots
+} from '../game/playerQuickslots'
 import {
   completeFirstSlimeHuntQuest,
+  getFirstSlimeHuntQuestNpcBadgeKind,
   recordFirstSlimeHuntSlimeDefeat,
   startFirstSlimeHuntQuest,
   type FirstSlimeHuntQuestState
@@ -82,6 +87,7 @@ import {
 } from './tiledSpriteTransform'
 import { createMapOverlay } from './createMapOverlay'
 import { createBlacksmithShopOverlay } from './createBlacksmithShopOverlay'
+import { createPotionShopOverlay } from './createPotionShopOverlay'
 import { createPlayerEquipmentOverlay } from './createPlayerEquipmentOverlay'
 import { createPlayerHudOverlay } from './createPlayerHudOverlay'
 import { createPlayerInventoryOverlay } from './createPlayerInventoryOverlay'
@@ -107,6 +113,7 @@ type CreatePixiTiledMapViewInput = {
   playerQuickslots: PlayerQuickslots
   firstSlimeHuntQuest: FirstSlimeHuntQuestState
   merchantInventory: PlayerInventory
+  potionMerchantInventory: PlayerInventory
   sceneIntroMessage: string
   cameraTargetCharacterId: string
   characterSpriteSheet: {
@@ -120,6 +127,7 @@ type CreatePixiTiledMapViewInput = {
   onPlayerQuickslotsChange: (nextQuickslots: PlayerQuickslots) => void
   onFirstSlimeHuntQuestChange: (nextQuest: FirstSlimeHuntQuestState) => void
   onMerchantInventoryChange: (nextInventory: PlayerInventory) => void
+  onPotionMerchantInventoryChange: (nextInventory: PlayerInventory) => void
   audioSettings: AudioSettings
   onAudioSettingsChange: (nextAudioSettings: AudioSettings) => void
   onRequestSceneChange: (request: SceneTransitionRequest) => void
@@ -195,6 +203,7 @@ type MonsterGoldDrop = {
 type RenderedCharacterNode = {
   container: Container
   sprite: Sprite
+  questBadge?: Sprite
   playerHealthBar?: {
     container: Container
     track: Graphics
@@ -257,20 +266,10 @@ type PlayerHitReactionState = {
 }
 
 const DEPTH_SORTED_LAYER_NAME = 'object'
-const UI_SPRITESHEET_IMAGE_URL = new URL(
-  '../assets/spritesheets/uipack_rpg_sheet.png',
-  import.meta.url
-).href
 const TINY_DUNGEON_TILESET_IMAGE_URL = new URL(
   '../assets/tilesets/tiny-dungeon-16.png',
   import.meta.url
 ).href
-const MESSAGE_PANEL_FRAME = {
-  x: 200,
-  y: 294,
-  width: 93,
-  height: 94
-}
 const MESSAGE_PANEL_BORDER_SIZE = 8
 const MESSAGE_PANEL_PADDING_X = 12
 const MESSAGE_PANEL_PADDING_Y = 8
@@ -323,6 +322,7 @@ const LEVEL_UP_TEXT_STYLE = new TextStyle({
   }
 })
 const BLACKSMITH_SHOP_NPC_ID = 'blacksmith'
+const POTION_SHOP_NPC_ID = 'potion_merchant'
 const SIGN_POST_APPEARANCE_TYPE = 'sign_inn'
 const MONSTER_PIG_APPEARANCE_TYPE = 'monster_pig'
 const MONSTER_SLIME_APPEARANCE_TYPE = 'monster_slime'
@@ -483,6 +483,8 @@ const QUEST_DIALOGUE_DURATION_MILLISECONDS = 3600
 const QUEST_START_TEXT = '퀘스트 시작: 첫 사냥'
 const QUEST_OBJECTIVE_COMPLETE_TEXT = '퀘스트 목표 완료!\n마법사에게 돌아가기'
 const QUEST_COMPLETE_TEXT = '퀘스트 완료: 첫 사냥\n100골드 · 경험치 60'
+const QUEST_BADGE_SCALE = 0.16
+const QUEST_BADGE_Y_OFFSET = 10
 type MonsterAppearanceType =
   | typeof MONSTER_PIG_APPEARANCE_TYPE
   | typeof MONSTER_SLIME_APPEARANCE_TYPE
@@ -557,6 +559,17 @@ const createMonsterHealthBar = (): NonNullable<
   }
 }
 
+const createQuestBadgeSprite = (texture: Texture): Sprite => {
+  const sprite = new Sprite(texture)
+
+  sprite.anchor.set(0.5, 1)
+  sprite.scale.set(QUEST_BADGE_SCALE)
+  sprite.roundPixels = true
+  sprite.visible = false
+
+  return sprite
+}
+
 const createPlayerResourceBar = (): NonNullable<
   RenderedCharacterNode['playerHealthBar']
 > => {
@@ -590,6 +603,7 @@ export const createPixiTiledMapView = async ({
   playerQuickslots,
   firstSlimeHuntQuest,
   merchantInventory,
+  potionMerchantInventory,
   sceneIntroMessage,
   cameraTargetCharacterId,
   characterSpriteSheet,
@@ -600,6 +614,7 @@ export const createPixiTiledMapView = async ({
   onPlayerQuickslotsChange,
   onFirstSlimeHuntQuestChange,
   onMerchantInventoryChange,
+  onPotionMerchantInventoryChange,
   audioSettings,
   onAudioSettingsChange,
   onRequestSceneChange
@@ -609,20 +624,19 @@ export const createPixiTiledMapView = async ({
   let scaledMapPixelWidth = Math.round(map.pixelWidth * cameraZoom)
   let scaledMapPixelHeight = Math.round(map.pixelHeight * cameraZoom)
   const [
-    messagePanelTexture,
     portalInsideTexture,
     tinyDungeonWeaponImageTexture,
     smearVfxTextures,
     monsterPigAnimationTextures,
     monsterSlimeAnimationTextures
   ] = await Promise.all([
-    loadMessagePanelTexture(),
     Assets.load<Texture>(PORTAL_INSIDE_IMAGE_URL),
     Assets.load<Texture>(TINY_DUNGEON_TILESET_IMAGE_URL),
     loadSmearVfxTextures(),
     loadMonsterPigAnimationTextures(),
     loadMonsterSlimeAnimationTextures()
   ])
+  const messagePanelTexture = createMessagePanelTexture()
 
   const monsterAnimationTexturesByAppearanceType: Record<
     MonsterAppearanceType,
@@ -726,6 +740,7 @@ export const createPixiTiledMapView = async ({
   let currentPlayerQuickslots = playerQuickslots
   let currentFirstSlimeHuntQuest = firstSlimeHuntQuest
   let currentBlacksmithInventory = merchantInventory
+  let currentPotionMerchantInventory = potionMerchantInventory
   let playerAttackStartedAtMilliseconds: number | undefined
   let playerAttackFacing: CharacterMoveDirection | undefined
   let playerWeaponTrailSprites: Sprite[] = []
@@ -734,6 +749,14 @@ export const createPixiTiledMapView = async ({
   let syncPlayerCharacterVisual: (nowMilliseconds?: number) => void = () => {}
   let isSceneTransitionPending = false
   let isDestroyed = false
+  const isBossMonsterScene = sceneIntroMessage === '동굴'
+  const monsterCombatStateOptions = isBossMonsterScene
+    ? {
+        hpMultiplier: 2,
+        damageMultiplier: 2
+      }
+    : undefined
+  const monsterRenderScaleMultiplier = isBossMonsterScene ? 2 : 1
   const clearPressedInputState = () => {
     pressedDirections.clear()
     pressedActions.clear()
@@ -744,6 +767,7 @@ export const createPixiTiledMapView = async ({
   let isPlayerEquipmentOpen = false
   let isPlayerSkillOpen = false
   let isBlacksmithShopOpen = false
+  let isPotionShopOpen = false
   let isPauseMenuOpen = false
   let playerHudOverlay: {
     syncFrame: () => void
@@ -781,6 +805,13 @@ export const createPixiTiledMapView = async ({
     destroy: () => {}
   }
   let playerShopOverlay: {
+    syncFrame: () => void
+    destroy: () => void
+  } = {
+    syncFrame: () => {},
+    destroy: () => {}
+  }
+  let potionShopOverlay: {
     syncFrame: () => void
     destroy: () => void
   } = {
@@ -906,6 +937,7 @@ export const createPixiTiledMapView = async ({
     playerStatOverlay.syncFrame()
     playerSkillOverlay.syncFrame()
     playerShopOverlay.syncFrame()
+    potionShopOverlay.syncFrame()
     pauseMenuOverlay.syncFrame()
     questTrackerOverlay.syncFrame()
   }
@@ -935,6 +967,32 @@ export const createPixiTiledMapView = async ({
   }
   const isAttackKey = (event: KeyboardEvent): boolean =>
     event.code === 'KeyA' || event.key.toLowerCase() === 'a'
+  const getQuickslotIndexFromKeyboardEvent = (
+    event: KeyboardEvent
+  ): number | undefined => {
+    switch (event.code) {
+      case 'Digit1':
+      case 'Numpad1':
+        return 0
+      case 'Digit2':
+      case 'Numpad2':
+        return 1
+      case 'Digit3':
+      case 'Numpad3':
+        return 2
+      case 'Digit4':
+      case 'Numpad4':
+        return 3
+      case 'Digit5':
+      case 'Numpad5':
+        return 4
+      case 'Digit6':
+      case 'Numpad6':
+        return 5
+      default:
+        return undefined
+    }
+  }
   const triggerPlayerAttack = (now: number) => {
     if (now < playerAttackReadyAtMilliseconds) {
       return
@@ -1077,7 +1135,23 @@ export const createPixiTiledMapView = async ({
       return
     }
 
+    if (nextIsOpen) {
+      isPotionShopOpen = false
+    }
+
     isBlacksmithShopOpen = nextIsOpen
+    syncPlayerUiOverlays()
+  }
+  const setPotionShopOpen = (nextIsOpen: boolean) => {
+    if (isPotionShopOpen === nextIsOpen) {
+      return
+    }
+
+    if (nextIsOpen) {
+      isBlacksmithShopOpen = false
+    }
+
+    isPotionShopOpen = nextIsOpen
     syncPlayerUiOverlays()
   }
   const setPauseMenuOpen = (nextIsOpen: boolean) => {
@@ -1092,6 +1166,7 @@ export const createPixiTiledMapView = async ({
       isPlayerEquipmentOpen = false
       isPlayerSkillOpen = false
       isBlacksmithShopOpen = false
+      isPotionShopOpen = false
       mapOverlay.setExpanded(false)
       gameSoundEffects.stopAllLoops()
     }
@@ -1112,6 +1187,7 @@ export const createPixiTiledMapView = async ({
     currentFirstSlimeHuntQuest = nextQuest
     onFirstSlimeHuntQuestChange(nextQuest)
     questTrackerOverlay.syncFrame()
+    syncQuestNpcBadges()
   }
   const grantPlayerExperienceReward = (experienceReward: number) => {
     const nextPlayerProgress = grantPlayerExperience(
@@ -1146,6 +1222,7 @@ export const createPixiTiledMapView = async ({
       isPlayerEquipmentOpen = false
       isPlayerSkillOpen = false
       isBlacksmithShopOpen = false
+      isPotionShopOpen = false
       isPauseMenuOpen = false
       gameSoundEffects.stopAllLoops()
     }
@@ -1159,6 +1236,7 @@ export const createPixiTiledMapView = async ({
       !isPlayerEquipmentOpen &&
       !isPlayerSkillOpen &&
       !isBlacksmithShopOpen &&
+      !isPotionShopOpen &&
       !isPauseMenuOpen &&
       !mapOverlay.getIsExpanded()
     ) {
@@ -1170,6 +1248,7 @@ export const createPixiTiledMapView = async ({
     isPlayerEquipmentOpen = false
     isPlayerSkillOpen = false
     isBlacksmithShopOpen = false
+    isPotionShopOpen = false
     isPauseMenuOpen = false
     mapOverlay.setExpanded(false)
     gameSoundEffects.stopAllLoops()
@@ -1398,6 +1477,23 @@ export const createPixiTiledMapView = async ({
       syncPlayerUiOverlays()
     }
   })
+  potionShopOverlay = createPotionShopOverlay({
+    mountElement,
+    getPlayerInventory: () => currentPlayerInventory,
+    getMerchantInventory: () => currentPotionMerchantInventory,
+    getIsOpen: () => isPotionShopOpen,
+    onRequestOpenChange: setPotionShopOpen,
+    onRequestTradeStateChange: (
+      nextPlayerInventory,
+      nextMerchantInventory
+    ) => {
+      currentPlayerInventory = nextPlayerInventory
+      currentPotionMerchantInventory = nextMerchantInventory
+      onPlayerInventoryChange(nextPlayerInventory)
+      onPotionMerchantInventoryChange(nextMerchantInventory)
+      syncPlayerUiOverlays()
+    }
+  })
   pauseMenuOverlay = createPauseMenuOverlay({
     mountElement,
     getIsOpen: () => isPauseMenuOpen,
@@ -1480,7 +1576,21 @@ export const createPixiTiledMapView = async ({
     PLAYER_WEAPON_TILE_FRAME_SOURCE,
     PLAYER_WEAPON_TILE_LOCAL_ID
   )
+  const questNewTexture = await Assets.load<Texture>(
+    imageUrls['quest_new.png']
+  )
+  const questFinTexture = await Assets.load<Texture>(
+    imageUrls['quest_fin.png']
+  )
+  const caveEntranceTexture = await Assets.load<Texture>(
+    imageUrls['cave1-visible.png']
+  )
+  caveEntranceTexture.source.addressMode = 'clamp-to-edge'
   const resolveMapPortalTexture = (appearanceType: string): Texture => {
+    if (appearanceType === 'cave_entrance') {
+      return caveEntranceTexture
+    }
+
     for (const tileset of map.tilesets) {
       const renderResources = tilesetResources.get(tileset.source)
 
@@ -1609,7 +1719,7 @@ export const createPixiTiledMapView = async ({
       ? new AnimatedSprite(monsterAnimationTextures.idleLeft)
       : new Sprite(resolvedCharacterAppearanceTexture!.texture)
     const renderScale = monsterBehaviorConfig
-      ? monsterBehaviorConfig.renderScale
+      ? monsterBehaviorConfig.renderScale * monsterRenderScaleMultiplier
       : resolvedCharacterAppearanceTexture!.renderScale
     const isPlayer = character.id === PLAYER_CHARACTER_ID
     const playerHealthBar = isPlayer
@@ -1661,6 +1771,10 @@ export const createPixiTiledMapView = async ({
             style: MONSTER_LEVEL_BADGE_STYLE,
             text: `Lv ${character.level}`
           })
+    const questBadge =
+      character.id === WIZARD_NPC_ID
+        ? createQuestBadgeSprite(questNewTexture)
+        : undefined
     container.label = `character:${character.id}:container`
     container.sortableChildren = true
     sprite.label = `character:${character.id}`
@@ -1706,11 +1820,20 @@ export const createPixiTiledMapView = async ({
       levelBadge.zIndex = 20
       container.addChild(levelBadge)
     }
+    if (questBadge) {
+      questBadge.label = `character:${character.id}:quest-badge`
+      questBadge.roundPixels = true
+      questBadge.zIndex = 22
+      container.addChild(questBadge)
+    }
 
     if (isMonsterCharacter) {
       monsterCombatStates.set(
         character.id,
-        createMonsterCombatState(character.level ?? 1)
+        createMonsterCombatState(
+          character.level ?? 1,
+          monsterCombatStateOptions
+        )
       )
       monsterSpawnStates.set(character.id, {
         ...character,
@@ -1757,6 +1880,7 @@ export const createPixiTiledMapView = async ({
       displayLabelPanel,
       displayLabel,
       levelBadge,
+      questBadge,
       monsterHealthBar
     })
     if (monsterAnimationTextures) {
@@ -1771,7 +1895,6 @@ export const createPixiTiledMapView = async ({
     const container = new Container()
     const baseSprite = new Sprite(resolveMapPortalTexture(portal.appearanceType))
     const coreSprite = new Sprite(portalInsideTexture)
-
     container.label = `portal:${portal.id}:container`
     container.sortableChildren = true
     baseSprite.label = `portal:${portal.id}:base`
@@ -1782,7 +1905,16 @@ export const createPixiTiledMapView = async ({
     coreSprite.scale.set(PORTAL_INSIDE_WORLD_SCALE)
     coreSprite.roundPixels = true
     coreSprite.zIndex = 1
-    if (portal.appearanceType === 'stairs_stone_step_base_00') {
+    const isCaveEntrancePortal = portal.appearanceType === 'cave_entrance'
+
+    if (isCaveEntrancePortal) {
+      baseSprite.scale.set(0.24)
+      container.position.set(
+        portal.position.x * map.tileWidth - 32,
+        portal.position.y * map.tileHeight
+      )
+      container.addChild(baseSprite)
+    } else if (portal.appearanceType === 'stairs_stone_step_base_00') {
       container.position.set(
         portal.position.x * map.tileWidth,
         portal.position.y * map.tileHeight
@@ -1999,6 +2131,31 @@ export const createPixiTiledMapView = async ({
     renderNode.levelBadge.position.set(
       Math.round((renderNode.sprite.width - renderNode.levelBadge.width) / 2),
       -Math.round(renderNode.levelBadge.height + 4)
+    )
+  }
+
+  const syncQuestNpcBadges = () => {
+    const wizardRenderNode = renderedCharacters.get(WIZARD_NPC_ID)
+
+    if (!wizardRenderNode?.questBadge) {
+      return
+    }
+
+    const badgeKind = getFirstSlimeHuntQuestNpcBadgeKind(
+      currentFirstSlimeHuntQuest
+    )
+
+    if (!badgeKind) {
+      wizardRenderNode.questBadge.visible = false
+      return
+    }
+
+    wizardRenderNode.questBadge.visible = true
+    wizardRenderNode.questBadge.texture =
+      badgeKind === 'new' ? questNewTexture : questFinTexture
+    wizardRenderNode.questBadge.position.set(
+      Math.round(wizardRenderNode.sprite.width / 2),
+      -QUEST_BADGE_Y_OFFSET
     )
   }
 
@@ -2454,7 +2611,10 @@ export const createPixiTiledMapView = async ({
     )
     monsterCombatStates.set(
       characterId,
-      createMonsterCombatState(nextCharacter.level ?? 1)
+      createMonsterCombatState(
+        nextCharacter.level ?? 1,
+        monsterCombatStateOptions
+      )
     )
     monsterPatrolStates.delete(characterId)
     monsterContactDamageLockedUntilById.delete(characterId)
@@ -3132,6 +3292,18 @@ export const createPixiTiledMapView = async ({
     syncCharacterMessageElement(characterId)
   }
 
+  const hideCharacterMessage = (characterId: string) => {
+    const activeMessage = activeCharacterMessages.get(characterId)
+
+    if (!activeMessage) {
+      return
+    }
+
+    activeMessage.container.removeFromParent()
+    activeMessage.container.destroy({ children: true })
+    activeCharacterMessages.delete(characterId)
+  }
+
   const pruneExpiredCharacterMessages = (now: number) => {
     for (const [characterId, activeMessage] of activeCharacterMessages) {
       if (activeMessage.expiresAt > now) {
@@ -3668,6 +3840,12 @@ export const createPixiTiledMapView = async ({
           continue
         }
 
+        if (event.characterId === POTION_SHOP_NPC_ID) {
+          hideCharacterMessage(event.characterId)
+          setPotionShopOpen(true)
+          continue
+        }
+
         showCharacterMessage(
           event.characterId,
           event.message,
@@ -3812,6 +3990,62 @@ export const createPixiTiledMapView = async ({
       return
     }
 
+    const quickslotIndex = getQuickslotIndexFromKeyboardEvent(event)
+
+    if (quickslotIndex !== undefined) {
+      if (event.repeat) {
+        return
+      }
+
+      const quickslotAssignment =
+        currentPlayerQuickslots.slots[quickslotIndex]
+
+      if (!quickslotAssignment) {
+        return
+      }
+
+      const assignedInventorySlotIndex = quickslotAssignment.inventorySlotIndex
+      const assignedItem =
+        currentPlayerInventory.slots[assignedInventorySlotIndex]
+
+      if (!assignedItem) {
+        currentPlayerQuickslots = clearPlayerQuickslotAssignment({
+          quickslots: currentPlayerQuickslots,
+          quickslotIndex
+        })
+        onPlayerQuickslotsChange(currentPlayerQuickslots)
+        syncPlayerUiOverlays()
+        return
+      }
+
+      const nextState = usePlayerQuickslotConsumable({
+        profile: playerProfile,
+        inventory: currentPlayerInventory,
+        quickslots: currentPlayerQuickslots,
+        quickslotIndex
+      })
+
+      if (!nextState) {
+        return
+      }
+
+      event.preventDefault()
+      currentPlayerInventory = nextState.inventory
+      Object.assign(playerProfile, nextState.profile)
+      onPlayerInventoryChange(nextState.inventory)
+
+      if (nextState.inventory.slots[assignedInventorySlotIndex] === undefined) {
+        currentPlayerQuickslots = clearPlayerQuickslotAssignment({
+          quickslots: currentPlayerQuickslots,
+          quickslotIndex
+        })
+        onPlayerQuickslotsChange(currentPlayerQuickslots)
+      }
+
+      syncPlayerUiOverlays()
+      return
+    }
+
     const action = getCharacterActionFromKey(event.key)
 
     if (action || isAttackKey(event)) {
@@ -3921,6 +4155,7 @@ export const createPixiTiledMapView = async ({
   app.ticker.add(pauseMenuOverlay.syncFrame, undefined, UPDATE_PRIORITY.UTILITY)
   app.ticker.add(questTrackerOverlay.syncFrame, undefined, UPDATE_PRIORITY.UTILITY)
   syncAllCharacterSprites()
+  syncQuestNpcBadges()
   syncViewportDisplayScale()
   centerCameraOnCharacter(getCharacterStateById(cameraTargetCharacterId))
   showSceneIntroBanner()
@@ -3988,6 +4223,7 @@ export const createPixiTiledMapView = async ({
     playerStatOverlay.destroy()
     playerSkillOverlay.destroy()
     playerShopOverlay.destroy()
+    potionShopOverlay.destroy()
     pauseMenuOverlay.destroy()
     questTrackerOverlay.destroy()
     gameSoundEffects.destroy()
@@ -4005,23 +4241,44 @@ export const createPixiTiledMapView = async ({
   }
 }
 
-const loadMessagePanelTexture = async (): Promise<Texture> => {
-  const uiSpritesheetImageTexture = await Assets.load<Texture>(
-    UI_SPRITESHEET_IMAGE_URL
-  )
+const createMessagePanelTexture = (): Texture => {
+  const canvas = document.createElement('canvas')
+  const context = canvas.getContext('2d')
 
-  uiSpritesheetImageTexture.source.scaleMode = 'nearest'
-  uiSpritesheetImageTexture.source.addressMode = 'clamp-to-edge'
+  if (!context) {
+    throw new Error('Could not create canvas context for message panel')
+  }
 
-  return new Texture({
-    source: uiSpritesheetImageTexture.source,
-    frame: new Rectangle(
-      MESSAGE_PANEL_FRAME.x,
-      MESSAGE_PANEL_FRAME.y,
-      MESSAGE_PANEL_FRAME.width,
-      MESSAGE_PANEL_FRAME.height
-    )
-  })
+  canvas.width = 32
+  canvas.height = 32
+  context.imageSmoothingEnabled = false
+  context.clearRect(0, 0, canvas.width, canvas.height)
+
+  context.fillStyle = '#c9a271'
+  context.fillRect(0, 0, canvas.width, canvas.height)
+  context.fillStyle = '#fffaf0'
+  context.fillRect(1, 1, canvas.width - 2, canvas.height - 2)
+  context.fillStyle = '#f4e5c8'
+  context.fillRect(1, 1, canvas.width - 2, 1)
+  context.fillRect(1, 1, 1, canvas.height - 2)
+  context.fillStyle = '#a98256'
+  context.fillRect(1, canvas.height - 2, canvas.width - 2, 1)
+  context.fillRect(canvas.width - 2, 1, 1, canvas.height - 2)
+  context.fillStyle = '#fffdf8'
+  context.fillRect(2, 2, canvas.width - 4, canvas.height - 4)
+  context.fillStyle = '#ecd8b8'
+  context.fillRect(2, 2, canvas.width - 4, 1)
+  context.fillRect(2, 2, 1, canvas.height - 4)
+  context.fillStyle = '#d9c29a'
+  context.fillRect(2, canvas.height - 3, canvas.width - 4, 1)
+  context.fillRect(canvas.width - 3, 2, 1, canvas.height - 4)
+
+  const texture = Texture.from(canvas)
+
+  texture.source.scaleMode = 'nearest'
+  texture.source.addressMode = 'clamp-to-edge'
+
+  return texture
 }
 
 const loadSmearVfxTextures = async (): Promise<SmearVfxRenderResources> => {

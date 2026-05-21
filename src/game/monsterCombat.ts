@@ -4,19 +4,28 @@ export type MonsterCombatState = {
   contactDamage: number
 }
 
+type CreateMonsterCombatStateOptions = {
+  hpMultiplier?: number
+  damageMultiplier?: number
+}
+
 const MONSTER_BASE_HP = 10
 const MONSTER_HP_PER_LEVEL = 2
 
 export const createMonsterCombatState = (
-  monsterLevel = 1
+  monsterLevel = 1,
+  options: CreateMonsterCombatStateOptions = {}
 ): MonsterCombatState => {
   const level = Math.max(1, Math.floor(monsterLevel))
-  const maxHp = MONSTER_BASE_HP + level * MONSTER_HP_PER_LEVEL
+  const hpMultiplier = Math.max(1, options.hpMultiplier ?? 1)
+  const damageMultiplier = Math.max(1, options.damageMultiplier ?? 1)
+  const maxHp = (MONSTER_BASE_HP + level * MONSTER_HP_PER_LEVEL) * hpMultiplier
 
   return {
     maxHp,
     currentHp: maxHp,
-    contactDamage: Math.max(1, Math.ceil(level / 2))
+    contactDamage:
+      Math.max(1, Math.ceil(level / 2)) * damageMultiplier
   }
 }
 

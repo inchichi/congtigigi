@@ -4,6 +4,10 @@ import {
   type PlayerInventory,
   type PlayerInventoryItem
 } from './playerInventory'
+import {
+  getPlayerQuickslotAssignment,
+  type PlayerQuickslots
+} from './playerQuickslots'
 import type { PlayerProfile } from './playerProfile'
 
 export type UsePlayerInventoryConsumableResult = {
@@ -11,12 +15,19 @@ export type UsePlayerInventoryConsumableResult = {
   inventory: PlayerInventory
 }
 
+export type UsePlayerQuickslotConsumableResult = UsePlayerInventoryConsumableResult
 type UsePlayerInventoryConsumableInput = {
   profile: PlayerProfile
   inventory: PlayerInventory
   slotIndex: number
 }
 
+type UsePlayerQuickslotConsumableInput = {
+  profile: PlayerProfile
+  inventory: PlayerInventory
+  quickslots: PlayerQuickslots
+  quickslotIndex: number
+}
 const PLAYER_POTION_RESTORE_AMOUNT = 10
 
 export const usePlayerInventoryConsumable = ({
@@ -67,11 +78,29 @@ export const usePlayerInventoryConsumable = ({
           item
         })
       }
-    default:
+  default:
       return undefined
   }
 }
 
+export const usePlayerQuickslotConsumable = ({
+  profile,
+  inventory,
+  quickslots,
+  quickslotIndex
+}: UsePlayerQuickslotConsumableInput): UsePlayerQuickslotConsumableResult | undefined => {
+  const quickslot = getPlayerQuickslotAssignment(quickslots, quickslotIndex)
+
+  if (!quickslot) {
+    return undefined
+  }
+
+  return usePlayerInventoryConsumable({
+    profile,
+    inventory,
+    slotIndex: quickslot.inventorySlotIndex
+  })
+}
 const consumeInventorySlot = ({
   inventory,
   slotIndex,
