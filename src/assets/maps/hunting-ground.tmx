@@ -84,6 +84,13 @@
     <property name="type" value="monster_slime"/>
    </properties>
   </object>
+  <object id="11" name="cave_entrance_sign" type="character" x="1440" y="384" width="32" height="32">
+   <properties>
+    <property name="type" value="sign_inn"/>
+    <property name="blocksMovement" type="bool" value="false"/>
+    <property name="displayText" value="동굴입구"/>
+   </properties>
+  </object>
  </objectgroup>
  <objectgroup id="3" name="portals">
   <object id="4" name="return_gate" type="portal" x="0" y="320" width="32" height="64">
