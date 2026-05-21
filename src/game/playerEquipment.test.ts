@@ -65,6 +65,15 @@ describe('createInitialPlayerEquipment', () => {
       }
     })
 
+    expect(getPlayerEquipmentItemDefinitionById('iron-sword')).toMatchObject({
+      slotId: 'weapon',
+      label: '강철 검',
+      icon: {
+        key: 'weapon-sword',
+        scale: 0.08
+      }
+    })
+
     expect(getPlayerEquipmentItemDefinitionById('iron-armor')).toMatchObject({
       label: '철 옷',
       price: 260,
@@ -72,5 +81,43 @@ describe('createInitialPlayerEquipment', () => {
         key: 'tiny-knight-open-helmet'
       }
     })
+
+    expect(getPlayerEquipmentItemDefinitionById('Chain_Armor')).toMatchObject({
+      slotId: 'armor',
+      label: 'Chain_Armor',
+      icon: {
+        key: 'tiny-knight-open-helmet'
+      }
+    })
+
+    expect(
+      [
+        'iron-sword',
+        'battle-axe',
+        'long-spear',
+        'quick-dagger',
+        'spiked-mace',
+        'magic-staff',
+        'Leather_Armor',
+        'Leather_Helmet',
+        'Chain_Armor',
+        'Chain_Helmet',
+        'Iron_Armor',
+        'Iron_Helmet'
+      ].map((itemId) => getPlayerEquipmentItemDefinitionById(itemId)?.slotId)
+    ).toEqual([
+      'weapon',
+      'weapon',
+      'weapon',
+      'weapon',
+      'weapon',
+      'weapon',
+      'armor',
+      'hat',
+      'armor',
+      'hat',
+      'armor',
+      'hat'
+    ])
   })
 })

@@ -10,6 +10,12 @@ export type PlayerEquipmentIconKey =
   | 'tiny-knight-gray-helmet'
   | 'tiny-knight-open-helmet'
   | 'town-crate-sword-right'
+  | 'weapon-sword'
+  | 'weapon-axe'
+  | 'weapon-spear'
+  | 'weapon-dagger'
+  | 'weapon-mace'
+  | 'weapon-staff'
   | 'ui-circle-beige'
   | 'ui-check-beige'
 
@@ -121,12 +127,156 @@ const PLAYER_EQUIPMENT_ITEM_DEFINITIONS: PlayerEquipmentItemDefinition[] = [
     }
   },
   {
+    id: 'iron-sword',
+    slotId: 'weapon',
+    label: '강철 검',
+    level: 2,
+    description: '균형이 좋은 근접 무기',
+    price: 240,
+    icon: {
+      key: 'weapon-sword',
+      scale: 0.08
+    }
+  },
+  {
+    id: 'battle-axe',
+    slotId: 'weapon',
+    label: '전투 도끼',
+    level: 2,
+    description: '무거운 한손 도끼',
+    price: 260,
+    icon: {
+      key: 'weapon-axe',
+      scale: 0.08
+    }
+  },
+  {
+    id: 'long-spear',
+    slotId: 'weapon',
+    label: '장창',
+    level: 2,
+    description: '거리감을 유지하기 좋은 창',
+    price: 280,
+    icon: {
+      key: 'weapon-spear',
+      scale: 0.08
+    }
+  },
+  {
+    id: 'quick-dagger',
+    slotId: 'weapon',
+    label: '단검',
+    level: 1,
+    description: '빠른 연속 공격용 무기',
+    price: 180,
+    icon: {
+      key: 'weapon-dagger',
+      scale: 0.08
+    }
+  },
+  {
+    id: 'spiked-mace',
+    slotId: 'weapon',
+    label: '철퇴',
+    level: 3,
+    description: '강한 타격을 주는 둔기',
+    price: 340,
+    icon: {
+      key: 'weapon-mace',
+      scale: 0.08
+    }
+  },
+  {
+    id: 'magic-staff',
+    slotId: 'weapon',
+    label: '마법 지팡이',
+    level: 3,
+    description: '마력을 머금은 지팡이',
+    price: 360,
+    icon: {
+      key: 'weapon-staff',
+      scale: 0.08
+    }
+  },
+  {
     id: 'iron-armor',
     slotId: 'armor',
     label: '철 옷',
     level: 2,
     description: '초보용을 넘어선 철제 옷',
     price: 260,
+    icon: {
+      key: 'tiny-knight-open-helmet',
+      scale: 1.4
+    }
+  },
+  {
+    id: 'Leather_Armor',
+    slotId: 'armor',
+    label: 'Leather_Armor',
+    level: 2,
+    description: '몬스터에게서 얻은 가죽 갑옷',
+    price: 220,
+    icon: {
+      key: 'tiny-knight-gray-helmet',
+      scale: 1.4
+    }
+  },
+  {
+    id: 'Leather_Helmet',
+    slotId: 'hat',
+    label: 'Leather_Helmet',
+    level: 2,
+    description: '몬스터에게서 얻은 가죽 투구',
+    price: 180,
+    icon: {
+      key: 'tiny-knight-gray-helmet',
+      scale: 1.4
+    }
+  },
+  {
+    id: 'Chain_Armor',
+    slotId: 'armor',
+    label: 'Chain_Armor',
+    level: 2,
+    description: '몬스터에게서 얻은 사슬 갑옷',
+    price: 300,
+    icon: {
+      key: 'tiny-knight-open-helmet',
+      scale: 1.4
+    }
+  },
+  {
+    id: 'Chain_Helmet',
+    slotId: 'hat',
+    label: 'Chain_Helmet',
+    level: 2,
+    description: '몬스터에게서 얻은 사슬 투구',
+    price: 240,
+    icon: {
+      key: 'tiny-knight-open-helmet',
+      scale: 1.4
+    }
+  },
+  {
+    id: 'Iron_Armor',
+    slotId: 'armor',
+    label: 'Iron_Armor',
+    level: 3,
+    description: '몬스터에게서 얻은 철 갑옷',
+    price: 360,
+    icon: {
+      key: 'tiny-knight-open-helmet',
+      scale: 1.4
+    }
+  },
+  {
+    id: 'Iron_Helmet',
+    slotId: 'hat',
+    label: 'Iron_Helmet',
+    level: 3,
+    description: '몬스터에게서 얻은 철 투구',
+    price: 300,
     icon: {
       key: 'tiny-knight-open-helmet',
       scale: 1.4
