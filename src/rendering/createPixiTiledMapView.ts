@@ -460,33 +460,33 @@ const PLAYER_WEAPON_TILE_FRAME_SOURCE: TileTextureFrameSource = {
   tileWidth: 16,
   tileHeight: 16
 }
-const BLUE_SLASH_WIDE_FRAME_URLS = [
+const WHITE_SLASH_WIDE_FRAME_URLS = [
   new URL(
-    '../assets/vfx/Sword Slashes/Blue Slash Wide/File1.png',
+    '../assets/vfx/Sword Slashes/White Slash Wide/File1.png',
     import.meta.url
   ).href,
   new URL(
-    '../assets/vfx/Sword Slashes/Blue Slash Wide/File2.png',
+    '../assets/vfx/Sword Slashes/White Slash Wide/File2.png',
     import.meta.url
   ).href,
   new URL(
-    '../assets/vfx/Sword Slashes/Blue Slash Wide/File3.png',
+    '../assets/vfx/Sword Slashes/White Slash Wide/File3.png',
     import.meta.url
   ).href,
   new URL(
-    '../assets/vfx/Sword Slashes/Blue Slash Wide/File4.png',
+    '../assets/vfx/Sword Slashes/White Slash Wide/File4.png',
     import.meta.url
   ).href,
   new URL(
-    '../assets/vfx/Sword Slashes/Blue Slash Wide/File5.png',
+    '../assets/vfx/Sword Slashes/White Slash Wide/File5.png',
     import.meta.url
   ).href,
   new URL(
-    '../assets/vfx/Sword Slashes/Blue Slash Wide/File6.png',
+    '../assets/vfx/Sword Slashes/White Slash Wide/File6.png',
     import.meta.url
   ).href
 ]
-const BLUE_SLASH_WIDE_FRAME_BOUNDS: CollisionRect[] = [
+const WHITE_SLASH_WIDE_FRAME_BOUNDS: CollisionRect[] = [
   { x: 63, y: 25, width: 465, height: 345 },
   { x: 75, y: 165, width: 463, height: 196 },
   { x: 33, y: 285, width: 373, height: 87 },
@@ -2762,11 +2762,11 @@ export const createPixiTiledMapView = async ({
   ): CollisionRect {
     const frameIndex = Math.min(
       Math.max(0, Math.floor(slashSprite.currentFrame)),
-      BLUE_SLASH_WIDE_FRAME_BOUNDS.length - 1
+      WHITE_SLASH_WIDE_FRAME_BOUNDS.length - 1
     )
     const frameBounds =
-      BLUE_SLASH_WIDE_FRAME_BOUNDS[frameIndex] ??
-      BLUE_SLASH_WIDE_FRAME_BOUNDS[0]
+      WHITE_SLASH_WIDE_FRAME_BOUNDS[frameIndex] ??
+      WHITE_SLASH_WIDE_FRAME_BOUNDS[0]
     const textureWidth = slashSprite.texture.source.pixelWidth
     const textureHeight = slashSprite.texture.source.pixelHeight
     const scaleX = slashSprite.scale.x
@@ -4609,9 +4609,9 @@ const createMessagePanelTexture = (): Texture => {
   return texture
 }
 
-const loadSlashVfxTextures = async (): Promise<SlashVfxRenderResources> => {
+  const loadSlashVfxTextures = async (): Promise<SlashVfxRenderResources> => {
   const textures = await Promise.all(
-    BLUE_SLASH_WIDE_FRAME_URLS.map((frameUrl) =>
+    WHITE_SLASH_WIDE_FRAME_URLS.map((frameUrl) =>
       Assets.load<Texture>(frameUrl)
     )
   )
