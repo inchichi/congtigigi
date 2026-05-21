@@ -128,16 +128,32 @@ body.game-root--map-focused > :not(.game-root) {
   position: absolute;
   z-index: 1;
   pointer-events: auto;
-  overflow: hidden;
-  background: #10100e;
-  box-shadow: 0 0 0 2px rgba(244, 231, 197, 0.92), 0 16px 32px rgba(0, 0, 0, 0.45);
+  overflow: visible;
+  background: transparent;
+  box-shadow: none;
   cursor: zoom-in;
   touch-action: manipulation;
 }
 
 .world-map-overlay__panel--expanded {
-  background: rgba(16, 16, 14, 0.98);
   cursor: zoom-out;
+}
+
+.world-map-overlay__frame {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  background: #10100e;
+  box-shadow: 0 0 0 2px rgba(244, 231, 197, 0.92), 0 16px 32px rgba(0, 0, 0, 0.45);
+}
+
+.world-map-overlay__panel--expanded .world-map-overlay__frame {
+  background: rgba(16, 16, 14, 0.98);
+  border-radius: 0;
+}
+
+.world-map-overlay__panel--collapsed .world-map-overlay__frame {
+  border-radius: 50%;
 }
 
 .world-map-overlay__panel:focus-visible,
@@ -165,6 +181,7 @@ body.game-root--map-focused > :not(.game-root) {
   position: absolute;
   left: 8px;
   top: 8px;
+  z-index: 2;
   padding: 2px 6px;
   border: 1px solid rgba(244, 231, 197, 0.5);
   background: rgba(23, 19, 17, 0.88);
@@ -1794,26 +1811,47 @@ body.game-root--map-focused > :not(.game-root) {
   background: #f0e0b8;
   box-shadow: 0 0 0 2px rgba(244, 231, 197, 0.92), 0 18px 36px rgba(0, 0, 0, 0.45);
   color: #2e2313;
+  animation: blacksmith-shop-overlay-panel-enter 140ms ease-out;
+}
+
+.blacksmith-shop-overlay__panel--selection {
+  width: min(680px, calc(100vw - 24px));
+}
+
+.blacksmith-shop-overlay__panel--workshop {
+  width: min(560px, calc(100vw - 24px));
 }
 
 .blacksmith-shop-overlay__panel-body {
   display: grid;
-  grid-template-columns: minmax(210px, 0.78fr) minmax(0, 1.22fr);
-  grid-template-areas:
-    'header header'
-    'service panes'
-    'workshop panes'
-    'status panes'
-    'footer panes';
-  gap: 12px 14px;
+  grid-template-columns: 1fr;
+  gap: 14px;
   width: 100%;
   max-height: calc(100vh - 24px);
   padding: 20px 22px 18px;
   overflow: auto;
 }
 
+.blacksmith-shop-overlay__panel-body--selection {
+  place-items: center;
+  padding: 24px 22px 22px;
+}
+
+.blacksmith-shop-overlay__panel-body--selection .blacksmith-shop-overlay__service-menu {
+  width: min(100%, 620px);
+}
+
+.blacksmith-shop-overlay__panel-body--workshop {
+  place-items: center;
+  padding: 28px 24px 24px;
+}
+
+.blacksmith-shop-overlay__panel-body--workshop .blacksmith-shop-overlay__workshop-panel {
+  width: min(100%, 460px);
+}
+
 .blacksmith-shop-overlay__header {
-  grid-area: header;
+  grid-area: auto;
   position: relative;
   display: grid;
   grid-template-columns: minmax(180px, 1fr) minmax(240px, 1.15fr) minmax(180px, 1fr);
@@ -1821,6 +1859,52 @@ body.game-root--map-focused > :not(.game-root) {
   align-items: stretch;
   min-height: 114px;
   padding-right: 40px;
+}
+
+.blacksmith-shop-overlay__header--compact {
+  grid-template-columns: minmax(0, 1fr);
+  justify-items: stretch;
+  min-height: 92px;
+  padding-right: 0;
+}
+
+.blacksmith-shop-overlay__header--compact .blacksmith-shop-overlay__portrait-card {
+  display: none;
+}
+
+.blacksmith-shop-overlay__screen-host {
+  min-height: 0;
+}
+
+.blacksmith-shop-overlay__screen {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  min-height: 0;
+  animation: blacksmith-shop-overlay-screen-enter 140ms ease-out;
+}
+
+.blacksmith-shop-overlay__screen--menu {
+  justify-items: center;
+  align-content: start;
+}
+
+.blacksmith-shop-overlay__screen--menu .blacksmith-shop-overlay__service-menu {
+  width: min(640px, 100%);
+  justify-self: center;
+}
+
+.blacksmith-shop-overlay__screen--shop {
+  align-content: start;
+}
+
+.blacksmith-shop-overlay__screen--workshop {
+  justify-items: center;
+  align-content: start;
+}
+
+.blacksmith-shop-overlay__screen--workshop .blacksmith-shop-overlay__workshop-panel {
+  width: min(640px, 100%);
 }
 
 .blacksmith-shop-overlay__portrait-card {
@@ -1921,7 +2005,7 @@ body.game-root--map-focused > :not(.game-root) {
 }
 
 .blacksmith-shop-overlay__service-menu {
-  grid-area: service;
+  grid-area: auto;
   display: grid;
   gap: 10px;
   min-width: 0;
@@ -2001,7 +2085,7 @@ body.game-root--map-focused > :not(.game-root) {
 }
 
 .blacksmith-shop-overlay__workshop-panel {
-  grid-area: workshop;
+  grid-area: auto;
   display: grid;
   justify-items: center;
   gap: 8px;
@@ -2043,6 +2127,7 @@ body.game-root--map-focused > :not(.game-root) {
   position: absolute;
   right: 6px;
   top: 6px;
+  z-index: 2;
   width: 32px;
   height: 32px;
   border: 1px solid rgba(111, 89, 58, 0.42);
@@ -2062,7 +2147,7 @@ body.game-root--map-focused > :not(.game-root) {
 }
 
 .blacksmith-shop-overlay__panes {
-  grid-area: panes;
+  grid-area: auto;
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
@@ -2242,7 +2327,7 @@ body.game-root--map-focused > :not(.game-root) {
 }
 
 .blacksmith-shop-overlay__status {
-  grid-area: status;
+  grid-area: auto;
   color: #6b5534;
   font-size: 0.66rem;
   letter-spacing: 0.06em;
@@ -2252,13 +2337,37 @@ body.game-root--map-focused > :not(.game-root) {
 }
 
 .blacksmith-shop-overlay__footer {
-  grid-area: footer;
+  grid-area: auto;
   color: #6b5534;
   font-size: 0.6rem;
   letter-spacing: 0.08em;
   line-height: 1.2;
   text-align: center;
   text-transform: uppercase;
+}
+
+@keyframes blacksmith-shop-overlay-panel-enter {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -48%);
+  }
+
+  to {
+    opacity: 1;
+    transform: translate(-50%, -50%);
+  }
+}
+
+@keyframes blacksmith-shop-overlay-screen-enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 @media (max-width: 920px) {

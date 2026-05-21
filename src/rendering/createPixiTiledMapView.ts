@@ -440,6 +440,8 @@ const PLAYER_ATTACK_TRAIL_ALPHA = [0.42, 0.28, 0.18, 0.1]
 const PLAYER_ATTACK_TRAIL_SPRITE_COUNT = PLAYER_ATTACK_TRAIL_ALPHA.length
 const PLAYER_ATTACK_SWING_X_OFFSET = 4
 const PLAYER_ATTACK_LIFT_Y_OFFSET = 3
+const PLAYER_NAME_BADGE_FOOT_OFFSET = 6
+const PLAYER_STATUS_STACK_CLEARANCE = 6
 const PLAYER_ATTACK_ROTATION_OFFSET = 1.15
 const PLAYER_ATTACK_SCALE_BOOST = 0.06
 const PLAYER_ATTACK_SLASH_EFFECT_SCALE_X = 1.55
@@ -1455,7 +1457,9 @@ export const createPixiTiledMapView = async ({
       character.displayText === undefined
         ? undefined
         : new Text({
-            style: SIGN_POST_LABEL_STYLE,
+            style: isSignPostCharacter
+              ? SIGN_POST_LABEL_STYLE
+              : PLAYER_NAME_BADGE_STYLE,
             text: character.displayText
           })
     const displayLabelPanel =
@@ -1777,19 +1781,19 @@ export const createPixiTiledMapView = async ({
       return
     }
 
-    if (
-      character.id === PLAYER_CHARACTER_ID &&
-      renderNode.playerNameBadge
-    ) {
+    if (character.id === PLAYER_CHARACTER_ID) {
       renderNode.levelBadge.visible = true
       renderNode.levelBadge.text = `Lv ${character.level}`
+      const playerStatusStackHeight =
+        renderNode.levelBadge.height +
+        PLAYER_HEALTH_BAR_HEIGHT +
+        PLAYER_MANA_BAR_HEIGHT +
+        PLAYER_HEALTH_BAR_GAP +
+        PLAYER_MANA_BAR_GAP +
+        PLAYER_STATUS_STACK_CLEARANCE
       renderNode.levelBadge.position.set(
         Math.round((renderNode.sprite.width - renderNode.levelBadge.width) / 2),
-        Math.round(
-          renderNode.playerNameBadge.position.y +
-            renderNode.playerNameBadge.height +
-            2
-        )
+        -Math.round(playerStatusStackHeight)
       )
       return
     }
@@ -1833,19 +1837,10 @@ export const createPixiTiledMapView = async ({
 
     renderNode.playerNameBadge.visible = true
     renderNode.playerNameBadge.text = playerProfile.name
-    const levelHeight = renderNode.levelBadge?.height ?? 0
-    const stackHeight =
-      renderNode.playerNameBadge.height +
-      levelHeight +
-      PLAYER_HEALTH_BAR_HEIGHT +
-      PLAYER_MANA_BAR_HEIGHT +
-      PLAYER_HEALTH_BAR_GAP +
-      PLAYER_MANA_BAR_GAP +
-      8
 
     renderNode.playerNameBadge.position.set(
       Math.round((renderNode.sprite.width - renderNode.playerNameBadge.width) / 2),
-      -Math.round(stackHeight)
+      Math.round(renderNode.sprite.height + PLAYER_NAME_BADGE_FOOT_OFFSET)
     )
   }
 
@@ -1878,12 +1873,12 @@ export const createPixiTiledMapView = async ({
     const manaInnerHeight = PLAYER_MANA_BAR_HEIGHT - 2
     const healthFilledWidth = Math.max(0, Math.round(healthInnerWidth * healthRatio))
     const manaFilledWidth = Math.max(0, Math.round(manaInnerWidth * manaRatio))
-    const nameHeight = renderNode.playerNameBadge.height
-    const levelBadge = renderNode.levelBadge
-    const levelHeight = levelBadge?.height ?? 0
-    const levelBottomY = levelBadge
-      ? levelBadge.position.y + levelHeight
-      : renderNode.playerNameBadge.position.y + nameHeight
+    const statusStackTopY = -Math.round(
+      PLAYER_HEALTH_BAR_HEIGHT +
+        PLAYER_MANA_BAR_HEIGHT +
+        PLAYER_MANA_BAR_GAP +
+        PLAYER_STATUS_STACK_CLEARANCE
+    )
 
     healthBar.container.visible = true
     healthBar.track.clear()
@@ -1915,7 +1910,7 @@ export const createPixiTiledMapView = async ({
 
     healthBar.container.position.set(
       Math.round((renderNode.sprite.width - PLAYER_HEALTH_BAR_WIDTH) / 2),
-      Math.round(levelBottomY + PLAYER_HEALTH_BAR_GAP)
+      statusStackTopY
     )
     manaBar.container.position.set(
       Math.round((renderNode.sprite.width - PLAYER_MANA_BAR_WIDTH) / 2),
@@ -1950,9 +1945,12 @@ export const createPixiTiledMapView = async ({
       return
     }
 
-    renderNode.displayLabel.anchor.set(0.5, 1)
     renderNode.displayLabel.visible = true
-    renderNode.displayLabel.position.set(Math.round(renderNode.sprite.width / 2), -4)
+    renderNode.displayLabel.anchor.set(0)
+    renderNode.displayLabel.position.set(
+      Math.round((renderNode.sprite.width - renderNode.displayLabel.width) / 2),
+      Math.round(renderNode.sprite.height + PLAYER_NAME_BADGE_FOOT_OFFSET)
+    )
   }
 
   const syncMonsterHealthBar = (

@@ -25,7 +25,9 @@ export type MapOverlay = {
   destroy: () => void
 }
 
-const COLLAPSED_MAX_SIZE = 220
+const COLLAPSED_BASE_MAX_SIZE = 220
+const COLLAPSED_SIZE_SCALE = 0.8
+const COLLAPSED_MAX_SIZE = Math.round(COLLAPSED_BASE_MAX_SIZE * COLLAPSED_SIZE_SCALE)
 const COLLAPSED_FOCUS_WORLD_SIZE = 640
 const OVERLAY_MARGIN = 16
 const DISPLAY_BORDER_SHADOW = '0 0 0 2px rgba(244, 231, 197, 0.92), 0 16px 32px rgba(0, 0, 0, 0.45)'
@@ -44,6 +46,7 @@ export const createMapOverlay = ({
   const overlayRoot = document.createElement('div')
   const backdropButton = document.createElement('button')
   const panelButton = document.createElement('button')
+  const mapFrame = document.createElement('div')
   const previewCanvas = document.createElement('canvas')
   const viewportFrame = document.createElement('div')
   const badgeElement = document.createElement('div')
@@ -76,19 +79,23 @@ export const createMapOverlay = ({
 
   panelButton.type = 'button'
   panelButton.className = 'world-map-overlay__panel'
-  panelButton.setAttribute('aria-label', 'Open the zoomed world map')
+  panelButton.setAttribute('aria-label', 'Open the world map')
   panelButton.setAttribute('aria-expanded', 'false')
+
+  mapFrame.className = 'world-map-overlay__frame'
+  mapFrame.setAttribute('aria-hidden', 'true')
 
   previewCanvas.className = 'world-map-overlay__canvas'
   viewportFrame.className = 'world-map-overlay__viewport'
   badgeElement.className = 'world-map-overlay__badge'
-  badgeElement.textContent = 'ZOOM MAP'
+  badgeElement.textContent = 'WORLD MAP'
 
   previewCanvas.setAttribute('aria-hidden', 'true')
   viewportFrame.setAttribute('aria-hidden', 'true')
   badgeElement.setAttribute('aria-hidden', 'true')
 
-  panelButton.append(previewCanvas, viewportFrame, badgeElement)
+  mapFrame.append(previewCanvas, viewportFrame)
+  panelButton.append(mapFrame, badgeElement)
   overlayRoot.append(backdropButton, panelButton)
   mountElement.append(overlayRoot)
 
@@ -99,6 +106,7 @@ export const createMapOverlay = ({
       return
     }
 
+    const uiScale = getResponsiveUiScale()
     const focusPoint = getFocusPoint()
     const sourceScaleX = sourceCanvas.width / mapPixelWidth
     const sourceScaleY = sourceCanvas.height / mapPixelHeight
@@ -150,7 +158,12 @@ export const createMapOverlay = ({
       viewportFrame.style.border = '2px solid rgba(244, 231, 197, 0.95)'
       viewportFrame.style.boxShadow = '0 0 0 1px rgba(23, 19, 17, 0.78)'
       viewportFrame.style.transform = 'none'
+      mapFrame.style.borderRadius = '0'
+      mapFrame.style.background = 'rgba(16, 16, 14, 0.98)'
       badgeElement.textContent = 'WORLD MAP'
+      badgeElement.style.left = '8px'
+      badgeElement.style.top = '8px'
+      badgeElement.style.transform = 'none'
       return
     }
 
@@ -208,7 +221,12 @@ export const createMapOverlay = ({
     viewportFrame.style.border = '2px solid rgba(244, 231, 197, 0.98)'
     viewportFrame.style.boxShadow = '0 0 0 1px rgba(23, 19, 17, 0.78)'
     viewportFrame.style.transform = 'none'
-    badgeElement.textContent = 'ZOOM MAP'
+    mapFrame.style.borderRadius = '50%'
+    mapFrame.style.background = '#10100e'
+    badgeElement.textContent = 'WORLD MAP'
+    badgeElement.style.left = '50%'
+    badgeElement.style.top = `${displayHeight + Math.max(6, Math.round(8 * uiScale))}px`
+    badgeElement.style.transform = 'translateX(-50%)'
   }
 
   const syncLayout = () => {
@@ -273,26 +291,30 @@ export const createMapOverlay = ({
     panelButton.style.top = isExpanded ? '50%' : `${scaledMargin}px`
     panelButton.style.transformOrigin = isExpanded ? 'center center' : 'top left'
     panelButton.style.transform = isExpanded
-      ? `translate(-50%, -50%) scale(${uiScale})`
+      ? 'translate(-50%, -50%)'
       : `scale(${uiScale})`
     panelButton.style.width = `${displayWidth}px`
     panelButton.style.height = `${displayHeight}px`
     panelButton.style.cursor = isExpanded ? 'zoom-out' : 'zoom-in'
-    panelButton.style.boxShadow = DISPLAY_BORDER_SHADOW
+    panelButton.style.boxShadow = 'none'
+    panelButton.style.background = 'transparent'
     panelButton.setAttribute(
       'aria-label',
-      isExpanded ? 'Close the world map' : 'Open the zoomed world map'
+      isExpanded ? 'Close the world map' : 'Open the world map'
     )
     panelButton.setAttribute('aria-expanded', String(isExpanded))
     panelButton.title = isExpanded
       ? 'Click to close the world map'
-      : 'Click to open the zoomed world map'
+      : 'Click to open the world map'
     backdropButton.hidden = !isExpanded
 
     previewCanvas.width = backingWidth
     previewCanvas.height = backingHeight
     previewCanvas.style.width = '100%'
     previewCanvas.style.height = '100%'
+    mapFrame.style.width = '100%'
+    mapFrame.style.height = '100%'
+    mapFrame.style.boxShadow = DISPLAY_BORDER_SHADOW
 
     syncFrame()
   }
