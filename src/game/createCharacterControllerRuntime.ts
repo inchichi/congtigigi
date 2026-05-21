@@ -190,16 +190,8 @@ const createNpcControllerAttachment = (): CharacterControllerAttachment => ({
       character,
       deltaMilliseconds
     }),
-  canReceiveInteraction: (character) =>
-    isMonsterCharacter(character) && character.blocksMovement,
-  handleInteraction: ({ targetCharacter }) =>
-    isMonsterCharacter(targetCharacter) && targetCharacter.blocksMovement
-      ? {
-          kind: 'message',
-          message: '!',
-          durationMilliseconds: 600
-        }
-      : undefined
+  canReceiveInteraction: () => false,
+  handleInteraction: () => undefined
 })
 
 const createLuaControllerAttachment = (
@@ -296,9 +288,6 @@ const getControllerAttachmentKey = (character: CharacterState): string => {
       return `lua:${character.controller.scriptId}:${character.controller.radiusInTiles}:${character.controller.moveSpeedTilesPerSecond}:${JSON.stringify(character.controller.config)}`
   }
 }
-
-const isMonsterCharacter = (character: CharacterState): boolean =>
-  character.appearanceType.startsWith('monster_')
 
 const scaleLuaMovementIntent = (
   movement: { x: number; y: number },

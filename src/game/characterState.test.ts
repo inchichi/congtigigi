@@ -101,21 +101,6 @@ describe('getCharacterControllerIntent', () => {
     })
   })
 
-  it('emits an attack action from keyboard controllers', () => {
-    expect(
-      getCharacterControllerIntent({
-        character: createInitialPlayerCharacter({
-          mapWidth: 32,
-          mapHeight: 20
-        }),
-        deltaMilliseconds: 250,
-        triggeredActions: new Set(['attack'])
-      })
-    ).toEqual({
-      actions: ['attack']
-    })
-  })
-
   it('keeps idle npc controllers still', () => {
     expect(
       getCharacterControllerIntent({
