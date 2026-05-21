@@ -998,6 +998,7 @@ body.game-root--map-focused > :not(.game-root) {
 .player-hud-overlay__skill-slot {
   position: relative;
   display: grid;
+  justify-items: center;
   align-content: start;
   min-width: 0;
   padding: 4px 4px 5px;
@@ -1014,6 +1015,27 @@ body.game-root--map-focused > :not(.game-root) {
   transform: translateY(-1px);
 }
 
+.player-hud-overlay__skill-slot--draggable {
+  cursor: grab;
+}
+
+.player-hud-overlay__skill-slot--filled {
+  cursor: grab;
+}
+
+.player-hud-overlay__skill-icon {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  margin-top: 14px;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: contain;
+  image-rendering: pixelated;
+}
+
 .player-hud-overlay__skill-hotkey {
   position: absolute;
   left: 4px;
@@ -1027,7 +1049,7 @@ body.game-root--map-focused > :not(.game-root) {
 .player-hud-overlay__skill-name {
   align-self: center;
   justify-self: center;
-  margin-top: 9px;
+  margin-top: 4px;
   color: #2e2313;
   font-size: 0.76rem;
   line-height: 1.1;
@@ -1388,7 +1410,7 @@ body.game-root--map-focused > :not(.game-root) {
 }
 
 .player-skill-overlay__skill-row {
-  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  grid-template-columns: auto auto minmax(0, 1fr) auto auto;
   align-items: center;
 }
 
@@ -1408,6 +1430,23 @@ body.game-root--map-focused > :not(.game-root) {
 .player-stat-overlay__stat-row--locked,
 .player-skill-overlay__skill-row--locked {
   opacity: 0.74;
+}
+
+.player-skill-overlay__skill-row--draggable {
+  cursor: grab;
+}
+
+.player-skill-overlay__skill-icon {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  margin-right: 2px;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: contain;
+  image-rendering: pixelated;
 }
 
 .player-stat-overlay__stat-row--recommended {

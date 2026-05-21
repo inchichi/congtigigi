@@ -4,8 +4,8 @@ import {
   type PlayerProfile
 } from './playerProfile'
 
-export const PLAYER_BASE_EXPERIENCE_TO_LEVEL_UP = 100
-export const PLAYER_EXPERIENCE_TO_LEVEL_UP_PER_LEVEL = 20
+export const PLAYER_BASE_EXPERIENCE_TO_LEVEL_UP = 140
+export const PLAYER_EXPERIENCE_TO_LEVEL_UP_PER_LEVEL = 30
 
 export type GrantPlayerExperienceResult = {
   nextProfile: PlayerProfile
