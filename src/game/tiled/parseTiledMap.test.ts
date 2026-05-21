@@ -185,7 +185,7 @@ describe('parseTiledMap', () => {
       'characters',
       'portals'
     ])
-    expect(map.eventLayers[0].events).toHaveLength(4)
+    expect(map.eventLayers[0].events).toHaveLength(5)
     expect(map.eventLayers[0].events).toMatchObject([
       {
         id: 5,
@@ -250,6 +250,22 @@ describe('parseTiledMap', () => {
           type: 'monster_slime'
         },
         appearanceType: 'monster_slime'
+      },
+      {
+        id: 11,
+        name: 'cave_entrance_sign',
+        className: 'character',
+        x: 1440,
+        y: 384,
+        width: 32,
+        height: 32,
+        visible: true,
+        properties: {
+          blocksMovement: false,
+          type: 'sign_inn',
+          displayText: '동굴입구'
+        },
+        appearanceType: 'sign_inn'
       }
     ])
     expect(map.eventLayers[1].events[0]).toMatchObject({
