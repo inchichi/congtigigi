@@ -8,15 +8,18 @@ import {
 } from '../game/playerEquipment'
 import { getPlayerInventoryFilledSlotCount } from '../game/playerInventory'
 import type { PlayerInventory } from '../game/playerInventory'
+import type { PlayerProfile } from '../game/playerProfile'
 import {
   findPlayerQuickslotIndexByInventorySlotIndex,
   type PlayerQuickslots
 } from '../game/playerQuickslots'
 import { equipPlayerInventorySlot } from '../game/playerLoadout'
+import { usePlayerInventoryConsumable } from '../game/playerConsumables'
 import { getResponsiveUiScale } from './getResponsiveUiScale'
 
 type CreatePlayerInventoryOverlayInput = {
   mountElement: HTMLElement
+  profile: PlayerProfile
   getInventory: () => PlayerInventory
   getEquipment: () => PlayerEquipment
   getQuickslots: () => PlayerQuickslots
@@ -24,6 +27,7 @@ type CreatePlayerInventoryOverlayInput = {
   onRequestOpenChange: (isOpen: boolean) => void
   onRequestInventoryChange: (nextInventory: PlayerInventory) => void
   onRequestEquipmentChange: (nextEquipment: PlayerEquipment) => void
+  onRequestProfileChange: (nextProfile: PlayerProfile) => void
 }
 
 export type PlayerInventoryOverlay = {
@@ -149,13 +153,15 @@ const INVENTORY_CATEGORY_OPTIONS: Array<{
 
 export const createPlayerInventoryOverlay = ({
   mountElement,
+  profile,
   getInventory,
   getQuickslots,
   getEquipment,
   getIsOpen,
   onRequestOpenChange,
   onRequestInventoryChange,
-  onRequestEquipmentChange
+  onRequestEquipmentChange,
+  onRequestProfileChange
 }: CreatePlayerInventoryOverlayInput): PlayerInventoryOverlay => {
   const overlayRoot = document.createElement('div')
   const backdropButton = document.createElement('button')
@@ -185,10 +191,16 @@ export const createPlayerInventoryOverlay = ({
   const slotItemLabels: HTMLSpanElement[] = []
   const slotQuantityLabels: HTMLSpanElement[] = []
   const slotEmptyMarkers: HTMLSpanElement[] = []
-  const slotQuickslotBadges: HTMLSpanElement[] = []
   const initialInventory = getInventory()
-  let selectedCategory: InventoryCategoryId = 'all'
+  let selectedCategory: InventoryCategoryId = 'equipment'
+  let wasOpen = false
   let hoveredSlotIndex: number | undefined
+  let lastPointerPosition:
+    | {
+        x: number
+        y: number
+      }
+    | undefined
   let tooltipAnchor = {
     x: 0,
     y: 0
@@ -277,6 +289,7 @@ export const createPlayerInventoryOverlay = ({
   detailsHeader.append(detailsIcon, detailsText)
   detailsPanel.append(detailsHeader)
   detailsPanel.hidden = true
+  detailsPanel.style.display = 'none'
   detailsPanel.setAttribute('aria-hidden', 'true')
 
   emptyStateElement.className = 'player-inventory-overlay__empty-state'
@@ -289,7 +302,6 @@ export const createPlayerInventoryOverlay = ({
     const slotItemLabel = document.createElement('span')
     const slotQuantityLabel = document.createElement('span')
     const slotEmptyMarker = document.createElement('span')
-    const slotQuickslotBadge = document.createElement('span')
 
     slotButton.type = 'button'
     slotButton.className = 'player-inventory-overlay__slot'
@@ -314,17 +326,12 @@ export const createPlayerInventoryOverlay = ({
     slotEmptyMarker.setAttribute('aria-hidden', 'true')
     slotEmptyMarker.hidden = true
 
-    slotQuickslotBadge.className = 'player-inventory-overlay__slot-quickslot-badge'
-    slotQuickslotBadge.hidden = true
-    slotQuickslotBadge.setAttribute('aria-hidden', 'true')
-
     slotButton.append(
       slotEmptyMarker,
       slotIndexLabel,
       slotIcon,
       slotItemLabel,
-      slotQuantityLabel,
-      slotQuickslotBadge
+      slotQuantityLabel
     )
     slotGrid.append(slotButton)
 
@@ -334,8 +341,9 @@ export const createPlayerInventoryOverlay = ({
     slotItemLabels.push(slotItemLabel)
     slotQuantityLabels.push(slotQuantityLabel)
     slotEmptyMarkers.push(slotEmptyMarker)
-    slotQuickslotBadges.push(slotQuickslotBadge)
-    slotButton.addEventListener('pointerleave', handleSlotButtonPointerLeave)
+    slotButton.addEventListener('dragstart', handleSlotGridDragStart)
+    slotButton.addEventListener('pointerenter', showTooltipForSlotButton)
+    slotButton.addEventListener('pointerleave', hideTooltip)
   }
 
   titleGroup.append(titleElement, summaryElement)
@@ -399,6 +407,11 @@ export const createPlayerInventoryOverlay = ({
   }
 
   const handleDocumentPointerMove = (event: PointerEvent) => {
+    lastPointerPosition = {
+      x: event.clientX,
+      y: event.clientY
+    }
+
     if (dragState && event.pointerId === dragState.pointerId) {
       panelPosition = clampPanelPosition(
         event.clientX - dragState.offsetX,
@@ -408,31 +421,9 @@ export const createPlayerInventoryOverlay = ({
       )
       panel.style.left = `${panelPosition.left}px`
       panel.style.top = `${panelPosition.top}px`
-      return
     }
 
-    const slotButton = getInventorySlotButton(event.target)
-
-    if (!slotButton) {
-      if (hoveredSlotIndex !== undefined) {
-        hideTooltip()
-      }
-      return
-    }
-
-    const slotIndex = Number(slotButton.dataset.playerInventorySlotIndex)
-
-    if (Number.isNaN(slotIndex)) {
-      hideTooltip()
-      return
-    }
-
-    hoveredSlotIndex = slotIndex
-    tooltipAnchor = {
-      x: event.clientX,
-      y: event.clientY
-    }
-    syncTooltip()
+    syncHoveredSlotTooltip()
   }
 
   const handleDocumentPointerUp = (event: PointerEvent) => {
@@ -509,6 +500,88 @@ export const createPlayerInventoryOverlay = ({
     return target.closest('button[data-player-inventory-slot-index]') as
       | HTMLButtonElement
       | undefined
+  }
+
+  const getHoveredInventorySlotButton = (
+    clientX: number,
+    clientY: number
+  ) => {
+    for (const slotButton of slotButtons) {
+      if (slotButton.hidden) {
+        continue
+      }
+
+      const rect = slotButton.getBoundingClientRect()
+
+      if (
+        clientX >= rect.left &&
+        clientX < rect.right &&
+        clientY >= rect.top &&
+        clientY < rect.bottom
+      ) {
+        return slotButton
+      }
+    }
+
+    return undefined
+  }
+
+  const updateTooltipForSlotButton = (
+    slotButton: HTMLButtonElement,
+    clientX: number,
+    clientY: number
+  ) => {
+    const slotIndex = Number(slotButton.dataset.playerInventorySlotIndex)
+
+    if (Number.isNaN(slotIndex)) {
+      hideTooltip()
+      return
+    }
+
+    hoveredSlotIndex = slotIndex
+    lastPointerPosition = {
+      x: clientX,
+      y: clientY
+    }
+    tooltipAnchor = {
+      x: clientX,
+      y: clientY
+    }
+    syncTooltip()
+  }
+
+  function showTooltipForSlotButton(event: PointerEvent) {
+    const slotButton = getInventorySlotButton(event.currentTarget)
+
+    if (!slotButton) {
+      hideTooltip()
+      return
+    }
+
+    updateTooltipForSlotButton(slotButton, event.clientX, event.clientY)
+  }
+
+  const syncHoveredSlotTooltip = () => {
+    if (!lastPointerPosition) {
+      hideTooltip()
+      return
+    }
+
+    const slotButton = getHoveredInventorySlotButton(
+      lastPointerPosition.x,
+      lastPointerPosition.y
+    )
+
+    if (!slotButton) {
+      hideTooltip()
+      return
+    }
+
+    updateTooltipForSlotButton(
+      slotButton,
+      lastPointerPosition.x,
+      lastPointerPosition.y
+    )
   }
 
   const setBackgroundFrame = (
@@ -594,9 +667,10 @@ export const createPlayerInventoryOverlay = ({
     )
   }
 
-  const hideTooltip = () => {
+  function hideTooltip() {
     hoveredSlotIndex = undefined
     detailsPanel.hidden = true
+    detailsPanel.style.display = 'none'
     detailsPanel.setAttribute('aria-hidden', 'true')
     detailsIcon.hidden = true
   }
@@ -644,13 +718,14 @@ export const createPlayerInventoryOverlay = ({
         ? '회복 아이템입니다.'
         : '기타 아이템입니다.')
     detailsHint.textContent = selectedDefinition
-      ? `장비창으로 드래그해서 ${getPlayerEquipmentSlotLabelById(selectedDefinition.slotId)}에 장착`
+      ? `장비창으로 드래그해서 ${getPlayerEquipmentSlotLabelById(selectedDefinition.slotId)}에 장착 · 더블클릭하면 장착`
       : isLikelyConsumableInventoryItem(selectedSlot)
-        ? '퀵슬롯으로 드래그해서 등록'
+        ? '퀵슬롯으로 드래그해서 등록 · 더블클릭하면 사용'
         : '드래그해서 이동할 수 있습니다'
 
     detailsIcon.hidden = true
     detailsPanel.hidden = false
+    detailsPanel.style.display = 'grid'
     detailsPanel.setAttribute('aria-hidden', 'false')
     detailsPanel.style.visibility = 'hidden'
     detailsPanel.style.left = '0px'
@@ -683,6 +758,10 @@ export const createPlayerInventoryOverlay = ({
     const isOpen = getIsOpen()
     const uiScale = getResponsiveUiScale()
 
+    if (isOpen && !wasOpen) {
+      selectedCategory = 'equipment'
+    }
+
     overlayRoot.hidden = !isOpen
     overlayRoot.style.display = isOpen ? '' : 'none'
     overlayRoot.setAttribute('aria-hidden', String(!isOpen))
@@ -692,6 +771,7 @@ export const createPlayerInventoryOverlay = ({
       backdropButton.hidden = true
       panel.hidden = true
       hideTooltip()
+      wasOpen = false
       return
     }
     const inventorySlotScale = 0.92
@@ -723,7 +803,6 @@ export const createPlayerInventoryOverlay = ({
       const slotItemLabel = slotItemLabels[index]
       const slotQuantityLabel = slotQuantityLabels[index]
       const slotEmptyMarker = slotEmptyMarkers[index]
-      const slotQuickslotBadge = slotQuickslotBadges[index]
       const slot = inventory.slots[index]
       const slotDefinition = slot
         ? getPlayerEquipmentItemDefinitionById(slot.id)
@@ -740,9 +819,9 @@ export const createPlayerInventoryOverlay = ({
         slot && !slotDefinition && isLikelyConsumableInventoryItem(slot)
       )
       const isVisible =
-        selectedCategory === 'all'
-          ? true
-          : slot !== undefined && slotCategory === selectedCategory
+        slot === undefined ||
+        selectedCategory === 'all' ||
+        slotCategory === selectedCategory
 
       setEmptySlotAppearance(slotButton)
       setCardDimensions(
@@ -751,6 +830,7 @@ export const createPlayerInventoryOverlay = ({
         BUTTON_SQUARE_FRAME.height * inventorySlotScale
       )
       slotButton.hidden = !isVisible
+      slotButton.style.display = isVisible ? '' : 'none'
       if (assignedQuickslotIndex !== undefined && isConsumableSlot) {
         slotButton.style.borderColor = 'rgba(91, 134, 214, 0.42)'
         slotButton.style.boxShadow =
@@ -789,6 +869,17 @@ export const createPlayerInventoryOverlay = ({
       const consumableDragHint = isConsumableSlot
         ? ' · 드래그해서 퀵슬롯에 등록'
         : ''
+      const equipmentDoubleClickHint = slotDefinition
+        ? ` · 더블클릭하면 ${targetSlotLabel}에 장착`
+        : ''
+      const consumableDoubleClickHint = isConsumableSlot
+        ? ' · 더블클릭하면 사용'
+        : ''
+      const slotLabelText = slot
+        ? slotDefinition
+          ? `${slot.label}${slot.quantity > 1 ? ` x${slot.quantity}` : ''}${equipmentDragHint}${equipmentDoubleClickHint}`
+          : `${slot.label}${slot.quantity > 1 ? ` x${slot.quantity}` : ''}${quickslotHint}${consumableDragHint}${consumableDoubleClickHint}`
+        : `빈 가방 칸 ${index + 1}`
 
       slotIndexLabel.hidden = true
       slotButton.classList.toggle(
@@ -799,15 +890,8 @@ export const createPlayerInventoryOverlay = ({
         'player-inventory-overlay__slot--empty',
         slot === undefined
       )
-      slotButton.setAttribute(
-        'aria-label',
-        slot
-          ? slotDefinition
-            ? `${slot.label}${slot.quantity > 1 ? ` x${slot.quantity}` : ''}. 클릭하면 ${targetSlotLabel}에 장착${equipmentDragHint}`
-            : `${slot.label}${slot.quantity > 1 ? ` x${slot.quantity}` : ''}${quickslotHint}${consumableDragHint}`
-          : `빈 가방 칸 ${index + 1}`
-      )
-      slotButton.title = ''
+      slotButton.setAttribute('aria-label', slotLabelText)
+      slotButton.title = slotLabelText
 
       if (slot && isVisible) {
         visibleSlotCount += 1
@@ -819,11 +903,6 @@ export const createPlayerInventoryOverlay = ({
         slotItemLabel.hidden = true
         slotItemLabel.textContent = ''
         slotEmptyMarker.hidden = true
-        slotQuickslotBadge.hidden = !(assignedQuickslotIndex !== undefined && isConsumableSlot)
-        slotQuickslotBadge.textContent =
-          assignedQuickslotIndex !== undefined && isConsumableSlot
-            ? String(assignedQuickslotIndex + 1)
-            : ''
         renderInventorySlotIcon(slotIcon, slot, inventorySlotScale)
       } else {
         slotItemLabel.hidden = true
@@ -831,8 +910,6 @@ export const createPlayerInventoryOverlay = ({
         slotQuantityLabel.hidden = true
         slotQuantityLabel.textContent = ''
         slotEmptyMarker.hidden = true
-        slotQuickslotBadge.hidden = true
-        slotQuickslotBadge.textContent = ''
         clearFrame(slotIcon)
       }
     }
@@ -863,7 +940,7 @@ export const createPlayerInventoryOverlay = ({
     panel.style.left = `${panelPosition.left}px`
     panel.style.top = `${panelPosition.top}px`
 
-    syncTooltip()
+    syncHoveredSlotTooltip()
 
     for (const tabButton of tabButtons) {
       const isActive =
@@ -876,12 +953,40 @@ export const createPlayerInventoryOverlay = ({
     summaryElement.textContent = `${filledSlotCount} / ${inventory.slots.length}칸 · ${formatGoldAmount(inventory.gold)}`
     emptyStateElement.hidden =
       selectedCategory === 'all' || visibleSlotCount > 0
+    wasOpen = true
   }
 
-  const handleInventorySlotClick = (slotIndex: number) => {
-    const nextState = equipPlayerInventorySlot({
-      equipment: getEquipment(),
-      inventory: getInventory(),
+  const handleInventorySlotDoubleClick = (slotIndex: number) => {
+    const inventory = getInventory()
+    const item = inventory.slots[slotIndex]
+
+    if (!item) {
+      return
+    }
+
+    const equipmentDefinition = getPlayerEquipmentItemDefinitionById(item.id)
+
+    if (equipmentDefinition) {
+      const nextState = equipPlayerInventorySlot({
+        equipment: getEquipment(),
+        inventory,
+        slotIndex
+      })
+
+      if (!nextState) {
+        syncFrame()
+        return
+      }
+
+      onRequestEquipmentChange(nextState.equipment)
+      onRequestInventoryChange(nextState.inventory)
+      syncFrame()
+      return
+    }
+
+    const nextState = usePlayerInventoryConsumable({
+      profile,
+      inventory,
       slotIndex
     })
 
@@ -890,77 +995,12 @@ export const createPlayerInventoryOverlay = ({
       return
     }
 
-    onRequestEquipmentChange(nextState.equipment)
+    onRequestProfileChange(nextState.profile)
     onRequestInventoryChange(nextState.inventory)
     syncFrame()
   }
 
-  const handleSlotGridPointerOver = (event: PointerEvent) => {
-    const slotButton = getInventorySlotButton(event.target)
-
-    if (!slotButton) {
-      return
-    }
-
-    const slotIndex = Number(slotButton.dataset.playerInventorySlotIndex)
-
-    if (Number.isNaN(slotIndex)) {
-      return
-    }
-
-    hoveredSlotIndex = slotIndex
-    tooltipAnchor = {
-      x: event.clientX,
-      y: event.clientY
-    }
-    syncTooltip()
-  }
-
-  const handleSlotGridPointerMove = (event: PointerEvent) => {
-    const slotButton = getInventorySlotButton(event.target)
-
-    if (!slotButton) {
-      return
-    }
-
-    const slotIndex = Number(slotButton.dataset.playerInventorySlotIndex)
-
-    if (Number.isNaN(slotIndex)) {
-      return
-    }
-
-    hoveredSlotIndex = slotIndex
-    tooltipAnchor = {
-      x: event.clientX,
-      y: event.clientY
-    }
-    syncTooltip()
-  }
-
-  function handleSlotButtonPointerLeave() {
-    hideTooltip()
-  }
-
-  const handleSlotGridPointerOut = (event: PointerEvent) => {
-    const slotButton = getInventorySlotButton(event.target)
-
-    if (!slotButton) {
-      return
-    }
-
-    const relatedTarget = event.relatedTarget
-
-    if (
-      relatedTarget instanceof Node &&
-      slotButton.contains(relatedTarget)
-    ) {
-      return
-    }
-
-    hideTooltip()
-  }
-
-  const handlePanelClick = (event: MouseEvent) => {
+  const handlePanelDoubleClick = (event: MouseEvent) => {
     const target = event.target
 
     if (!(target instanceof Element)) {
@@ -979,15 +1019,20 @@ export const createPlayerInventoryOverlay = ({
       )
 
       if (!Number.isNaN(slotIndex)) {
-        handleInventorySlotClick(slotIndex)
+        event.preventDefault()
+        event.stopPropagation()
+        handleInventorySlotDoubleClick(slotIndex)
       }
 
       return
     }
   }
 
-  const handleSlotGridDragStart = (event: DragEvent) => {
-    const slotButton = getInventorySlotButton(event.target)
+  function handleSlotGridDragStart(event: DragEvent) {
+    const slotButton =
+      event.currentTarget instanceof HTMLButtonElement
+        ? event.currentTarget
+        : undefined
 
     if (!slotButton || !event.dataTransfer) {
       return
@@ -1045,16 +1090,13 @@ export const createPlayerInventoryOverlay = ({
   backdropButton.addEventListener('click', handleBackdropClick)
   backdropButton.addEventListener('pointerdown', handleBackdropPointerDown)
   headerRow.addEventListener('pointerdown', startDragging)
-  slotGrid.addEventListener('dragstart', handleSlotGridDragStart)
-  slotGrid.addEventListener('pointerover', handleSlotGridPointerOver)
-  slotGrid.addEventListener('pointermove', handleSlotGridPointerMove)
-  slotGrid.addEventListener('pointerout', handleSlotGridPointerOut)
+  panel.addEventListener('pointerleave', hideTooltip)
   document.addEventListener('pointermove', handleDocumentPointerMove)
   document.addEventListener('pointerup', handleDocumentPointerUp)
   document.addEventListener('pointercancel', handleDocumentPointerUp)
   closeButton.addEventListener('click', handleCloseButtonClick)
   closeButton.addEventListener('pointerdown', handleCloseButtonPointerDown)
-  panel.addEventListener('click', handlePanelClick)
+  panel.addEventListener('dblclick', handlePanelDoubleClick)
 
   const syncFrame = () => {
     syncLayout()
@@ -1065,19 +1107,16 @@ export const createPlayerInventoryOverlay = ({
     backdropButton.removeEventListener('click', handleBackdropClick)
     backdropButton.removeEventListener('pointerdown', handleBackdropPointerDown)
     headerRow.removeEventListener('pointerdown', startDragging)
-    slotGrid.removeEventListener('dragstart', handleSlotGridDragStart)
-    slotGrid.removeEventListener('pointerover', handleSlotGridPointerOver)
-    slotGrid.removeEventListener('pointermove', handleSlotGridPointerMove)
-    slotGrid.removeEventListener('pointerout', handleSlotGridPointerOut)
+    panel.removeEventListener('pointerleave', hideTooltip)
+    for (const slotButton of slotButtons) {
+      slotButton.removeEventListener('dragstart', handleSlotGridDragStart)
+    }
     document.removeEventListener('pointermove', handleDocumentPointerMove)
     document.removeEventListener('pointerup', handleDocumentPointerUp)
     document.removeEventListener('pointercancel', handleDocumentPointerUp)
     closeButton.removeEventListener('click', handleCloseButtonClick)
     closeButton.removeEventListener('pointerdown', handleCloseButtonPointerDown)
-    panel.removeEventListener('click', handlePanelClick)
-    for (const slotButton of slotButtons) {
-      slotButton.removeEventListener('pointerleave', handleSlotButtonPointerLeave)
-    }
+    panel.removeEventListener('dblclick', handlePanelDoubleClick)
     overlayRoot.remove()
   }
 

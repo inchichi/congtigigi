@@ -1,4 +1,9 @@
-export type PlayerEquipmentSlotId = 'weapon' | 'armor' | 'boots' | 'accessory'
+export type PlayerEquipmentSlotId =
+  | 'weapon'
+  | 'armor'
+  | 'hat'
+  | 'boots'
+  | 'accessory'
 
 export type PlayerEquipmentIconKey =
   | 'tiny-dungeon-weapon'
@@ -41,6 +46,7 @@ export type PlayerEquipment = {
 const EQUIPMENT_SLOT_LABEL_BY_ID: Record<PlayerEquipmentSlotId, string> = {
   weapon: '무기',
   armor: '옷',
+  hat: '모자',
   boots: '신발',
   accessory: '장신구'
 }
@@ -48,6 +54,7 @@ const EQUIPMENT_SLOT_LABEL_BY_ID: Record<PlayerEquipmentSlotId, string> = {
 const EQUIPMENT_SLOT_IDS: PlayerEquipmentSlotId[] = [
   'weapon',
   'armor',
+  'hat',
   'boots',
   'accessory'
 ]
@@ -168,20 +175,24 @@ for (const definition of PLAYER_EQUIPMENT_ITEM_DEFINITIONS) {
   }
 }
 
+const STARTER_WEAPON_ITEM_DEFINITION = PLAYER_EQUIPMENT_ITEM_DEFINITION_BY_ID.get(
+  'basic-sword'
+)
+
+if (!STARTER_WEAPON_ITEM_DEFINITION) {
+  throw new Error('Missing starter weapon definition')
+}
+
 export const createInitialPlayerEquipment = (): PlayerEquipment => ({
   setName: '기본 장비',
   level: 1,
   slots: EQUIPMENT_SLOT_IDS.map((slotId) => {
-    const itemDefinition = getPlayerEquipmentItemDefinitionBySlotId(slotId)
-
-    if (!itemDefinition) {
-      throw new Error(`Missing equipment item definition for slot ${slotId}`)
-    }
-
     return {
       id: slotId,
       label: EQUIPMENT_SLOT_LABEL_BY_ID[slotId],
-      item: createPlayerEquipmentItemFromDefinition(itemDefinition)
+      item: slotId === 'weapon'
+        ? createPlayerEquipmentItemFromDefinition(STARTER_WEAPON_ITEM_DEFINITION)
+        : undefined
     }
   })
 })

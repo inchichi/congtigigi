@@ -35,7 +35,8 @@ describe('unequipPlayerEquipmentSlot', () => {
           },
           equipment.slots[1],
           equipment.slots[2],
-          equipment.slots[3]
+          equipment.slots[3],
+          equipment.slots[4]
         ]
       },
       inventory: {
@@ -98,7 +99,8 @@ describe('equipPlayerInventorySlot', () => {
           },
           equipment.slots[1],
           equipment.slots[2],
-          equipment.slots[3]
+          equipment.slots[3],
+          equipment.slots[4]
         ]
       },
       inventory: {

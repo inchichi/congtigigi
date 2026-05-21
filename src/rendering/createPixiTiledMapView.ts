@@ -1320,6 +1320,7 @@ export const createPixiTiledMapView = async ({
   })
   playerInventoryOverlay = createPlayerInventoryOverlay({
     mountElement,
+    profile: playerProfile,
     getInventory: () => currentPlayerInventory,
     getQuickslots: () => currentPlayerQuickslots,
     getEquipment: () => currentPlayerEquipment,
@@ -1334,6 +1335,10 @@ export const createPixiTiledMapView = async ({
       currentPlayerEquipment = nextEquipment
       onPlayerEquipmentChange(nextEquipment)
       syncPlayerCharacterVisual()
+      syncPlayerUiOverlays()
+    },
+    onRequestProfileChange: (nextProfile) => {
+      Object.assign(playerProfile, nextProfile)
       syncPlayerUiOverlays()
     }
   })

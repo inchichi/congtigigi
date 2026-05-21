@@ -35,6 +35,12 @@ const BUTTON_SQUARE_FRAME = {
   width: 45,
   height: 49
 }
+const ICON_CIRCLE_FRAME = {
+  x: 356,
+  y: 466,
+  width: 17,
+  height: 17
+}
 const HUD_MARGIN = 16
 const HUD_PANEL_MIN_WIDTH = 400
 const HUD_PANEL_MAX_WIDTH = 760
@@ -72,6 +78,7 @@ export const createPlayerHudOverlay = ({
   const skillDescriptionLabels: HTMLSpanElement[] = []
   const consumableButtons: HTMLButtonElement[] = []
   const consumableHotkeyLabels: HTMLSpanElement[] = []
+  const consumableIcons: HTMLSpanElement[] = []
   const consumableNameLabels: HTMLSpanElement[] = []
   const consumableQuantityLabels: HTMLSpanElement[] = []
   const skillSlotCount = profile.skills.length
@@ -98,6 +105,7 @@ export const createPlayerHudOverlay = ({
   for (let index = 0; index < QUICK_CONSUMABLE_SLOT_COUNT; index += 1) {
     const consumableButton = document.createElement('button')
     const hotkeyLabel = document.createElement('span')
+    const icon = document.createElement('span')
     const nameLabel = document.createElement('span')
     const quantityLabel = document.createElement('span')
 
@@ -113,19 +121,27 @@ export const createPlayerHudOverlay = ({
     hotkeyLabel.className = 'player-hud-overlay__consumable-hotkey'
     hotkeyLabel.textContent = QUICK_CONSUMABLE_HOTKEYS[index]
 
+    icon.className = 'player-hud-overlay__consumable-icon'
+    icon.setAttribute('aria-hidden', 'true')
+    icon.hidden = true
+
     nameLabel.className = 'player-hud-overlay__consumable-name'
     nameLabel.textContent = '비어있음'
 
     quantityLabel.className = 'player-hud-overlay__consumable-quantity'
     quantityLabel.hidden = true
 
-    consumableButton.append(hotkeyLabel, nameLabel, quantityLabel)
+    consumableButton.append(hotkeyLabel, icon, nameLabel, quantityLabel)
     consumableGrid.append(consumableButton)
 
     consumableButtons.push(consumableButton)
     consumableHotkeyLabels.push(hotkeyLabel)
+    consumableIcons.push(icon)
     consumableNameLabels.push(nameLabel)
     consumableQuantityLabels.push(quantityLabel)
+    consumableButton.addEventListener('dragstart', handleQuickslotDragStart)
+    consumableButton.addEventListener('dragover', handleQuickslotDragOver)
+    consumableButton.addEventListener('drop', handleQuickslotDrop)
   }
 
   for (let index = 0; index < skillSlotCount; index += 1) {
@@ -191,6 +207,21 @@ export const createPlayerHudOverlay = ({
     element.style.boxShadow = 'inset 0 1px 0 rgba(255, 255, 255, 0.7)'
   }
 
+  const clearFrame = (element: HTMLElement) => {
+    element.hidden = true
+    element.style.backgroundImage = 'none'
+  }
+
+  const renderConsumableIcon = (element: HTMLElement, hasItem: boolean) => {
+    if (!hasItem) {
+      clearFrame(element)
+      return
+    }
+
+    element.hidden = false
+    setSpriteFrame(element, ICON_CIRCLE_FRAME, 0.96)
+  }
+
   const isLikelyConsumableInventoryItem = (item: {
     id: string
     label: string
@@ -217,6 +248,13 @@ export const createPlayerHudOverlay = ({
   const getQuickslotIndexFromButton = (button: HTMLButtonElement): number =>
     Number(button.dataset.playerQuickslotIndex)
 
+  const hasInventoryDragData = (dataTransfer: DataTransfer): boolean =>
+    Array.from(dataTransfer.types).some((type) =>
+      type === 'application/x-player-drag-origin' ||
+      type === 'application/x-player-inventory-slot-index' ||
+      type === 'text/plain'
+    )
+
   const getDraggedInventorySlotIndex = (event: DragEvent): number | undefined => {
     const rawValue =
       event.dataTransfer?.getData('application/x-player-inventory-slot-index') ||
@@ -231,8 +269,11 @@ export const createPlayerHudOverlay = ({
     return Number.isNaN(slotIndex) ? undefined : slotIndex
   }
 
-  const handleQuickslotDragStart = (event: DragEvent) => {
-    const quickslotButton = getQuickslotButton(event.target)
+  function handleQuickslotDragStart(event: DragEvent) {
+    const quickslotButton =
+      event.currentTarget instanceof HTMLButtonElement
+        ? event.currentTarget
+        : undefined
 
     if (!quickslotButton || !event.dataTransfer) {
       return
@@ -260,23 +301,17 @@ export const createPlayerHudOverlay = ({
     event.dataTransfer.setData('text/plain', String(inventorySlotIndex))
   }
 
-  const handleQuickslotDragOver = (event: DragEvent) => {
-    const quickslotButton = getQuickslotButton(event.target)
+  function handleQuickslotDragOver(event: DragEvent) {
+    const quickslotButton =
+      event.currentTarget instanceof HTMLButtonElement
+        ? event.currentTarget
+        : undefined
 
     if (!quickslotButton || !event.dataTransfer) {
       return
     }
 
-    const inventorySlotIndex = getDraggedInventorySlotIndex(event)
-    const inventory = getInventory()
-
-    if (inventorySlotIndex === undefined) {
-      return
-    }
-
-    const item = inventory.slots[inventorySlotIndex]
-
-    if (!item || !isLikelyConsumableInventoryItem(item)) {
+    if (!hasInventoryDragData(event.dataTransfer)) {
       return
     }
 
@@ -284,8 +319,11 @@ export const createPlayerHudOverlay = ({
     event.dataTransfer.dropEffect = 'move'
   }
 
-  const handleQuickslotDrop = (event: DragEvent) => {
-    const quickslotButton = getQuickslotButton(event.target)
+  function handleQuickslotDrop(event: DragEvent) {
+    const quickslotButton =
+      event.currentTarget instanceof HTMLButtonElement
+        ? event.currentTarget
+        : undefined
 
     if (!quickslotButton) {
       return
@@ -405,24 +443,27 @@ export const createPlayerHudOverlay = ({
     for (let index = 0; index < consumableButtons.length; index += 1) {
       const consumableButton = consumableButtons[index]
       const hotkeyLabel = consumableHotkeyLabels[index]
+      const icon = consumableIcons[index]
       const nameLabel = consumableNameLabels[index]
       const quantityLabel = consumableQuantityLabels[index]
       const quickslot = quickslots.slots[index]
       const item = quickslot ? inventory.slots[quickslot.inventorySlotIndex] : undefined
       const isQuickslotItem = item ? isLikelyConsumableInventoryItem(item) : false
+      const hasQuickslotItem = Boolean(item && isQuickslotItem)
+      const quickslotItem = hasQuickslotItem ? item : undefined
 
       setSpriteFrame(consumableButton, BUTTON_SQUARE_FRAME)
       setEmptySlotAppearance(consumableButton)
       consumableButton.classList.toggle(
         'player-hud-overlay__consumable-slot--filled',
-        Boolean(item && isQuickslotItem)
+        hasQuickslotItem
       )
       consumableButton.classList.toggle(
         'player-hud-overlay__consumable-slot--empty',
-        !item || !isQuickslotItem
+        !hasQuickslotItem
       )
-      consumableButton.draggable = Boolean(item && isQuickslotItem)
-      if (item && isQuickslotItem) {
+      consumableButton.draggable = hasQuickslotItem
+      if (hasQuickslotItem) {
         consumableButton.style.borderColor = 'rgba(91, 134, 214, 0.42)'
         consumableButton.style.boxShadow =
           'inset 0 1px 0 rgba(255, 255, 255, 0.7), 0 0 0 1px rgba(91, 134, 214, 0.08)'
@@ -433,33 +474,36 @@ export const createPlayerHudOverlay = ({
       }
       consumableButton.setAttribute(
         'aria-label',
-        item && isQuickslotItem
-          ? `퀵슬롯 ${index + 1} ${item.label}${
-              item.quantity > 1 ? ` x${item.quantity}` : ''
+        quickslotItem
+          ? `퀵슬롯 ${index + 1} ${quickslotItem.label}${
+              quickslotItem.quantity > 1 ? ` x${quickslotItem.quantity}` : ''
             }. 드래그해서 다른 칸으로 이동`
           : `퀵슬롯 ${index + 1} 비어있음`
       )
-      consumableButton.title = item && isQuickslotItem
-        ? `${item.label}${item.quantity > 1 ? ` x${item.quantity}` : ''}. 드래그해서 다른 칸으로 이동`
+      consumableButton.title = quickslotItem
+        ? `${quickslotItem.label}${quickslotItem.quantity > 1 ? ` x${quickslotItem.quantity}` : ''}. 드래그해서 다른 칸으로 이동`
         : `퀵슬롯 ${index + 1} 비어있음`
       hotkeyLabel.textContent = QUICK_CONSUMABLE_HOTKEYS[index]
-      nameLabel.textContent = item && isQuickslotItem ? item.label : '비어있음'
-      quantityLabel.hidden = !(item && isQuickslotItem && item.quantity > 1)
+      renderConsumableIcon(icon, hasQuickslotItem)
+      nameLabel.hidden = hasQuickslotItem
+      nameLabel.textContent = hasQuickslotItem ? '' : '비어있음'
+      quantityLabel.hidden = !(quickslotItem && quickslotItem.quantity > 1)
       quantityLabel.textContent =
-        item && isQuickslotItem && item.quantity > 1 ? `x${item.quantity}` : ''
+        quickslotItem && quickslotItem.quantity > 1
+          ? `x${quickslotItem.quantity}`
+          : ''
     }
   }
 
-  consumableGrid.addEventListener('dragstart', handleQuickslotDragStart)
-  consumableGrid.addEventListener('dragover', handleQuickslotDragOver)
-  consumableGrid.addEventListener('drop', handleQuickslotDrop)
   consumableGrid.addEventListener('contextmenu', handleQuickslotContextMenu)
 
   const destroy = () => {
     overlayRoot.remove()
-    consumableGrid.removeEventListener('dragstart', handleQuickslotDragStart)
-    consumableGrid.removeEventListener('dragover', handleQuickslotDragOver)
-    consumableGrid.removeEventListener('drop', handleQuickslotDrop)
+    for (const consumableButton of consumableButtons) {
+      consumableButton.removeEventListener('dragstart', handleQuickslotDragStart)
+      consumableButton.removeEventListener('dragover', handleQuickslotDragOver)
+      consumableButton.removeEventListener('drop', handleQuickslotDrop)
+    }
     consumableGrid.removeEventListener('contextmenu', handleQuickslotContextMenu)
   }
 

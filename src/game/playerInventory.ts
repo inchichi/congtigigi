@@ -11,8 +11,20 @@ export type PlayerInventory = {
   slots: PlayerInventorySlot[]
 }
 
-const DEFAULT_PLAYER_INVENTORY_SLOT_COUNT = 12
+const DEFAULT_PLAYER_INVENTORY_SLOT_COUNT = 30
 const DEFAULT_PLAYER_INVENTORY_GOLD = 1000
+const DEFAULT_PLAYER_INVENTORY_STARTER_ITEMS: PlayerInventoryItem[] = [
+  {
+    id: 'health-potion',
+    label: '체력 회복 포션',
+    quantity: 30
+  },
+  {
+    id: 'mana-potion',
+    label: '마나 회복 포션',
+    quantity: 30
+  }
+]
 
 type CreateInitialPlayerInventoryInput = {
   slotCount?: number
@@ -31,12 +43,19 @@ type ClearPlayerInventorySlotInput = {
 }
 
 export const createInitialPlayerInventory = ({
-  slotCount = DEFAULT_PLAYER_INVENTORY_SLOT_COUNT,
+  slotCount,
   gold = DEFAULT_PLAYER_INVENTORY_GOLD
-}: CreateInitialPlayerInventoryInput = {}): PlayerInventory => ({
-  gold,
-  slots: Array.from({ length: slotCount }, () => undefined)
-})
+}: CreateInitialPlayerInventoryInput = {}): PlayerInventory => {
+  const resolvedSlotCount = slotCount ?? DEFAULT_PLAYER_INVENTORY_SLOT_COUNT
+  const starterItems = slotCount === undefined ? DEFAULT_PLAYER_INVENTORY_STARTER_ITEMS : []
+
+  return {
+    gold,
+    slots: Array.from({ length: resolvedSlotCount }, (_, index) =>
+      starterItems[index] ? { ...starterItems[index] } : undefined
+    )
+  }
+}
 
 export const setPlayerInventorySlot = ({
   inventory,

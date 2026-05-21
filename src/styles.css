@@ -620,10 +620,21 @@ body.game-root--map-focused > :not(.game-root) {
   position: absolute;
   left: 4px;
   top: 3px;
+  z-index: 1;
   color: #6b5534;
   font-size: 0.66rem;
   line-height: 1;
   letter-spacing: 0.08em;
+}
+
+.player-hud-overlay__consumable-icon {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  z-index: 1;
+  display: block;
+  pointer-events: none;
+  transform: translate(-50%, -50%);
 }
 
 .player-hud-overlay__consumable-name {
@@ -636,10 +647,15 @@ body.game-root--map-focused > :not(.game-root) {
   text-align: center;
 }
 
+.player-hud-overlay__consumable-slot--filled .player-hud-overlay__consumable-name {
+  display: none;
+}
+
 .player-hud-overlay__consumable-quantity {
   position: absolute;
   right: 5px;
   bottom: 4px;
+  z-index: 1;
   color: #6b5534;
   font-size: 0.66rem;
   line-height: 1;
@@ -1372,25 +1388,6 @@ body.game-root--map-focused > :not(.game-root) {
   pointer-events: none;
 }
 
-.player-inventory-overlay__slot-quickslot-badge {
-  position: absolute;
-  right: 4px;
-  top: 4px;
-  z-index: 1;
-  display: grid;
-  min-width: 16px;
-  min-height: 16px;
-  padding: 0 3px;
-  place-items: center;
-  border: 1px solid rgba(91, 134, 214, 0.42);
-  background: #fff9ee;
-  color: #5b86d6;
-  font-size: 0.52rem;
-  line-height: 1;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
 .player-inventory-overlay__slot-icon {
   position: absolute;
   left: 50%;
@@ -1445,11 +1442,11 @@ body.game-root--map-focused > :not(.game-root) {
 
 .player-inventory-overlay__equipment-layout {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   grid-template-areas:
-    'center center'
-    'weapon armor'
-    'boots accessory';
+    'center center center'
+    'weapon armor hat'
+    'boots accessory .';
   gap: 8px;
   align-items: stretch;
   width: 100%;
@@ -1469,8 +1466,8 @@ body.game-root--map-focused > :not(.game-root) {
   grid-area: center;
   align-content: start;
   justify-items: center;
-  gap: 8px;
-  padding: 8px 8px 10px;
+  gap: 4px;
+  padding: 6px 8px 8px;
   overflow: hidden;
   text-align: center;
 }
@@ -1501,7 +1498,7 @@ body.game-root--map-focused > :not(.game-root) {
 
 .player-inventory-overlay__equipment-center-details {
   display: grid;
-  gap: 4px;
+  gap: 2px;
   width: 100%;
   justify-items: center;
 }
@@ -1517,9 +1514,9 @@ body.game-root--map-focused > :not(.game-root) {
 .player-inventory-overlay__equipment-center-level,
 .player-inventory-overlay__equipment-center-set {
   color: #6b5534;
-  font-size: 0.64rem;
+  font-size: 0.6rem;
   letter-spacing: 0.08em;
-  line-height: 1.2;
+  line-height: 1.1;
   text-transform: uppercase;
 }
 
@@ -1552,6 +1549,10 @@ body.game-root--map-focused > :not(.game-root) {
   grid-area: armor;
 }
 
+.player-inventory-overlay__equipment-slot--hat {
+  grid-area: hat;
+}
+
 .player-inventory-overlay__equipment-slot--boots {
   grid-area: boots;
 }
@@ -1562,26 +1563,32 @@ body.game-root--map-focused > :not(.game-root) {
 
 .player-inventory-overlay__equipment-slot-label,
 .player-inventory-overlay__equipment-slot-level {
-  position: relative;
-  z-index: 1;
   font-size: 0.58rem;
   line-height: 1;
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
+.player-inventory-overlay__equipment-slot-label {
+  position: absolute;
+  left: 6px;
+  top: 5px;
+  z-index: 1;
+  pointer-events: none;
+}
+
 .player-inventory-overlay__equipment-slot-item {
   position: relative;
   z-index: 1;
   align-self: center;
-  justify-self: start;
+  justify-self: center;
   max-width: 100%;
   padding: 0 2px;
   color: #2e2313;
-  font-size: 0.7rem;
+  font-size: 0.74rem;
   line-height: 1.05;
   overflow-wrap: anywhere;
-  text-align: left;
+  text-align: center;
 }
 
 .player-inventory-overlay__equipment-slot-description {
@@ -1600,14 +1607,30 @@ body.game-root--map-focused > :not(.game-root) {
 
 .player-inventory-overlay__equipment-slot-icon {
   position: absolute;
-  right: 6px;
-  top: 6px;
+  left: 50%;
+  top: 50%;
   z-index: 1;
   display: block;
   width: 16px;
   height: 15px;
-  opacity: 0.72;
+  transform: translate(-50%, -50%);
+  opacity: 0.82;
   pointer-events: none;
+}
+
+.player-inventory-overlay__equipment-slot--empty .player-inventory-overlay__equipment-slot-item {
+  position: absolute;
+  left: 50%;
+  top: 64%;
+  transform: translate(-50%, -50%);
+  width: calc(100% - 10px);
+  color: #6b5534;
+  font-size: 0.68rem;
+  letter-spacing: 0.05em;
+  line-height: 1;
+  padding: 0;
+  white-space: nowrap;
+  text-transform: uppercase;
 }
 
 .player-equipment-overlay {
@@ -1765,6 +1788,7 @@ body.game-root--map-focused > :not(.game-root) {
   font-size: 0.92rem;
   line-height: 1.05;
   overflow-wrap: anywhere;
+  text-align: left;
 }
 
 .player-equipment-overlay__slot-description {

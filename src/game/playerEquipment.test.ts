@@ -25,32 +25,22 @@ describe('createInitialPlayerEquipment', () => {
         {
           id: 'armor',
           label: '옷',
-          item: {
-            id: 'basic-armor',
-            label: '기본 옷',
-            level: 1,
-            description: '초보용 옷'
-          }
+          item: undefined
+        },
+        {
+          id: 'hat',
+          label: '모자',
+          item: undefined
         },
         {
           id: 'boots',
           label: '신발',
-          item: {
-            id: 'basic-boots',
-            label: '기본 신발',
-            level: 1,
-            description: '초보용 신발'
-          }
+          item: undefined
         },
         {
           id: 'accessory',
           label: '장신구',
-          item: {
-            id: 'basic-charm',
-            label: '기본 장신구',
-            level: 1,
-            description: '초보용 장신구'
-          }
+          item: undefined
         }
       ]
     })

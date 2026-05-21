@@ -181,6 +181,7 @@ const PANEL_MARGIN = 16
 const EQUIPMENT_SLOT_AREA_CLASS_BY_ID: Record<PlayerEquipmentSlotId, string> = {
   weapon: 'player-inventory-overlay__equipment-slot--weapon',
   armor: 'player-inventory-overlay__equipment-slot--armor',
+  hat: 'player-inventory-overlay__equipment-slot--hat',
   boots: 'player-inventory-overlay__equipment-slot--boots',
   accessory: 'player-inventory-overlay__equipment-slot--accessory'
 }
@@ -202,7 +203,6 @@ export const createPlayerEquipmentOverlay = ({
   const headerRow = document.createElement('div')
   const titleGroup = document.createElement('div')
   const titleElement = document.createElement('div')
-  const summaryElement = document.createElement('div')
   const equipmentSection = document.createElement('section')
   const equipmentSectionHeader = document.createElement('div')
   const equipmentSectionTitle = document.createElement('div')
@@ -212,8 +212,6 @@ export const createPlayerEquipmentOverlay = ({
   const equipmentCenterPreview = document.createElement('div')
   const equipmentCenterPortrait = document.createElement('span')
   const equipmentCenterPortraitWeapon = document.createElement('span')
-  const equipmentCenterPortraitArmor = document.createElement('span')
-  const equipmentCenterPortraitBoots = document.createElement('span')
   const equipmentCenterPortraitAccessory = document.createElement('span')
   const equipmentCenterDetails = document.createElement('div')
   const equipmentCenterName = document.createElement('div')
@@ -268,14 +266,13 @@ export const createPlayerEquipmentOverlay = ({
   titleElement.id = 'player-equipment-title'
   titleElement.className = 'player-inventory-overlay__title'
   titleElement.textContent = '장비'
-  summaryElement.className = 'player-inventory-overlay__summary'
-  summaryElement.textContent = `${initialEquipment.setName} · 레벨 ${initialEquipment.level}`
 
   equipmentSection.className = 'player-inventory-overlay__equipment-section'
   equipmentSection.style.gridArea = 'equipment'
   equipmentSectionHeader.className = 'player-inventory-overlay__equipment-header'
   equipmentSectionTitle.className = 'player-inventory-overlay__equipment-title'
   equipmentSectionTitle.textContent = '장비'
+  equipmentSectionTitle.hidden = true
   equipmentSectionSummary.className =
     'player-inventory-overlay__equipment-summary'
   equipmentSectionSummary.textContent = '착용 중인 장비'
@@ -290,10 +287,6 @@ export const createPlayerEquipmentOverlay = ({
     'player-inventory-overlay__equipment-center-portrait'
   equipmentCenterPortraitWeapon.className =
     'player-inventory-overlay__equipment-center-gear player-inventory-overlay__equipment-center-gear--weapon'
-  equipmentCenterPortraitArmor.className =
-    'player-inventory-overlay__equipment-center-gear player-inventory-overlay__equipment-center-gear--armor'
-  equipmentCenterPortraitBoots.className =
-    'player-inventory-overlay__equipment-center-gear player-inventory-overlay__equipment-center-gear--boots'
   equipmentCenterPortraitAccessory.className =
     'player-inventory-overlay__equipment-center-gear player-inventory-overlay__equipment-center-gear--accessory'
   equipmentCenterDetails.className =
@@ -310,6 +303,7 @@ export const createPlayerEquipmentOverlay = ({
       : `레벨 ${profile.level}`
   equipmentCenterSet.className = 'player-inventory-overlay__equipment-center-set'
   equipmentCenterSet.textContent = initialEquipment.setName
+  equipmentCenterSet.hidden = initialEquipment.setName === '기본 장비'
 
   closeButton.type = 'button'
   closeButton.className = 'player-equipment-overlay__close player-stat-overlay__close'
@@ -337,6 +331,7 @@ export const createPlayerEquipmentOverlay = ({
 
     slotHeaderLabel.className = 'player-inventory-overlay__equipment-slot-label'
     slotHeaderLabel.textContent = slot.label
+    slotHeaderLabel.hidden = true
 
     slotItemLabel.className = 'player-inventory-overlay__equipment-slot-item'
     slotItemLabel.textContent = slot.item?.label ?? '비어 있음'
@@ -344,9 +339,11 @@ export const createPlayerEquipmentOverlay = ({
     slotDescriptionLabel.className =
       'player-inventory-overlay__equipment-slot-description'
     slotDescriptionLabel.textContent = slot.item?.description ?? '가방에서 장착하세요'
+    slotDescriptionLabel.hidden = true
 
     slotLevelBadge.className = 'player-inventory-overlay__equipment-slot-level'
     slotLevelBadge.textContent = `레벨 ${slot.item?.level ?? '-'}`
+    slotLevelBadge.hidden = true
 
     slotIcon.className = 'player-inventory-overlay__equipment-slot-icon'
     slotIcon.setAttribute('aria-hidden', 'true')
@@ -366,14 +363,14 @@ export const createPlayerEquipmentOverlay = ({
     equipmentSlotDescriptionLabels.push(slotDescriptionLabel)
     equipmentSlotLevelBadges.push(slotLevelBadge)
     equipmentSlotIcons.push(slotIcon)
+    slotCard.addEventListener('dragover', handleEquipmentLayoutDragOver)
+    slotCard.addEventListener('drop', handleEquipmentLayoutDrop)
   }
 
   equipmentLayout.append(equipmentCenterCard)
   equipmentCenterPreview.append(
     equipmentCenterPortrait,
     equipmentCenterPortraitWeapon,
-    equipmentCenterPortraitArmor,
-    equipmentCenterPortraitBoots,
     equipmentCenterPortraitAccessory
   )
   equipmentCenterDetails.append(
@@ -383,14 +380,14 @@ export const createPlayerEquipmentOverlay = ({
     equipmentCenterSet
   )
   equipmentCenterCard.append(equipmentCenterPreview, equipmentCenterDetails)
-  equipmentSectionHeader.append(equipmentSectionTitle, equipmentSectionSummary)
+  equipmentSectionHeader.append(equipmentSectionSummary)
   equipmentSection.append(equipmentSectionHeader, equipmentLayout)
 
   const footerElement = document.createElement('div')
   footerElement.className = 'player-inventory-overlay__footer'
   footerElement.textContent = '클릭하면 해제 · 가방에서 드래그해서 장착 · U, Esc로 닫기'
 
-  titleGroup.append(titleElement, summaryElement)
+  titleGroup.append(titleElement)
   headerRow.append(titleGroup, closeButton)
   closeButton.append(closeIcon)
   panelBody.append(headerRow, equipmentSection, footerElement)
@@ -674,7 +671,7 @@ export const createPlayerEquipmentOverlay = ({
       PANEL_LIGHT_FRAME.height * centerCardScale
     )
     equipmentCenterPreview.style.height = `${Math.round(
-      (centerCardScale >= 1.45 ? 96 : 84)
+      centerCardScale >= 1.45 ? 60 : 52
     )}px`
     renderPlayerPortrait(centerCardScale >= 1.45 ? 3.5 : 3)
     setPreviewPosition(equipmentCenterPortrait, 50, 52)
@@ -684,27 +681,13 @@ export const createPlayerEquipmentOverlay = ({
       centerCardScale >= 1.45 ? 1.6 : 1.35
     )
     renderEquipmentPreviewIcon(
-      equipmentCenterPortraitArmor,
-      getEquippedItemIdBySlotId('armor'),
-      centerCardScale >= 1.45 ? 1.4 : 1.2
-    )
-    renderEquipmentPreviewIcon(
-      equipmentCenterPortraitBoots,
-      getEquippedItemIdBySlotId('boots'),
-      centerCardScale >= 1.45 ? 1.25 : 1.05
-    )
-    renderEquipmentPreviewIcon(
       equipmentCenterPortraitAccessory,
       getEquippedItemIdBySlotId('accessory'),
       centerCardScale >= 1.45 ? 1.25 : 1.05
     )
     setPreviewPosition(equipmentCenterPortraitWeapon, 32, 62, -0.55)
-    setPreviewPosition(equipmentCenterPortraitArmor, 50, 29)
-    setPreviewPosition(equipmentCenterPortraitBoots, 50, 84)
     setPreviewPosition(equipmentCenterPortraitAccessory, 41, 54)
 
-    summaryElement.textContent = `${equipment.setName} · 레벨 ${equipment.level}`
-    equipmentSectionSummary.textContent = `${equipment.setName} · 레벨 ${equipment.level}`
     equipmentCenterName.textContent = profile.name
     equipmentCenterJob.textContent = getPlayerJobDisplayName(profile)
     equipmentCenterLevel.textContent =
@@ -712,6 +695,7 @@ export const createPlayerEquipmentOverlay = ({
         ? `레벨 ${profile.level} · MAX`
         : `레벨 ${profile.level}`
     equipmentCenterSet.textContent = equipment.setName
+    equipmentCenterSet.hidden = equipment.setName === '기본 장비'
 
     for (let index = 0; index < equipmentSlotCards.length; index += 1) {
       const slot = equipment.slots[index]
@@ -737,6 +721,10 @@ export const createPlayerEquipmentOverlay = ({
         'player-inventory-overlay__equipment-slot--empty',
         slotItem === undefined
       )
+      slotCard.classList.toggle(
+        'player-inventory-overlay__equipment-slot--filled',
+        slotItem !== undefined
+      )
       slotCard.setAttribute(
         'aria-label',
         slotItem
@@ -747,13 +735,19 @@ export const createPlayerEquipmentOverlay = ({
         ? `${slotLabel} ${slotItem.label}. 클릭하면 해제`
         : `${slotLabel} 비어 있음. 가방에서 드래그해서 장착`
 
-      slotHeaderLabel.textContent = slotLabel
-      slotItemLabel.textContent = slotItem ? slotItem.label : '비어 있음'
-      slotDescriptionLabel.textContent = slotItem
-        ? slotItem.description
-        : '가방에서 장착하세요'
-      slotLevelBadge.textContent = slotItem ? `레벨 ${slotItem.level}` : '--'
-      renderEquipmentIcon(slotIcon, slotItem?.id, equipmentSlotScale)
+      slotHeaderLabel.hidden = slotItem !== undefined
+      slotDescriptionLabel.hidden = true
+      slotLevelBadge.hidden = true
+
+      if (slotItem) {
+        slotItemLabel.hidden = true
+        slotItemLabel.textContent = ''
+        renderEquipmentIcon(slotIcon, slotItem.id, equipmentSlotScale)
+      } else {
+        slotItemLabel.hidden = false
+        slotItemLabel.textContent = '비어 있음'
+        clearFrame(slotIcon)
+      }
     }
   }
 
@@ -796,7 +790,7 @@ export const createPlayerEquipmentOverlay = ({
     }
   }
 
-  const handleEquipmentLayoutDragOver = (event: DragEvent) => {
+  function handleEquipmentLayoutDragOver(event: DragEvent) {
     if (!event.dataTransfer) {
       return
     }
@@ -827,7 +821,7 @@ export const createPlayerEquipmentOverlay = ({
     event.dataTransfer.dropEffect = 'move'
   }
 
-  const handleEquipmentLayoutDrop = (event: DragEvent) => {
+  function handleEquipmentLayoutDrop(event: DragEvent) {
     if (!event.dataTransfer) {
       return
     }
@@ -913,8 +907,6 @@ export const createPlayerEquipmentOverlay = ({
   closeButton.addEventListener('click', handleCloseButtonClick)
   closeButton.addEventListener('pointerdown', handleCloseButtonPointerDown)
   panel.addEventListener('click', handlePanelClick)
-  equipmentLayout.addEventListener('dragover', handleEquipmentLayoutDragOver)
-  equipmentLayout.addEventListener('drop', handleEquipmentLayoutDrop)
 
   const syncFrame = () => {
     syncLayout()
@@ -931,8 +923,10 @@ export const createPlayerEquipmentOverlay = ({
     closeButton.removeEventListener('click', handleCloseButtonClick)
     closeButton.removeEventListener('pointerdown', handleCloseButtonPointerDown)
     panel.removeEventListener('click', handlePanelClick)
-    equipmentLayout.removeEventListener('dragover', handleEquipmentLayoutDragOver)
-    equipmentLayout.removeEventListener('drop', handleEquipmentLayoutDrop)
+    for (const slotCard of equipmentSlotCards) {
+      slotCard.removeEventListener('dragover', handleEquipmentLayoutDragOver)
+      slotCard.removeEventListener('drop', handleEquipmentLayoutDrop)
+    }
     overlayRoot.remove()
   }
 

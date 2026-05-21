@@ -9,10 +9,22 @@ import {
 } from './playerInventory'
 
 describe('createInitialPlayerInventory', () => {
-  it('creates 12 empty slots by default', () => {
+  it('creates starter consumables in the default inventory', () => {
     expect(createInitialPlayerInventory()).toEqual({
       gold: 1000,
-      slots: Array.from({ length: 12 }, () => undefined)
+      slots: [
+        {
+          id: 'health-potion',
+          label: '체력 회복 포션',
+          quantity: 30
+        },
+        {
+          id: 'mana-potion',
+          label: '마나 회복 포션',
+          quantity: 30
+        },
+        ...Array.from({ length: 28 }, () => undefined)
+      ]
     })
   })
 
@@ -26,7 +38,19 @@ describe('createInitialPlayerInventory', () => {
   it('supports custom starting gold', () => {
     expect(createInitialPlayerInventory({ gold: 250 })).toEqual({
       gold: 250,
-      slots: Array.from({ length: 12 }, () => undefined)
+      slots: [
+        {
+          id: 'health-potion',
+          label: '체력 회복 포션',
+          quantity: 30
+        },
+        {
+          id: 'mana-potion',
+          label: '마나 회복 포션',
+          quantity: 30
+        },
+        ...Array.from({ length: 28 }, () => undefined)
+      ]
     })
   })
 })
