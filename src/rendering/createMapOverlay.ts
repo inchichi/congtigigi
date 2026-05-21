@@ -11,10 +11,17 @@ type CreateMapOverlayInput = {
     x: number
     y: number
   }
+  onExpandedChange?: (isExpanded: boolean) => void
 }
 
 export type MapOverlay = {
   syncFrame: () => void
+  getIsExpanded: () => boolean
+  getIsVisible: () => boolean
+  setExpanded: (isExpanded: boolean) => void
+  setVisible: (isVisible: boolean) => void
+  toggleExpanded: () => void
+  toggleVisible: () => void
   destroy: () => void
 }
 
@@ -31,7 +38,8 @@ export const createMapOverlay = ({
   mapPixelWidth,
   mapPixelHeight,
   getSceneScale,
-  getFocusPoint
+  getFocusPoint,
+  onExpandedChange
 }: CreateMapOverlayInput): MapOverlay => {
   const overlayRoot = document.createElement('div')
   const backdropButton = document.createElement('button')
@@ -46,6 +54,7 @@ export const createMapOverlay = ({
   }
 
   let isExpanded = false
+  let isVisible = true
   let displayWidth = 0
   let displayHeight = 0
   let backingWidth = 0
@@ -78,8 +87,10 @@ export const createMapOverlay = ({
   overlayRoot.append(backdropButton, panelButton)
   mountElement.append(overlayRoot)
 
+  const shouldShowOverlay = () => isVisible || isExpanded
+
   const syncFrame = () => {
-    if (displayWidth === 0 || displayHeight === 0) {
+    if (!shouldShowOverlay() || displayWidth === 0 || displayHeight === 0) {
       return
     }
 
@@ -196,6 +207,18 @@ export const createMapOverlay = ({
   }
 
   const syncLayout = () => {
+    const shouldShow = shouldShowOverlay()
+
+    overlayRoot.hidden = !shouldShow
+    overlayRoot.style.display = shouldShow ? '' : 'none'
+    overlayRoot.setAttribute('aria-hidden', String(!shouldShow))
+    panelButton.hidden = !shouldShow
+
+    if (!shouldShow) {
+      backdropButton.hidden = true
+      return
+    }
+
     const uiScale = getResponsiveUiScale()
     const availableWidth = isExpanded
       ? Math.max(1, window.innerWidth - OVERLAY_MARGIN * 2)
@@ -276,6 +299,32 @@ export const createMapOverlay = ({
 
     isExpanded = nextExpanded
     syncLayout()
+    onExpandedChange?.(isExpanded)
+  }
+
+  const setVisible = (nextVisible: boolean) => {
+    if (isVisible === nextVisible) {
+      return
+    }
+
+    isVisible = nextVisible
+
+    if (!isVisible && isExpanded) {
+      isExpanded = false
+      syncLayout()
+      onExpandedChange?.(isExpanded)
+      return
+    }
+
+    syncLayout()
+  }
+
+  const toggleExpanded = () => {
+    setExpanded(!isExpanded)
+  }
+
+  const toggleVisible = () => {
+    setVisible(!isVisible)
   }
 
   const handlePanelClick = (event: MouseEvent) => {
@@ -288,32 +337,27 @@ export const createMapOverlay = ({
     setExpanded(false)
   }
 
-  const handleWindowKeyDown = (event: KeyboardEvent) => {
-    if (!isExpanded || event.key !== 'Escape') {
-      return
-    }
-
-    event.preventDefault()
-    setExpanded(false)
-  }
-
   const handleWindowResize = () => {
     syncLayout()
   }
 
   panelButton.addEventListener('click', handlePanelClick)
   backdropButton.addEventListener('click', handleBackdropClick)
-  window.addEventListener('keydown', handleWindowKeyDown)
   window.addEventListener('resize', handleWindowResize)
 
   syncLayout()
 
   return {
     syncFrame,
+    getIsExpanded: () => isExpanded,
+    getIsVisible: () => isVisible,
+    setExpanded,
+    setVisible,
+    toggleExpanded,
+    toggleVisible,
     destroy: () => {
       panelButton.removeEventListener('click', handlePanelClick)
       backdropButton.removeEventListener('click', handleBackdropClick)
-      window.removeEventListener('keydown', handleWindowKeyDown)
       window.removeEventListener('resize', handleWindowResize)
       overlayRoot.remove()
     }

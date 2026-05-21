@@ -164,6 +164,122 @@ body {
   pointer-events: none;
 }
 
+.pause-menu-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  pointer-events: none;
+}
+
+.pause-menu-overlay__backdrop,
+.pause-menu-overlay__resume {
+  appearance: none;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+
+.pause-menu-overlay__backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: auto;
+  background: rgba(9, 7, 6, 0.68);
+  cursor: zoom-out;
+  touch-action: manipulation;
+}
+
+.pause-menu-overlay__panel {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  z-index: 1;
+  display: grid;
+  pointer-events: auto;
+  overflow: hidden;
+  background: #f0e0b8;
+  box-shadow: 0 0 0 2px rgba(244, 231, 197, 0.92), 0 18px 36px rgba(0, 0, 0, 0.45);
+  color: #2e2313;
+}
+
+.pause-menu-overlay__panel-body {
+  display: grid;
+  grid-template-rows: auto auto auto 1fr;
+  gap: 18px;
+  width: 100%;
+  height: 100%;
+  padding: 28px 30px 26px;
+}
+
+.pause-menu-overlay__title {
+  color: #2e2313;
+  font-size: 1.08rem;
+  letter-spacing: 0.08em;
+  line-height: 1;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+.pause-menu-overlay__volume-row {
+  display: grid;
+  grid-template-columns: 74px minmax(0, 1fr) 48px;
+  gap: 12px;
+  align-items: center;
+  min-width: 0;
+}
+
+.pause-menu-overlay__volume-label,
+.pause-menu-overlay__volume-value {
+  color: #6b5534;
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  line-height: 1;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.pause-menu-overlay__volume-value {
+  justify-self: end;
+}
+
+.pause-menu-overlay__volume-input {
+  width: 100%;
+  accent-color: #8b6f3f;
+}
+
+.pause-menu-overlay__resume {
+  align-self: end;
+  justify-self: center;
+  min-width: 150px;
+  min-height: 38px;
+  padding: 9px 16px;
+  border: 1px solid rgba(111, 89, 58, 0.42);
+  background: rgba(255, 249, 238, 0.72);
+  color: #2e2313;
+  cursor: pointer;
+  font-size: 0.78rem;
+  letter-spacing: 0.08em;
+  line-height: 1;
+  text-transform: uppercase;
+  touch-action: manipulation;
+  transition: filter 120ms ease, transform 120ms ease;
+}
+
+.pause-menu-overlay__resume:hover,
+.pause-menu-overlay__resume:focus-visible {
+  filter: brightness(1.05);
+  transform: translateY(-1px);
+}
+
+.pause-menu-overlay__backdrop:focus-visible,
+.pause-menu-overlay__resume:focus-visible,
+.pause-menu-overlay__volume-input:focus-visible {
+  outline: 2px solid rgba(111, 89, 58, 0.8);
+  outline-offset: 2px;
+}
+
 .scene-intro-overlay {
   position: fixed;
   inset: 0;
