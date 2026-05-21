@@ -82,6 +82,10 @@ import type { MonsterAnimationTextures } from './monsterAnimationTextures'
 import { loadMonsterPigAnimationTextures } from './loadMonsterPigAnimationTextures'
 import { loadMonsterSlimeAnimationTextures } from './loadMonsterSlimeAnimationTextures'
 import { createGameSoundEffects } from './createGameSoundEffects'
+import {
+  createPauseMenuOverlay,
+  type AudioSettings
+} from './createPauseMenuOverlay'
 
 type CreatePixiTiledMapViewInput = {
   mountElement: HTMLElement
@@ -104,6 +108,8 @@ type CreatePixiTiledMapViewInput = {
   onPlayerEquipmentChange: (nextEquipment: PlayerEquipment) => void
   onPlayerQuickslotsChange: (nextQuickslots: PlayerQuickslots) => void
   onMerchantInventoryChange: (nextInventory: PlayerInventory) => void
+  audioSettings: AudioSettings
+  onAudioSettingsChange: (nextAudioSettings: AudioSettings) => void
   onRequestSceneChange: (request: SceneTransitionRequest) => void
 }
 
@@ -308,6 +314,8 @@ const BLACKSMITH_SHOP_NPC_ID = 'blacksmith'
 const SIGN_POST_APPEARANCE_TYPE = 'sign_inn'
 const MONSTER_PIG_APPEARANCE_TYPE = 'monster_pig'
 const MONSTER_SLIME_APPEARANCE_TYPE = 'monster_slime'
+const GROUND_LAYER_NAME = 'ground'
+const GRASS_TILE_TYPES = new Set(['garden_round_mid_01'])
 const GAME_VIEWPORT_WIDTH = 960
 const GAME_VIEWPORT_HEIGHT = 540
 const CAMERA_DEFAULT_ZOOM = 1.1
@@ -571,6 +579,8 @@ export const createPixiTiledMapView = async ({
   onPlayerEquipmentChange,
   onPlayerQuickslotsChange,
   onMerchantInventoryChange,
+  audioSettings,
+  onAudioSettingsChange,
   onRequestSceneChange
 }: CreatePixiTiledMapViewInput): Promise<{ destroy: () => void }> => {
   const app = new Application()
@@ -673,7 +683,10 @@ export const createPixiTiledMapView = async ({
   const pressedActions = new Set<CharacterAction>()
   const triggeredActions = new Set<CharacterAction>()
   const gameEventQueue = createGameEventQueue()
-  const gameSoundEffects = createGameSoundEffects()
+  let currentAudioSettings = audioSettings
+  const gameSoundEffects = createGameSoundEffects({
+    masterVolume: currentAudioSettings.sfxVolume
+  })
   const interactionLockUntilByCharacterPair = new Map<string, number>()
   const activeCharacterMessages = new Map<string, ActiveCharacterMessage>()
   const activeCharacterDamageTexts = new Map<
@@ -709,6 +722,7 @@ export const createPixiTiledMapView = async ({
   let isPlayerEquipmentOpen = false
   let isPlayerSkillOpen = false
   let isBlacksmithShopOpen = false
+  let isPauseMenuOpen = false
   let playerHudOverlay: {
     syncFrame: () => void
     destroy: () => void
@@ -751,6 +765,13 @@ export const createPixiTiledMapView = async ({
     syncFrame: () => {},
     destroy: () => {}
   }
+  let pauseMenuOverlay: {
+    syncFrame: () => void
+    destroy: () => void
+  } = {
+    syncFrame: () => {},
+    destroy: () => {}
+  }
   const monsterPatrolStates = new Map<string, MonsterPatrolState>()
   const monsterSpawnStates = new Map<string, CharacterState>()
   const monsterPigAnimatedSprites = new Map<string, AnimatedSprite>()
@@ -787,6 +808,8 @@ export const createPixiTiledMapView = async ({
     facing: initialPlayerCharacter.facing
   }
   const mapPortals = createMapPortalsFromEventLayers({ map })
+  const grassTiles = createGrassTileLookup(map)
+  let handleMapOverlayExpandedChange = (_isExpanded: boolean) => {}
   const mapOverlay = createMapOverlay({
     mountElement,
     cameraElement: viewportElement,
@@ -812,7 +835,8 @@ export const createPixiTiledMapView = async ({
           focusCharacter.position.y * map.tileHeight +
           characterPixelHeight / 2
       }
-    }
+    },
+    onExpandedChange: (isExpanded) => handleMapOverlayExpandedChange(isExpanded)
   })
   const syncViewportDisplayScale = () => {
     const displayScale = Math.max(
@@ -853,6 +877,7 @@ export const createPixiTiledMapView = async ({
     playerStatOverlay.syncFrame()
     playerSkillOverlay.syncFrame()
     playerShopOverlay.syncFrame()
+    pauseMenuOverlay.syncFrame()
   }
   const syncPlayerDerivedCharacterStats = () => {
     const playerCharacter = getCharacterStateById(PLAYER_CHARACTER_ID)
@@ -962,6 +987,29 @@ export const createPixiTiledMapView = async ({
     depthSortedLayer?.sortChildren()
     slashSprite.play()
   }
+  const stopPlayerFootsteps = () => {
+    gameSoundEffects.stop('grassFootstep')
+  }
+  const syncPlayerFootsteps = (didPlayerMove: boolean) => {
+    if (
+      !didPlayerMove ||
+      playerProfile.hp.current === 0 ||
+      isPauseMenuOpen ||
+      mapOverlay.getIsExpanded()
+    ) {
+      stopPlayerFootsteps()
+      return
+    }
+
+    const playerCharacter = getCharacterStateById(PLAYER_CHARACTER_ID)
+
+    if (!isCharacterOnGrass(playerCharacter, grassTiles)) {
+      stopPlayerFootsteps()
+      return
+    }
+
+    gameSoundEffects.startLoop('grassFootstep')
+  }
   const setPlayerUiOpen = (nextIsOpen: boolean) => {
     if (isPlayerUiOpen === nextIsOpen) {
       return
@@ -1002,15 +1050,54 @@ export const createPixiTiledMapView = async ({
     isBlacksmithShopOpen = nextIsOpen
     syncPlayerUiOverlays()
   }
-  const closeAllOverlays = () => {
+  const setPauseMenuOpen = (nextIsOpen: boolean) => {
+    if (isPauseMenuOpen === nextIsOpen) {
+      return
+    }
+
+    isPauseMenuOpen = nextIsOpen
+    if (nextIsOpen) {
+      isPlayerUiOpen = false
+      isPlayerStatOpen = false
+      isPlayerEquipmentOpen = false
+      isPlayerSkillOpen = false
+      isBlacksmithShopOpen = false
+      mapOverlay.setExpanded(false)
+      gameSoundEffects.stopAllLoops()
+    }
+    clearPressedInputState()
+    syncPlayerUiOverlays()
+  }
+  const updateCurrentAudioSettings = (nextAudioSettings: AudioSettings) => {
+    currentAudioSettings = nextAudioSettings
+    gameSoundEffects.setMasterVolume(currentAudioSettings.sfxVolume)
+    onAudioSettingsChange(currentAudioSettings)
+    pauseMenuOverlay.syncFrame()
+  }
+  handleMapOverlayExpandedChange = (nextIsExpanded: boolean) => {
+    if (nextIsExpanded) {
+      isPlayerUiOpen = false
+      isPlayerStatOpen = false
+      isPlayerEquipmentOpen = false
+      isPlayerSkillOpen = false
+      isBlacksmithShopOpen = false
+      isPauseMenuOpen = false
+      gameSoundEffects.stopAllLoops()
+    }
+    clearPressedInputState()
+    syncPlayerUiOverlays()
+  }
+  const closeAllOverlays = (): boolean => {
     if (
       !isPlayerUiOpen &&
       !isPlayerStatOpen &&
       !isPlayerEquipmentOpen &&
       !isPlayerSkillOpen &&
-      !isBlacksmithShopOpen
+      !isBlacksmithShopOpen &&
+      !isPauseMenuOpen &&
+      !mapOverlay.getIsExpanded()
     ) {
-      return
+      return false
     }
 
     isPlayerUiOpen = false
@@ -1018,7 +1105,12 @@ export const createPixiTiledMapView = async ({
     isPlayerEquipmentOpen = false
     isPlayerSkillOpen = false
     isBlacksmithShopOpen = false
+    isPauseMenuOpen = false
+    mapOverlay.setExpanded(false)
+    gameSoundEffects.stopAllLoops()
+    clearPressedInputState()
     syncPlayerUiOverlays()
+    return true
   }
   const requestSceneTransition = (portal: MapPortal) => {
     if (isSceneTransitionPending) {
@@ -1028,6 +1120,7 @@ export const createPixiTiledMapView = async ({
     isSceneTransitionPending = true
     closeAllOverlays()
     clearPressedInputState()
+    stopPlayerFootsteps()
     triggeredActions.clear()
     gameEventQueue.clear()
     onRequestSceneChange({
@@ -1131,6 +1224,13 @@ export const createPixiTiledMapView = async ({
       onMerchantInventoryChange(nextMerchantInventory)
       syncPlayerUiOverlays()
     }
+  })
+  pauseMenuOverlay = createPauseMenuOverlay({
+    mountElement,
+    getIsOpen: () => isPauseMenuOpen,
+    getAudioSettings: () => currentAudioSettings,
+    onRequestOpenChange: setPauseMenuOpen,
+    onAudioSettingsChange: updateCurrentAudioSettings
   })
 
   const syncRuntimeWarningBanner = () => {
@@ -2366,6 +2466,7 @@ export const createPixiTiledMapView = async ({
       now + PLAYER_RESPAWN_DELAY_MILLISECONDS
     playerHitReactionState = undefined
     clearPressedInputState()
+    stopPlayerFootsteps()
     playerAttackStartedAtMilliseconds = undefined
     playerAttackResolvedStartedAtMilliseconds = undefined
     playerAttackFacing = undefined
@@ -3018,7 +3119,7 @@ export const createPixiTiledMapView = async ({
     options: {
       preserveFacing?: boolean
     } = {}
-  ) => {
+  ): boolean => {
     const currentCharacter = getCharacterStateById(characterId)
     const desiredFacing = moveCharacterState({
       character: currentCharacter,
@@ -3108,7 +3209,7 @@ export const createPixiTiledMapView = async ({
       nextCharacter.position.y === currentCharacter.position.y &&
       nextCharacter.facing === currentCharacter.facing
     ) {
-      return
+      return false
     }
 
     characterStates = characterStates.map((character) =>
@@ -3129,13 +3230,15 @@ export const createPixiTiledMapView = async ({
 
       if (touchedPortal) {
         requestSceneTransition(touchedPortal)
-        return
+        return didPositionChange
       }
     }
 
     if (nextCharacter.id === cameraTargetCharacterId && didPositionChange) {
       centerCameraOnCharacter(nextCharacter)
     }
+
+    return didPositionChange
   }
 
   const drainControllerRuntimeEventsIntoQueue = () => {
@@ -3146,11 +3249,20 @@ export const createPixiTiledMapView = async ({
 
   const updateCharacters = () => {
     try {
-      controllerRuntime.syncCharacters(characterStates)
-      drainControllerRuntimeEventsIntoQueue()
       const now = performance.now()
 
+      if (isPauseMenuOpen) {
+        clearPressedInputState()
+        stopPlayerFootsteps()
+        triggeredActions.clear()
+        lastRuntimeErrorMessage = undefined
+        return
+      }
+
+      controllerRuntime.syncCharacters(characterStates)
+      drainControllerRuntimeEventsIntoQueue()
       maybeRespawnPlayer(now)
+      let didPlayerMoveThisFrame = false
 
       for (const character of [...characterStates]) {
         if (character.id === PLAYER_CHARACTER_ID && playerProfile.hp.current === 0) {
@@ -3166,10 +3278,19 @@ export const createPixiTiledMapView = async ({
 
         if (intent) {
           if (intent.movement) {
-            tryMoveCharacter(character.id, intent.movement.x, intent.movement.y)
+            const didMove = tryMoveCharacter(
+              character.id,
+              intent.movement.x,
+              intent.movement.y
+            )
+
+            if (character.id === PLAYER_CHARACTER_ID && didMove) {
+              didPlayerMoveThisFrame = true
+            }
           }
 
           if (isSceneTransitionPending) {
+            stopPlayerFootsteps()
             return
           }
 
@@ -3400,9 +3521,11 @@ export const createPixiTiledMapView = async ({
       syncActiveCharacterMessages()
       syncActiveCharacterDamageTexts(now)
       syncPlayerCharacterVisual(now)
+      syncPlayerFootsteps(didPlayerMoveThisFrame)
       triggeredActions.clear()
       lastRuntimeErrorMessage = undefined
     } catch (error) {
+      stopPlayerFootsteps()
       gameEventQueue.clear()
       triggeredActions.clear()
 
@@ -3426,6 +3549,52 @@ export const createPixiTiledMapView = async ({
       event.code === 'KeyU' || event.key.toLowerCase() === 'u'
     const isSkillToggleKey =
       event.code === 'KeyK' || event.key.toLowerCase() === 'k'
+    const isMapToggleKey =
+      event.code === 'KeyM' || event.key.toLowerCase() === 'm'
+
+    if (event.key === 'Escape') {
+      event.preventDefault()
+
+      if (event.repeat) {
+        return
+      }
+
+      if (!closeAllOverlays()) {
+        setPauseMenuOpen(true)
+      }
+
+      return
+    }
+
+    if (isPauseMenuOpen) {
+      if (
+        !(event.target instanceof HTMLInputElement) ||
+        event.target.type !== 'range'
+      ) {
+        event.preventDefault()
+      }
+
+      return
+    }
+
+    if (isMapToggleKey) {
+      if (!event.repeat) {
+        event.preventDefault()
+
+        if (mapOverlay.getIsExpanded()) {
+          mapOverlay.setExpanded(false)
+        } else {
+          mapOverlay.toggleVisible()
+        }
+      }
+
+      return
+    }
+
+    if (mapOverlay.getIsExpanded()) {
+      event.preventDefault()
+      return
+    }
 
     if (isInventoryToggleKey) {
       if (!event.repeat) {
@@ -3460,19 +3629,6 @@ export const createPixiTiledMapView = async ({
         setPlayerSkillOpen(!isPlayerSkillOpen)
       }
 
-      return
-    }
-
-    if (
-      event.key === 'Escape' &&
-      (isPlayerUiOpen ||
-        isPlayerStatOpen ||
-        isPlayerEquipmentOpen ||
-        isPlayerSkillOpen ||
-        isBlacksmithShopOpen)
-    ) {
-      event.preventDefault()
-      closeAllOverlays()
       return
     }
 
@@ -3529,6 +3685,7 @@ export const createPixiTiledMapView = async ({
 
   const handleWindowBlur = () => {
     clearPressedInputState()
+    stopPlayerFootsteps()
   }
 
   const handleViewportWheel = (event: WheelEvent) => {
@@ -3585,6 +3742,7 @@ export const createPixiTiledMapView = async ({
     UPDATE_PRIORITY.UTILITY
   )
   app.ticker.add(playerShopOverlay.syncFrame, undefined, UPDATE_PRIORITY.UTILITY)
+  app.ticker.add(pauseMenuOverlay.syncFrame, undefined, UPDATE_PRIORITY.UTILITY)
   syncAllCharacterSprites()
   syncViewportDisplayScale()
   centerCameraOnCharacter(getCharacterStateById(cameraTargetCharacterId))
@@ -3596,6 +3754,7 @@ export const createPixiTiledMapView = async ({
   playerStatOverlay.syncFrame()
   playerSkillOverlay.syncFrame()
   playerShopOverlay.syncFrame()
+  pauseMenuOverlay.syncFrame()
   handleVisibilityChange()
 
   const destroy = () => {
@@ -3618,6 +3777,7 @@ export const createPixiTiledMapView = async ({
     app.ticker.remove(playerStatOverlay.syncFrame)
     app.ticker.remove(playerSkillOverlay.syncFrame)
     app.ticker.remove(playerShopOverlay.syncFrame)
+    app.ticker.remove(pauseMenuOverlay.syncFrame)
     gameEventQueue.clear()
     monsterPatrolStates.clear()
     monsterSpawnStates.clear()
@@ -3649,6 +3809,7 @@ export const createPixiTiledMapView = async ({
     playerStatOverlay.destroy()
     playerSkillOverlay.destroy()
     playerShopOverlay.destroy()
+    pauseMenuOverlay.destroy()
     gameSoundEffects.destroy()
     controllerRuntime.destroy()
     app.destroy({ removeView: true }, { children: true })
@@ -3849,6 +4010,45 @@ const isCharacterPositionBlocked = (
     )
   )
 }
+
+const createGrassTileLookup = (map: ParsedTiledMap): Set<string> => {
+  const groundLayer = map.layers.find(
+    (layer) => layer.name.toLowerCase() === GROUND_LAYER_NAME
+  )
+  const grassTileKeys = new Set<string>()
+
+  if (!groundLayer) {
+    return grassTileKeys
+  }
+
+  for (const tile of groundLayer.tiles) {
+    const tileset = resolveTilesetForTile(tile, map.tilesets)
+    const tileType = tileset.tileTypes[tile.localId]
+
+    if (tileType && GRASS_TILE_TYPES.has(tileType)) {
+      grassTileKeys.add(createTileLookupKey(tile.x, tile.y))
+    }
+  }
+
+  return grassTileKeys
+}
+
+const isCharacterOnGrass = (
+  character: CharacterState,
+  grassTiles: Set<string>
+): boolean => {
+  const tileX = Math.floor(
+    character.position.x + character.collisionSize.width / 2
+  )
+  const tileY = Math.floor(
+    character.position.y + character.collisionSize.height / 2
+  )
+
+  return grassTiles.has(createTileLookupKey(tileX, tileY))
+}
+
+const createTileLookupKey = (tileX: number, tileY: number): string =>
+  `${tileX},${tileY}`
 
 const createCollisionRectFromCharacter = (
   character: CharacterState
