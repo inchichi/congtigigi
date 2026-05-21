@@ -1,8 +1,19 @@
 import type { PlayerProfile } from '../game/playerProfile'
 import {
   getPlayerSkillLevelLabel,
+  getPlayerSkillPointCost,
+  getPlayerSkillUserLevel,
   spendPlayerSkillPoint
 } from '../game/playerProgression'
+import {
+  PLAYER_SKILL_DRAG_MIME_TYPE
+} from '../game/playerSkillSlots'
+import {
+  PLAYER_PROTECT_SKILL_ID,
+  getPlayerSkillDisplayInfoById,
+  isPlayerSkillUnlockedInProfile
+} from '../game/playerSkills'
+import { PLAYER_SMASH_SKILL_ID } from '../game/playerSmashSkill'
 import { getResponsiveUiScale } from './getResponsiveUiScale'
 
 type CreatePlayerSkillOverlayInput = {
@@ -50,11 +61,22 @@ export const createPlayerSkillOverlay = ({
   const skillGrid = document.createElement('div')
   const footerElement = document.createElement('div')
   const skillRows: HTMLButtonElement[] = []
+  const skillIcons: HTMLSpanElement[] = []
   const skillHotkeys: HTMLSpanElement[] = []
   const skillNames: HTMLSpanElement[] = []
   const skillLevels: HTMLSpanElement[] = []
   const skillDescriptions: HTMLSpanElement[] = []
   const skillActions: HTMLSpanElement[] = []
+  const visibleSkillEntries = [
+    {
+      profileSkillIndex: 0,
+      skillId: PLAYER_SMASH_SKILL_ID
+    },
+    {
+      profileSkillIndex: 1,
+      skillId: PLAYER_PROTECT_SKILL_ID
+    }
+  ] as const
   let panelPosition = { left: 0, top: 0 }
   let hasPanelPosition = false
   let dragState:
@@ -88,7 +110,7 @@ export const createPlayerSkillOverlay = ({
   titleElement.className = 'player-skill-overlay__title'
   titleElement.textContent = '스킬'
   summaryElement.className = 'player-skill-overlay__summary'
-  summaryElement.textContent = `남은 포인트 ${profile.skillPoints}`
+  summaryElement.textContent = `남은 포인트 ${profile.availableSkillPoints}`
 
   closeButton.type = 'button'
   closeButton.className = 'player-skill-overlay__close'
@@ -105,7 +127,9 @@ export const createPlayerSkillOverlay = ({
   infoJob.className = 'player-skill-overlay__info-job'
   infoJob.textContent = profile.job
   infoLevel.className = 'player-skill-overlay__info-level'
-  infoLevel.textContent = `레벨 ${profile.level}`
+  infoLevel.textContent = `사용자 레벨 ${getPlayerSkillUserLevel(
+    profile.totalSkillPointsEarned
+  )}`
   infoHint.className = 'player-skill-overlay__info-hint'
   infoHint.textContent = '레벨업마다 스킬 포인트를 사용해 기술을 성장시킵니다'
 
@@ -113,8 +137,11 @@ export const createPlayerSkillOverlay = ({
   footerElement.className = 'player-skill-overlay__footer'
   footerElement.textContent = '클릭해서 스킬 강화 · Esc로 닫기'
 
-  for (const skill of profile.skills) {
+  for (const skillEntry of visibleSkillEntries) {
+    const skill = profile.skills[skillEntry.profileSkillIndex]
+    const displaySkill = getPlayerSkillDisplayInfoById(skillEntry.skillId)
     const row = document.createElement('button')
+    const icon = document.createElement('span')
     const hotkey = document.createElement('span')
     const content = document.createElement('div')
     const name = document.createElement('span')
@@ -124,8 +151,13 @@ export const createPlayerSkillOverlay = ({
 
     row.type = 'button'
     row.className = 'player-skill-overlay__skill-row'
-    row.dataset.playerSkillIndex = String(skillRows.length)
+    row.dataset.playerSkillIndex = String(skillEntry.profileSkillIndex)
+    row.dataset.playerSkillId = skillEntry.skillId
     row.setAttribute('aria-label', `${skill.label} 강화`)
+    row.draggable = isPlayerSkillUnlockedInProfile(profile, skillEntry.skillId)
+
+    icon.className = 'player-skill-overlay__skill-icon'
+    icon.setAttribute('aria-hidden', 'true')
 
     hotkey.className = 'player-skill-overlay__skill-hotkey'
     hotkey.textContent = skill.hotkey
@@ -141,10 +173,12 @@ export const createPlayerSkillOverlay = ({
     action.textContent = '강화'
 
     content.append(name, description)
-    row.append(hotkey, content, level, action)
+    row.append(icon, hotkey, content, level, action)
+    renderSkillIcon(icon, displaySkill.iconUrl)
     skillGrid.append(row)
 
     skillRows.push(row)
+    skillIcons.push(icon)
     skillHotkeys.push(hotkey)
     skillNames.push(name)
     skillLevels.push(level)
@@ -275,24 +309,45 @@ export const createPlayerSkillOverlay = ({
 
     infoName.textContent = profile.name
     infoJob.textContent = profile.job
-    infoLevel.textContent = `레벨 ${profile.level}`
-    summaryElement.textContent = `남은 포인트 ${profile.skillPoints}`
+    infoLevel.textContent = `사용자 레벨 ${getPlayerSkillUserLevel(
+      profile.totalSkillPointsEarned
+    )}`
+    summaryElement.textContent = `남은 포인트 ${profile.availableSkillPoints}`
 
-    for (let index = 0; index < profile.skills.length; index += 1) {
-      const skill = profile.skills[index]
+    for (let index = 0; index < visibleSkillEntries.length; index += 1) {
+      const skillEntry = visibleSkillEntries[index]
+      const skill = profile.skills[skillEntry.profileSkillIndex]
+
+      if (!skill) {
+        continue
+      }
+
+      const displaySkill = getPlayerSkillDisplayInfoById(skillEntry.skillId)
       const row = skillRows[index]
+      const icon = skillIcons[index]
       const hotkey = skillHotkeys[index]
       const name = skillNames[index]
       const level = skillLevels[index]
       const description = skillDescriptions[index]
       const action = skillActions[index]
-      const canUpgrade =
-        profile.skillPoints > 0 && skill.level < skill.maxLevel
+    const skillPointCost = getPlayerSkillPointCost(skill)
+    const canUpgrade =
+      profile.availableSkillPoints >= skillPointCost && skillPointCost > 0
+    const actionLabel =
+      skill.level <= 0
+        ? '잠김'
+        : skill.level >= skill.maxLevel
+          ? 'MAX'
+          : '강화'
 
-      row.disabled = !canUpgrade
       row.classList.toggle('player-skill-overlay__skill-row--locked', !canUpgrade)
+      row.classList.toggle(
+        'player-skill-overlay__skill-row--draggable',
+        isPlayerSkillUnlockedInProfile(profile, skillEntry.skillId)
+      )
+      row.draggable = isPlayerSkillUnlockedInProfile(profile, skillEntry.skillId)
       row.title = canUpgrade
-        ? `${skill.label}을 1 올립니다`
+        ? `${skill.label}을 ${skillPointCost} 포인트로 올립니다`
         : skill.level >= skill.maxLevel
           ? `${skill.label}은 이미 최대 레벨입니다`
           : '스킬 포인트가 부족합니다'
@@ -308,7 +363,8 @@ export const createPlayerSkillOverlay = ({
       name.textContent = skill.label
       description.textContent = skill.description
       level.textContent = getPlayerSkillLevelLabel(skill)
-      action.textContent = skill.level >= skill.maxLevel ? 'MAX' : canUpgrade ? '강화' : '잠김'
+      action.textContent = actionLabel
+      renderSkillIcon(icon, displaySkill.iconUrl)
     }
   }
 
@@ -320,6 +376,38 @@ export const createPlayerSkillOverlay = ({
     }
 
     onRequestProfileChange(nextProfile)
+  }
+
+  const handleSkillRowDragStart = (event: DragEvent) => {
+    const row =
+      event.currentTarget instanceof HTMLButtonElement
+        ? event.currentTarget
+        : undefined
+
+    if (!row || !event.dataTransfer) {
+      return
+    }
+
+    const skillId = row.dataset.playerSkillId
+
+    if (!skillId) {
+      event.preventDefault()
+      return
+    }
+
+    const skillIndex = Number(row.dataset.playerSkillIndex)
+    const skill = Number.isNaN(skillIndex)
+      ? undefined
+      : profile.skills[skillIndex]
+
+    if (!skill || !isPlayerSkillUnlockedInProfile(profile, skillId)) {
+      event.preventDefault()
+      return
+    }
+
+    event.dataTransfer.effectAllowed = 'move'
+    event.dataTransfer.setData(PLAYER_SKILL_DRAG_MIME_TYPE, skillId)
+    event.dataTransfer.setData('text/plain', skillId)
   }
 
   const handlePanelClick = (event: MouseEvent) => {
@@ -393,6 +481,9 @@ export const createPlayerSkillOverlay = ({
   closeButton.addEventListener('click', handleCloseButtonClick)
   panel.addEventListener('click', handlePanelClick)
   document.addEventListener('keydown', handleGlobalKeyDown, true)
+  for (const skillRow of skillRows) {
+    skillRow.addEventListener('dragstart', handleSkillRowDragStart)
+  }
 
   const syncFrame = () => {
     syncLayout()
@@ -409,6 +500,9 @@ export const createPlayerSkillOverlay = ({
     closeButton.removeEventListener('click', handleCloseButtonClick)
     panel.removeEventListener('click', handlePanelClick)
     document.removeEventListener('keydown', handleGlobalKeyDown, true)
+    for (const skillRow of skillRows) {
+      skillRow.removeEventListener('dragstart', handleSkillRowDragStart)
+    }
     overlayRoot.remove()
   }
 
@@ -422,3 +516,25 @@ export const createPlayerSkillOverlay = ({
 
 const clamp = (value: number, min: number, max: number): number =>
   Math.min(max, Math.max(min, value))
+
+const renderSkillIcon = (
+  element: HTMLSpanElement,
+  iconUrl: string | undefined
+) => {
+  if (!iconUrl) {
+    element.hidden = true
+    element.style.backgroundImage = 'none'
+    element.style.backgroundRepeat = 'no-repeat'
+    element.style.backgroundPosition = 'center'
+    element.style.backgroundSize = 'contain'
+    element.style.imageRendering = 'pixelated'
+    return
+  }
+
+  element.hidden = false
+  element.style.backgroundImage = `url(${iconUrl})`
+  element.style.backgroundRepeat = 'no-repeat'
+  element.style.backgroundPosition = 'center'
+  element.style.backgroundSize = 'contain'
+  element.style.imageRendering = 'pixelated'
+}

@@ -9,8 +9,8 @@ import {
 
 describe('getPlayerExperienceToNextLevel', () => {
   it('uses a level-based growth curve and stops at level 100', () => {
-    expect(getPlayerExperienceToNextLevel(1)).toBe(100)
-    expect(getPlayerExperienceToNextLevel(5)).toBe(180)
+    expect(getPlayerExperienceToNextLevel(1)).toBe(140)
+    expect(getPlayerExperienceToNextLevel(5)).toBe(260)
     expect(getPlayerExperienceToNextLevel(100)).toBe(0)
   })
 })
@@ -34,26 +34,23 @@ describe('grantPlayerExperience', () => {
   it('levels up and carries overflow experience forward', () => {
     const profile = createInitialPlayerProfile()
 
-    expect(grantPlayerExperience(profile, 120)).toEqual({
+    expect(grantPlayerExperience(profile, 150)).toEqual({
       nextProfile: {
         ...profile,
         level: 2,
         statPoints: 3,
-        skillPoints: 1,
+        availableSkillPoints: 0,
+        totalSkillPointsEarned: 0,
         hp: {
           current: 28,
           max: 28
         },
-        mp: {
-          current: 14,
-          max: 14
-        },
         experience: {
-          current: 20
+          current: 10
         }
       },
       levelsGained: 1,
-      gainedExperience: 120
+      gainedExperience: 150
     })
   })
 
@@ -70,14 +67,11 @@ describe('grantPlayerExperience', () => {
         ...profile,
         level: 100,
         statPoints: profile.statPoints + 3,
-        skillPoints: profile.skillPoints + 1,
+        availableSkillPoints: profile.availableSkillPoints,
+        totalSkillPointsEarned: profile.totalSkillPointsEarned,
         hp: {
           current: profile.hp.max + 4,
           max: profile.hp.max + 4
-        },
-        mp: {
-          current: profile.mp.max + 2,
-          max: profile.mp.max + 2
         },
         experience: {
           current: 0

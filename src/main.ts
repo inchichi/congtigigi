@@ -29,6 +29,7 @@ import { createInitialPlayerEquipment } from './game/playerEquipment'
 import { createInitialPlayerInventory } from './game/playerInventory'
 import { createInitialPlayerProfile } from './game/playerProfile'
 import { createInitialPlayerQuickslots } from './game/playerQuickslots'
+import { createInitialPlayerSkillSlots } from './game/playerSkillSlots'
 import {
   normalizeStoredPlayerControlBindings,
   PLAYER_CONTROL_BINDINGS_STORAGE_KEY,
@@ -118,6 +119,7 @@ const playerProfile = createInitialPlayerProfile()
 let playerEquipment = createInitialPlayerEquipment()
 let playerInventory = createInitialPlayerInventory()
 let playerQuickslots = createInitialPlayerQuickslots()
+let playerSkillSlots = createInitialPlayerSkillSlots()
 let playerControlBindings = readStoredPlayerControlBindings()
 let questLog = createInitialQuestLog()
 let merchantInventory = createInitialBlacksmithInventory()
@@ -173,6 +175,7 @@ const bootstrapScene = async (
     playerEquipment,
     playerInventory,
     playerQuickslots,
+    playerSkillSlots,
     playerControlBindings,
     questLog,
     merchantInventory,
@@ -200,6 +203,9 @@ const bootstrapScene = async (
     },
     onPlayerQuickslotsChange: (nextQuickslots) => {
       playerQuickslots = nextQuickslots
+    },
+    onPlayerSkillSlotsChange: (nextSkillSlots) => {
+      playerSkillSlots = nextSkillSlots
     },
     onPlayerControlBindingsChange: (nextControlBindings) => {
       playerControlBindings = nextControlBindings

@@ -10,6 +10,15 @@ import {
   setPlayerQuickslotAssignment,
   type PlayerQuickslots
 } from '../game/playerQuickslots'
+import {
+  PLAYER_SKILL_DRAG_MIME_TYPE,
+  clearPlayerSkillSlotAssignment,
+  PLAYER_SKILL_SLOT_COUNT,
+  PLAYER_SKILL_SLOT_HOTKEY_LABELS,
+  setPlayerSkillSlotAssignment,
+  type PlayerSkillSlots
+} from '../game/playerSkillSlots'
+import { getPlayerSkillDisplayInfoById } from '../game/playerSkills'
 import { getResponsiveUiScale } from './getResponsiveUiScale'
 
 type CreatePlayerHudOverlayInput = {
@@ -17,7 +26,9 @@ type CreatePlayerHudOverlayInput = {
   profile: PlayerProfile
   getInventory: () => PlayerInventory
   getQuickslots: () => PlayerQuickslots
+  getSkillSlots: () => PlayerSkillSlots
   onRequestQuickslotChange: (nextQuickslots: PlayerQuickslots) => void
+  onRequestSkillSlotsChange: (nextSkillSlots: PlayerSkillSlots) => void
 }
 
 export type PlayerHudOverlay = {
@@ -77,7 +88,6 @@ const HUD_PANEL_MAX_WIDTH = 760
 const HUD_PANEL_SCALE_MULTIPLIER = 0.82
 const HEALTH_BAR_COLOR = '#d06b5d'
 const MANA_BAR_COLOR = '#5b86d6'
-const SKILL_HOTKEYS = ['Q', 'W', 'E', 'R'] as const
 const QUICK_CONSUMABLE_HOTKEYS = ['1', '2', '3', '4', '5', '6'] as const
 const QUICK_CONSUMABLE_SLOT_COUNT = QUICK_CONSUMABLE_HOTKEYS.length
 type HudHoverTarget =
@@ -95,7 +105,9 @@ export const createPlayerHudOverlay = ({
   profile,
   getInventory,
   getQuickslots,
-  onRequestQuickslotChange
+  getSkillSlots,
+  onRequestQuickslotChange,
+  onRequestSkillSlotsChange
 }: CreatePlayerHudOverlayInput): PlayerHudOverlay => {
   const overlayRoot = document.createElement('div')
   const panel = document.createElement('section')
@@ -120,6 +132,7 @@ export const createPlayerHudOverlay = ({
   const tooltipDescription = document.createElement('div')
   const tooltipHint = document.createElement('div')
   const skillButtons: HTMLButtonElement[] = []
+  const skillIcons: HTMLSpanElement[] = []
   const skillHotkeyLabels: HTMLSpanElement[] = []
   const skillNameLabels: HTMLSpanElement[] = []
   const skillDescriptionLabels: HTMLSpanElement[] = []
@@ -128,7 +141,7 @@ export const createPlayerHudOverlay = ({
   const consumableIcons: HTMLSpanElement[] = []
   const consumableNameLabels: HTMLSpanElement[] = []
   const consumableQuantityLabels: HTMLSpanElement[] = []
-  const skillSlotCount = profile.skills.length
+  const skillSlotCount = PLAYER_SKILL_SLOT_COUNT
   let hoveredHudTarget: HudHoverTarget | undefined
   let tooltipAnchor = {
     x: 0,
@@ -216,8 +229,8 @@ export const createPlayerHudOverlay = ({
   }
 
   for (let index = 0; index < skillSlotCount; index += 1) {
-    const skill = profile.skills[index]
     const skillButton = document.createElement('button')
+    const skillIcon = document.createElement('span')
     const hotkeyLabel = document.createElement('span')
     const nameLabel = document.createElement('span')
     const descriptionLabel = document.createElement('span')
@@ -225,16 +238,16 @@ export const createPlayerHudOverlay = ({
     skillButton.type = 'button'
     skillButton.className = 'player-hud-overlay__skill-slot'
     skillButton.dataset.playerSkillIndex = String(index)
-    skillButton.setAttribute(
-      'aria-label',
-      skill ? `${skill.label} ${skill.description}` : `스킬 슬롯 ${index + 1}`
-    )
-    skillButton.title = skill
-      ? `${skill.label} · ${skill.description}`
-      : `스킬 슬롯 ${index + 1} 비어있음`
+    skillButton.setAttribute('aria-label', `스킬 슬롯 ${index + 1} 비어있음`)
+    skillButton.title = `스킬 슬롯 ${index + 1} 비어있음`
+    skillButton.draggable = false
+
+    skillIcon.className = 'player-hud-overlay__skill-icon'
+    skillIcon.setAttribute('aria-hidden', 'true')
+    skillIcon.hidden = true
 
     hotkeyLabel.className = 'player-hud-overlay__skill-hotkey'
-    hotkeyLabel.textContent = SKILL_HOTKEYS[index]
+    hotkeyLabel.textContent = PLAYER_SKILL_SLOT_HOTKEY_LABELS[index]
 
     nameLabel.className = 'player-hud-overlay__skill-name'
     nameLabel.textContent = '비어있음'
@@ -242,13 +255,17 @@ export const createPlayerHudOverlay = ({
     descriptionLabel.className = 'player-hud-overlay__skill-description'
     descriptionLabel.textContent = ''
 
-    skillButton.append(hotkeyLabel, nameLabel, descriptionLabel)
+    skillButton.append(hotkeyLabel, skillIcon, nameLabel, descriptionLabel)
     skillGrid.append(skillButton)
 
     skillButtons.push(skillButton)
+    skillIcons.push(skillIcon)
     skillHotkeyLabels.push(hotkeyLabel)
     skillNameLabels.push(nameLabel)
     skillDescriptionLabels.push(descriptionLabel)
+    skillButton.addEventListener('dragstart', handleSkillSlotDragStart)
+    skillButton.addEventListener('dragover', handleSkillSlotDragOver)
+    skillButton.addEventListener('drop', handleSkillSlotDrop)
     skillButton.addEventListener('pointerenter', showTooltipForSkill)
     skillButton.addEventListener('pointermove', showTooltipForSkill)
     skillButton.addEventListener('pointerleave', hideTooltip)
@@ -313,6 +330,26 @@ export const createPlayerHudOverlay = ({
     element.style.backgroundImage = 'none'
   }
 
+  const renderSkillIcon = (
+    element: HTMLElement,
+    iconUrl: string | undefined,
+    scale = 0.92
+  ) => {
+    if (!iconUrl) {
+      clearFrame(element)
+      return
+    }
+
+    element.hidden = false
+    element.style.backgroundImage = `url(${iconUrl})`
+    element.style.backgroundRepeat = 'no-repeat'
+    element.style.backgroundPosition = 'center'
+    element.style.backgroundSize = 'contain'
+    element.style.width = `${Math.round(34 * scale)}px`
+    element.style.height = `${Math.round(34 * scale)}px`
+    element.style.imageRendering = 'pixelated'
+  }
+
   const getConsumableIconFrame = (itemId: string) => {
     switch (itemId) {
       case 'health-potion':
@@ -347,6 +384,27 @@ export const createPlayerHudOverlay = ({
 
   const getSkillButtonIndexFromButton = (button: HTMLButtonElement): number =>
     Number(button.dataset.playerSkillIndex)
+
+  const getSkillSlotButtonIndexFromButton = (
+    button: HTMLButtonElement
+  ): number => Number(button.dataset.playerSkillIndex)
+
+  const hasSkillDragData = (dataTransfer: DataTransfer): boolean =>
+    Array.from(dataTransfer.types).some((type) =>
+      type === PLAYER_SKILL_DRAG_MIME_TYPE || type === 'text/plain'
+    )
+
+  const getDraggedSkillId = (event: DragEvent): string | undefined => {
+    const rawValue =
+      event.dataTransfer?.getData(PLAYER_SKILL_DRAG_MIME_TYPE) ||
+      event.dataTransfer?.getData('text/plain')
+
+    if (!rawValue) {
+      return undefined
+    }
+
+    return rawValue.length > 0 ? rawValue : undefined
+  }
 
   function hideTooltip() {
     hoveredHudTarget = undefined
@@ -393,18 +451,23 @@ export const createPlayerHudOverlay = ({
       renderConsumableIcon(tooltipIcon, quickslotItem?.id, 1.02)
     } else {
       const index = hoveredHudTarget.index
-      const skill = profile.skills[index]
+      const skillSlot = getSkillSlots().slots[index]
+      const skill = skillSlot
+        ? getPlayerSkillDisplayInfoById(skillSlot.skillId)
+        : undefined
 
       if (!skill) {
-        hideTooltip()
-        return
+        tooltipName.textContent = `스킬 슬롯 ${index + 1} 비어 있음`
+        tooltipMeta.textContent = `스킬 슬롯 ${index + 1}`
+        tooltipDescription.textContent = '스킬을 장착하세요.'
+        tooltipHint.textContent = '스킬 슬롯을 채우면 여기서 확인할 수 있습니다'
+      } else {
+        tooltipName.textContent = skill.label
+        tooltipMeta.textContent = `스킬 슬롯 ${index + 1}`
+        tooltipDescription.textContent = skill.description
+        tooltipHint.textContent = '스킬 슬롯에 장착된 기술입니다'
       }
-
-      tooltipName.textContent = skill.label
-      tooltipMeta.textContent = `${skill.hotkey} · ${skill.level >= skill.maxLevel ? 'MAX' : `${skill.level} / ${skill.maxLevel}`}`
-      tooltipDescription.textContent = skill.description
-      tooltipHint.textContent = '스킬 창에서 강화할 수 있습니다'
-      clearFrame(tooltipIcon)
+      renderSkillIcon(tooltipIcon, skill?.iconUrl, 1.02)
     }
 
     tooltipPanel.hidden = false
@@ -514,6 +577,16 @@ export const createPlayerHudOverlay = ({
     }
 
     return target.closest('button[data-player-quickslot-index]') as
+      | HTMLButtonElement
+      | undefined
+  }
+
+  const getSkillButton = (target: EventTarget | null) => {
+    if (!(target instanceof Element)) {
+      return undefined
+    }
+
+    return target.closest('button[data-player-skill-index]') as
       | HTMLButtonElement
       | undefined
   }
@@ -633,6 +706,89 @@ export const createPlayerHudOverlay = ({
     )
   }
 
+  function handleSkillSlotDragStart(event: DragEvent) {
+    const skillButton =
+      event.currentTarget instanceof HTMLButtonElement
+        ? event.currentTarget
+        : undefined
+
+    if (!skillButton || !event.dataTransfer) {
+      return
+    }
+
+    const skillSlotIndex = getSkillSlotButtonIndexFromButton(skillButton)
+    const skillSlot = getSkillSlots().slots[skillSlotIndex]
+
+    if (!skillSlot) {
+      event.preventDefault()
+      return
+    }
+
+    event.dataTransfer.effectAllowed = 'move'
+    event.dataTransfer.setData(PLAYER_SKILL_DRAG_MIME_TYPE, skillSlot.skillId)
+    event.dataTransfer.setData('text/plain', skillSlot.skillId)
+  }
+
+  function handleSkillSlotDragOver(event: DragEvent) {
+    const skillButton =
+      event.currentTarget instanceof HTMLButtonElement
+        ? event.currentTarget
+        : undefined
+
+    if (!skillButton || !event.dataTransfer) {
+      return
+    }
+
+    if (!hasSkillDragData(event.dataTransfer)) {
+      return
+    }
+
+    event.preventDefault()
+    event.dataTransfer.dropEffect = 'move'
+  }
+
+  function handleSkillSlotDrop(event: DragEvent) {
+    const skillButton =
+      event.currentTarget instanceof HTMLButtonElement
+        ? event.currentTarget
+        : undefined
+
+    if (!skillButton) {
+      return
+    }
+
+    const skillId = getDraggedSkillId(event)
+
+    if (!skillId) {
+      return
+    }
+
+    event.preventDefault()
+    onRequestSkillSlotsChange(
+      setPlayerSkillSlotAssignment({
+        skillSlots: getSkillSlots(),
+        skillSlotIndex: getSkillSlotButtonIndexFromButton(skillButton),
+        skillId
+      })
+    )
+  }
+
+  const handleSkillSlotContextMenu = (event: MouseEvent) => {
+    const skillButton = getSkillButton(event.target)
+
+    if (!skillButton) {
+      return
+    }
+
+    event.preventDefault()
+    onRequestSkillSlotsChange(
+      clearPlayerSkillSlotAssignment({
+        skillSlots: getSkillSlots(),
+        skillSlotIndex: getSkillSlotButtonIndexFromButton(skillButton)
+      })
+    )
+  }
+
   const syncResourceRow = (
     row: HTMLDivElement,
     value: { current: number; max: number },
@@ -688,24 +844,44 @@ export const createPlayerHudOverlay = ({
     )
 
     for (let index = 0; index < skillButtons.length; index += 1) {
-      const skill = profile.skills[index]
+      const skillSlot = getSkillSlots().slots[index]
+      const skill = skillSlot
+        ? getPlayerSkillDisplayInfoById(skillSlot.skillId)
+        : undefined
       const skillButton = skillButtons[index]
+      const skillIcon = skillIcons[index]
       const hotkeyLabel = skillHotkeyLabels[index]
       const nameLabel = skillNameLabels[index]
       const descriptionLabel = skillDescriptionLabels[index]
 
       setSpriteFrame(skillButton, BUTTON_SQUARE_FRAME)
       setEmptySlotAppearance(skillButton)
+      skillButton.draggable = Boolean(skill)
+      skillButton.classList.toggle(
+        'player-hud-overlay__skill-slot--draggable',
+        Boolean(skill)
+      )
+      skillButton.classList.toggle(
+        'player-hud-overlay__skill-slot--filled',
+        Boolean(skill)
+      )
+      skillButton.classList.toggle(
+        'player-hud-overlay__skill-slot--empty',
+        !skill
+      )
       skillButton.setAttribute(
         'aria-label',
-        skill ? `${skill.label} ${skill.description}` : `스킬 슬롯 ${index + 1}`
+        skill
+          ? `${skill.label} ${skill.description}`
+          : `스킬 슬롯 ${index + 1} 비어있음`
       )
       skillButton.title = skill
         ? `${skill.label} · ${skill.description}`
         : `스킬 슬롯 ${index + 1} 비어있음`
-      hotkeyLabel.textContent = SKILL_HOTKEYS[index]
+      hotkeyLabel.textContent = PLAYER_SKILL_SLOT_HOTKEY_LABELS[index]
       nameLabel.textContent = skill ? skill.label : '비어있음'
       descriptionLabel.textContent = skill ? skill.description : ''
+      renderSkillIcon(skillIcon, skill?.iconUrl)
     }
 
     const quickslots = getQuickslots()
@@ -775,6 +951,7 @@ export const createPlayerHudOverlay = ({
   }
 
   consumableGrid.addEventListener('contextmenu', handleQuickslotContextMenu)
+  skillGrid.addEventListener('contextmenu', handleSkillSlotContextMenu)
   panel.addEventListener('pointerleave', hideTooltip)
 
   const destroy = () => {
@@ -788,11 +965,15 @@ export const createPlayerHudOverlay = ({
       consumableButton.removeEventListener('pointerleave', hideTooltip)
     }
     for (const skillButton of skillButtons) {
+      skillButton.removeEventListener('dragstart', handleSkillSlotDragStart)
+      skillButton.removeEventListener('dragover', handleSkillSlotDragOver)
+      skillButton.removeEventListener('drop', handleSkillSlotDrop)
       skillButton.removeEventListener('pointerenter', showTooltipForSkill)
       skillButton.removeEventListener('pointermove', showTooltipForSkill)
       skillButton.removeEventListener('pointerleave', hideTooltip)
     }
     consumableGrid.removeEventListener('contextmenu', handleQuickslotContextMenu)
+    skillGrid.removeEventListener('contextmenu', handleSkillSlotContextMenu)
     panel.removeEventListener('pointerleave', hideTooltip)
   }
 

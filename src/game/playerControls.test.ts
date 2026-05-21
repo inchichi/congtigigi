@@ -55,6 +55,7 @@ describe('playerControls', () => {
     )
     expect(getPlayerControlActionFromCode(bindings, 'Enter')).toBe('interact')
     expect(getPlayerControlActionFromCode(bindings, 'KeyA')).toBe('attack')
+    expect(getPlayerControlActionFromCode(bindings, 'KeyQ')).toBeUndefined()
     expect(getPlayerControlQuickslotIndexFromCode(bindings, 'Digit6')).toBe(5)
   })
 

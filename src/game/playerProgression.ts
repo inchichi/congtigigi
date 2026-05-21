@@ -4,12 +4,20 @@ import {
   type PlayerSkillSlot,
   type PlayerStatId
 } from './playerProfile'
-import { PLAYER_INTELLIGENCE_MP_BONUS_PER_POINT } from './playerStatEffects'
+import {
+  PLAYER_BASE_INTELLIGENCE_STAT,
+  PLAYER_INTELLIGENCE_MP_BONUS_PER_POINT
+} from './playerStatEffects'
 
 export const PLAYER_LEVEL_UP_STAT_POINTS = 3
-export const PLAYER_LEVEL_UP_SKILL_POINTS = 1
 export const PLAYER_LEVEL_UP_HP_BONUS = 4
-export const PLAYER_LEVEL_UP_MP_BONUS = 2
+const PLAYER_SKILL_USER_LEVEL_BASE_MANA_BY_LEVEL: Record<number, number> = {
+  1: 12,
+  2: 16,
+  3: 20,
+  4: 24,
+  5: 28
+}
 
 export const grantPlayerLevelUpRewards = (
   profile: PlayerProfile,
@@ -26,22 +34,37 @@ export const grantPlayerLevelUpRewards = (
   }
 
   const nextHpMax = profile.hp.max + appliedLevels * PLAYER_LEVEL_UP_HP_BONUS
-  const nextMpMax = profile.mp.max + appliedLevels * PLAYER_LEVEL_UP_MP_BONUS
 
   return {
     ...profile,
     level: profile.level + appliedLevels,
     statPoints: profile.statPoints + appliedLevels * PLAYER_LEVEL_UP_STAT_POINTS,
-    skillPoints: profile.skillPoints + appliedLevels * PLAYER_LEVEL_UP_SKILL_POINTS,
     hp: {
       current: nextHpMax,
       max: nextHpMax
-    },
-    mp: {
-      current: nextMpMax,
-      max: nextMpMax
     }
   }
+}
+
+export const grantPlayerSkillPoints = (
+  profile: PlayerProfile,
+  gainedSkillPoints: number
+): PlayerProfile => {
+  const normalizedSkillPoints = Math.max(0, Math.floor(gainedSkillPoints))
+
+  if (normalizedSkillPoints === 0) {
+    return profile
+  }
+
+  const nextProfile = {
+    ...profile,
+    availableSkillPoints:
+      profile.availableSkillPoints + normalizedSkillPoints,
+    totalSkillPointsEarned:
+      profile.totalSkillPointsEarned + normalizedSkillPoints
+  }
+
+  return syncPlayerManaFromSkillProgress(nextProfile)
 }
 
 export const spendPlayerStatPoint = (
@@ -52,22 +75,20 @@ export const spendPlayerStatPoint = (
     return undefined
   }
 
-  return {
+  const nextProfile = {
     ...profile,
-    statPoints: profile.statPoints - 1,
     stats: {
       ...profile.stats,
       [statId]: profile.stats[statId] + 1
-    },
+    }
+  }
+
+  return {
+    ...nextProfile,
+    statPoints: profile.statPoints - 1,
     mp:
       statId === 'intelligence'
-        ? {
-            current: Math.min(
-              profile.mp.max + PLAYER_INTELLIGENCE_MP_BONUS_PER_POINT,
-              profile.mp.current + PLAYER_INTELLIGENCE_MP_BONUS_PER_POINT
-            ),
-            max: profile.mp.max + PLAYER_INTELLIGENCE_MP_BONUS_PER_POINT
-          }
+        ? syncPlayerManaFromSkillProgress(nextProfile).mp
         : profile.mp
   }
 }
@@ -78,11 +99,13 @@ export const spendPlayerSkillPoint = (
 ): PlayerProfile | undefined => {
   const skill = profile.skills[skillIndex]
 
-  if (
-    profile.skillPoints <= 0 ||
-    !skill ||
-    skill.level >= skill.maxLevel
-  ) {
+  if (!skill) {
+    return undefined
+  }
+
+  const skillPointCost = getPlayerSkillPointCost(skill)
+
+  if (skillPointCost <= 0 || profile.availableSkillPoints < skillPointCost) {
     return undefined
   }
 
@@ -97,10 +120,74 @@ export const spendPlayerSkillPoint = (
 
   return {
     ...profile,
-    skillPoints: profile.skillPoints - 1,
+    availableSkillPoints: profile.availableSkillPoints - skillPointCost,
     skills: nextSkills
   }
 }
 
+export const getPlayerSkillPointCost = (
+  skill: PlayerSkillSlot
+): number => {
+  if (skill.level >= skill.maxLevel) {
+    return 0
+  }
+
+  if (skill.level <= 1) {
+    return 2
+  }
+
+  if (skill.level === 2) {
+    return 3
+  }
+
+  return 4
+}
+
 export const getPlayerSkillLevelLabel = (skill: PlayerSkillSlot): string =>
   skill.level >= skill.maxLevel ? 'MAX' : `${skill.level} / ${skill.maxLevel}`
+
+export const getPlayerSkillUserLevel = (
+  totalSkillPointsEarned: number
+): number => Math.max(1, Math.floor(totalSkillPointsEarned) + 1)
+
+export const getPlayerMaxManaBySkillUserLevel = (skillUserLevel: number): number => {
+  const normalizedLevel = Math.max(1, Math.floor(skillUserLevel))
+
+  return (
+    PLAYER_SKILL_USER_LEVEL_BASE_MANA_BY_LEVEL[normalizedLevel] ??
+    PLAYER_SKILL_USER_LEVEL_BASE_MANA_BY_LEVEL[5] +
+      (normalizedLevel - 5) * 4
+  )
+}
+
+export const getPlayerMaxManaForProfile = (
+  profile: Pick<PlayerProfile, 'stats' | 'totalSkillPointsEarned'>
+): number =>
+  getPlayerMaxManaBySkillUserLevel(
+    getPlayerSkillUserLevel(profile.totalSkillPointsEarned)
+  ) +
+  Math.max(0, profile.stats.intelligence - PLAYER_BASE_INTELLIGENCE_STAT) *
+    PLAYER_INTELLIGENCE_MP_BONUS_PER_POINT
+
+const syncPlayerManaFromSkillProgress = (
+  profile: PlayerProfile
+): PlayerProfile => {
+  const nextMpMax = getPlayerMaxManaForProfile(profile)
+
+  if (nextMpMax === profile.mp.max) {
+    return profile
+  }
+
+  const nextMpCurrent = Math.min(
+    nextMpMax,
+    profile.mp.current + Math.max(0, nextMpMax - profile.mp.max)
+  )
+
+  return {
+    ...profile,
+    mp: {
+      current: nextMpCurrent,
+      max: nextMpMax
+    }
+  }
+}

@@ -116,6 +116,21 @@ describe('getCharacterControllerIntent', () => {
     })
   })
 
+  it('emits a smash action from keyboard controllers', () => {
+    expect(
+      getCharacterControllerIntent({
+        character: createInitialPlayerCharacter({
+          mapWidth: 32,
+          mapHeight: 20
+        }),
+        deltaMilliseconds: 250,
+        triggeredActions: new Set(['smash'])
+      })
+    ).toEqual({
+      actions: ['smash']
+    })
+  })
+
   it('keeps idle npc controllers still', () => {
     expect(
       getCharacterControllerIntent({

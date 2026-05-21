@@ -38,6 +38,27 @@ import {
   type PlayerQuickslots
 } from '../game/playerQuickslots'
 import {
+  getPlayerSkillSlotIndexFromCode,
+  type PlayerSkillSlots
+} from '../game/playerSkillSlots'
+import {
+  PLAYER_PROTECT_SKILL_ID,
+  getPlayerSkillDamageById,
+  getPlayerSkillManaCostById,
+  getPlayerSkillLevelById,
+  getPlayerProtectSkillDurationByLevel,
+  isPlayerSkillUnlockedInProfile
+} from '../game/playerSkills'
+import {
+  PLAYER_SMASH_SKILL_COOLDOWN_MILLISECONDS,
+  PLAYER_SMASH_SKILL_EFFECT_ANIMATION_SPEED,
+  PLAYER_SMASH_SKILL_ID,
+  PLAYER_SMASH_SKILL_SEGMENT_COUNT,
+  PLAYER_SMASH_SKILL_SEGMENT_DURATION_MILLISECONDS,
+  PLAYER_SMASH_SKILL_SEGMENT_STAGGER_MILLISECONDS,
+  getPlayerSmashSkillSegmentPlacement
+} from '../game/playerSmashSkill'
+import {
   createInitialPlayerControlBindings,
   getPlayerControlActionFromCode,
   getPlayerControlMovementDirectionFromCode,
@@ -69,6 +90,7 @@ import {
   shouldPlayerEvadeDamage
 } from '../game/playerStatEffects'
 import { grantPlayerExperience } from '../game/playerExperience'
+import { grantPlayerSkillPoints } from '../game/playerProgression'
 import {
   createMonsterPatrolState,
   stepMonsterPatrol,
@@ -82,7 +104,8 @@ import {
 } from '../game/monsterCombat'
 import {
   getMonsterExperienceDropAmount,
-  getMonsterGoldDropAmount
+  getMonsterGoldDropAmount,
+  getMonsterSkillPointDropAmount
 } from '../game/monsterRewards'
 import { resolveCharacterInteractionTarget } from '../game/interaction/resolveCharacterInteractionTarget'
 import {
@@ -129,6 +152,7 @@ type CreatePixiTiledMapViewInput = {
   playerEquipment: PlayerEquipment
   playerInventory: PlayerInventory
   playerQuickslots: PlayerQuickslots
+  playerSkillSlots: PlayerSkillSlots
   playerControlBindings: PlayerControlBindings
   questLog: QuestLogState
   merchantInventory: PlayerInventory
@@ -145,6 +169,7 @@ type CreatePixiTiledMapViewInput = {
   onPlayerInventoryChange: (nextInventory: PlayerInventory) => void
   onPlayerEquipmentChange: (nextEquipment: PlayerEquipment) => void
   onPlayerQuickslotsChange: (nextQuickslots: PlayerQuickslots) => void
+  onPlayerSkillSlotsChange: (nextSkillSlots: PlayerSkillSlots) => void
   onPlayerControlBindingsChange: (
     nextControlBindings: PlayerControlBindings
   ) => void
@@ -173,6 +198,10 @@ type TilesetRenderResources = {
 type SlashVfxRenderResources = {
   horizontalTextures: Texture[]
   verticalTextures: Texture[]
+}
+
+type ProtectVfxRenderResources = {
+  shieldTextures: Texture[]
 }
 
 type ResolvedCharacterAppearanceTexture = {
@@ -382,6 +411,7 @@ const MONSTER_ATTACK_RANGE_TOUCH_TOLERANCE_TILES = 0.14
 const PLAYER_RESPAWN_DELAY_MILLISECONDS = 3000
 const PLAYER_HIT_REACTION_DURATION_MILLISECONDS = 180
 const PLAYER_HIT_REACTION_MAX_OFFSET_PIXELS = 6
+const PLAYER_PROTECT_SKILL_COOLDOWN_MILLISECONDS = 3200
 const MONSTER_GOLD_DROP_ICON_RADIUS = 7
 const MONSTER_GOLD_DROP_ICON_SHINE_RADIUS = 2
 const MONSTER_GOLD_DROP_AMOUNT_TEXT_STYLE = new TextStyle({
@@ -494,6 +524,16 @@ const WHITE_SLASH_WIDE_FRAME_BOUNDS: CollisionRect[] = [
   { x: 11, y: 103, width: 41, height: 212 },
   { x: 29, y: 63, width: 23, height: 55 }
 ]
+const PROTECT_VFX_FRAME_IMAGE_URL = new URL(
+  '../assets/Pipoya VFX HEXShield/192x192/pipo-btleffect207_192.png',
+  import.meta.url
+).href
+const PROTECT_VFX_FRAME_WIDTH = 192
+const PROTECT_VFX_FRAME_HEIGHT = 192
+const PROTECT_VFX_FRAME_COLUMNS = 5
+const PROTECT_VFX_FRAME_ROWS = 4
+const PROTECT_VFX_ANIMATION_SPEED = 0.35
+const PROTECT_VFX_SCALE = 0.52
 const SLASH_VFX_HIT_PADDING_PIXELS = 2
 const PLAYER_WEAPON_WORLD_SCALE = 1.35
 const PLAYER_ATTACK_TRAIL_PROGRESS_STEP = 0.12
@@ -648,6 +688,7 @@ export const createPixiTiledMapView = async ({
   playerEquipment,
   playerInventory,
   playerQuickslots,
+  playerSkillSlots,
   playerControlBindings,
   questLog,
   merchantInventory,
@@ -661,6 +702,7 @@ export const createPixiTiledMapView = async ({
   onPlayerInventoryChange,
   onPlayerEquipmentChange,
   onPlayerQuickslotsChange,
+  onPlayerSkillSlotsChange,
   onPlayerControlBindingsChange,
   onQuestLogChange,
   onMerchantInventoryChange,
@@ -677,12 +719,14 @@ export const createPixiTiledMapView = async ({
     portalInsideTexture,
     tinyDungeonWeaponImageTexture,
     slashVfxTextures,
+    protectVfxTextures,
     monsterPigAnimationTextures,
     monsterSlimeAnimationTextures
   ] = await Promise.all([
     Assets.load<Texture>(PORTAL_INSIDE_IMAGE_URL),
     Assets.load<Texture>(TINY_DUNGEON_TILESET_IMAGE_URL),
     loadSlashVfxTextures(),
+    loadProtectVfxTextures(),
     loadMonsterPigAnimationTextures(),
     loadMonsterSlimeAnimationTextures()
   ])
@@ -788,7 +832,9 @@ export const createPixiTiledMapView = async ({
   let currentPlayerEquipment = playerEquipment
   let currentPlayerInventory = playerInventory
   let currentPlayerQuickslots = playerQuickslots
+  let currentPlayerSkillSlots = playerSkillSlots
   let currentPlayerControlBindings = playerControlBindings
+  const triggeredSkillSlotIndexes = new Set<number>()
   let currentQuestLog = questLog
   let currentBlacksmithInventory = merchantInventory
   let currentPotionMerchantInventory = potionMerchantInventory
@@ -797,6 +843,25 @@ export const createPixiTiledMapView = async ({
   let playerWeaponTrailSprites: Sprite[] = []
   let playerWeaponSprite: Sprite | undefined
   let playerSlashEffectSprite: AnimatedSprite | undefined
+  let playerProtectSkillSprite: AnimatedSprite | undefined
+  let playerProtectSkillActiveUntilMilliseconds = 0
+  let playerProtectSkillReadyAtMilliseconds = 0
+  let playerSmashSkillStartedAtMilliseconds: number | undefined
+  let playerSmashSkillFacing: CharacterMoveDirection | undefined
+  let playerSmashSkillOrigin:
+    | {
+        x: number
+        y: number
+      }
+    | undefined
+  let playerSmashSkillReadyAtMilliseconds = 0
+  let playerSmashSkillSegments: {
+    sprite: AnimatedSprite
+    delayMilliseconds: number
+    started: boolean
+    index: number
+  }[] = []
+  let playerSmashSkillHitMonsterIds = new Set<string>()
   let syncPlayerCharacterVisual: (nowMilliseconds?: number) => void = () => {}
   let isSceneTransitionPending = false
   let isDestroyed = false
@@ -812,6 +877,7 @@ export const createPixiTiledMapView = async ({
     pressedDirections.clear()
     pressedActions.clear()
     triggeredActions.clear()
+    triggeredSkillSlotIndexes.clear()
   }
   let isPlayerUiOpen = false
   let isPlayerStatOpen = false
@@ -1040,12 +1106,122 @@ export const createPixiTiledMapView = async ({
     }
 
     const playerCharacter = getCharacterStateById(PLAYER_CHARACTER_ID)
-    playerAttackStartedAtMilliseconds = now
-    playerAttackResolvedStartedAtMilliseconds = undefined
     playerAttackReadyAtMilliseconds =
       now + PLAYER_ATTACK_COOLDOWN_MILLISECONDS
-    playerAttackFacing = playerCharacter.facing
-    playPlayerSlashEffect(playerCharacter)
+    startPlayerWeaponAttackMotion(playerCharacter, now)
+  }
+  const triggerPlayerProtectSkill = (now: number): boolean => {
+    if (playerProfile.hp.current === 0) {
+      return false
+    }
+
+    if (now < playerProtectSkillReadyAtMilliseconds) {
+      return false
+    }
+
+    const protectSkillLevel =
+      getPlayerSkillLevelById(playerProfile, PLAYER_PROTECT_SKILL_ID) ?? 1
+
+    playerProtectSkillActiveUntilMilliseconds =
+      now + getPlayerProtectSkillDurationByLevel(protectSkillLevel)
+    playerProtectSkillReadyAtMilliseconds =
+      now + PLAYER_PROTECT_SKILL_COOLDOWN_MILLISECONDS
+    if (playerProtectSkillSprite) {
+      playerProtectSkillSprite.gotoAndPlay(0)
+      playerProtectSkillSprite.visible = true
+    }
+    showCharacterDamageText(
+      PLAYER_CHARACTER_ID,
+      '방어!',
+      EVADE_TEXT_DURATION_MILLISECONDS,
+      EVADE_TEXT_STYLE
+    )
+    return true
+  }
+  const triggerPlayerSmashSkill = (now: number): boolean => {
+    if (playerProfile.hp.current === 0) {
+      return false
+    }
+
+    if (now < playerSmashSkillReadyAtMilliseconds) {
+      return false
+    }
+
+    const playerCharacter = getCharacterStateById(PLAYER_CHARACTER_ID)
+
+    clearPlayerSmashSkillEffectSprites()
+    playerSmashSkillOrigin = {
+      x: playerCharacter.position.x * map.tileWidth + characterPixelWidth / 2,
+      y: playerCharacter.position.y * map.tileHeight + characterPixelHeight / 2
+    }
+    playerSmashSkillStartedAtMilliseconds = now
+    playerSmashSkillFacing = playerCharacter.facing
+    playerSmashSkillReadyAtMilliseconds =
+      now + PLAYER_SMASH_SKILL_COOLDOWN_MILLISECONDS
+    playerSmashSkillHitMonsterIds.clear()
+    playPlayerSmashSkillEffect(playerCharacter, now)
+    return true
+  }
+  const triggerPlayerSkillById = (skillId: string, now: number): boolean => {
+    const manaCost = getPlayerSkillManaCostById(playerProfile, skillId)
+
+    if (!isPlayerSkillUnlockedInProfile(playerProfile, skillId)) {
+      return false
+    }
+
+    if (manaCost > 0 && playerProfile.mp.current < manaCost) {
+      return false
+    }
+
+    let didTrigger = false
+
+    switch (skillId) {
+      case PLAYER_PROTECT_SKILL_ID:
+        didTrigger = triggerPlayerProtectSkill(now)
+        break
+      case PLAYER_SMASH_SKILL_ID:
+        didTrigger = triggerPlayerSmashSkill(now)
+        break
+      default:
+        return false
+    }
+
+    if (!didTrigger) {
+      return false
+    }
+
+    if (manaCost > 0) {
+      playerProfile.mp.current = Math.max(0, playerProfile.mp.current - manaCost)
+      syncPlayerUiOverlays()
+    }
+
+    return true
+  }
+  const triggerPlayerSkillFromSlotIndex = (
+    skillSlotIndex: number,
+    now: number
+  ) => {
+    const skillSlot = currentPlayerSkillSlots.slots[skillSlotIndex]
+
+    if (!skillSlot) {
+      return
+    }
+
+    triggerPlayerSkillById(skillSlot.skillId, now)
+  }
+  const startPlayerWeaponAttackMotion = (
+    character: CharacterState,
+    now: number,
+    options?: {
+      suppressDamage?: boolean
+    }
+  ) => {
+    playerAttackStartedAtMilliseconds = now
+    playerAttackResolvedStartedAtMilliseconds = options?.suppressDamage
+      ? now
+      : undefined
+    playerAttackFacing = character.facing
+    playPlayerSlashEffect(character)
   }
   const clearPlayerSlashEffectSprite = () => {
     if (!playerSlashEffectSprite) {
@@ -1057,6 +1233,15 @@ export const createPixiTiledMapView = async ({
     playerSlashEffectSprite = undefined
     sprite.removeFromParent()
     sprite.destroy()
+  }
+  const clearPlayerProtectSkillEffectSprite = () => {
+    if (!playerProtectSkillSprite) {
+      return
+    }
+
+    playerProtectSkillSprite.visible = false
+    playerProtectSkillSprite.stop()
+    playerProtectSkillSprite.gotoAndStop(0)
   }
   const playPlayerSlashEffect = (character: CharacterState) => {
     clearPlayerSlashEffectSprite()
@@ -1105,6 +1290,143 @@ export const createPixiTiledMapView = async ({
     depthSortedLayer?.addChild(slashSprite)
     depthSortedLayer?.sortChildren()
     slashSprite.play()
+  }
+  const clearPlayerSmashSkillEffectSprites = () => {
+    if (playerSmashSkillSegments.length === 0) {
+      playerSmashSkillStartedAtMilliseconds = undefined
+      playerSmashSkillFacing = undefined
+      playerSmashSkillOrigin = undefined
+      playerSmashSkillHitMonsterIds.clear()
+      return
+    }
+
+    for (const segment of playerSmashSkillSegments) {
+      segment.sprite.removeFromParent()
+      segment.sprite.destroy()
+    }
+
+    playerSmashSkillSegments = []
+    playerSmashSkillStartedAtMilliseconds = undefined
+    playerSmashSkillFacing = undefined
+    playerSmashSkillOrigin = undefined
+    playerSmashSkillHitMonsterIds.clear()
+  }
+  const playPlayerSmashSkillEffect = (
+    character: CharacterState,
+    now: number
+  ) => {
+    const isHorizontalSlash =
+      character.facing !== 'up' && character.facing !== 'down'
+    const slashTextures = isHorizontalSlash
+      ? slashVfxTextures.horizontalTextures
+      : slashVfxTextures.verticalTextures
+    const originX =
+      playerSmashSkillOrigin?.x ??
+      (character.position.x * map.tileWidth + characterPixelWidth / 2)
+    const originY =
+      playerSmashSkillOrigin?.y ??
+      (character.position.y * map.tileHeight + characterPixelHeight / 2)
+    const baseZIndex = Math.round(originY + characterPixelHeight / 2) + 1
+
+    playerSmashSkillSegments = Array.from(
+      { length: PLAYER_SMASH_SKILL_SEGMENT_COUNT },
+      (_, segmentIndex) => {
+        const slashSprite = new AnimatedSprite(slashTextures)
+
+        slashSprite.label = 'character:player:smash-skill-effect'
+        slashSprite.anchor.set(0.5)
+        slashSprite.animationSpeed = PLAYER_SMASH_SKILL_EFFECT_ANIMATION_SPEED
+        slashSprite.loop = false
+        slashSprite.roundPixels = true
+        slashSprite.visible = false
+        slashSprite.zIndex = baseZIndex + segmentIndex
+        depthSortedLayer?.addChild(slashSprite)
+
+        return {
+          sprite: slashSprite,
+          delayMilliseconds:
+            segmentIndex * PLAYER_SMASH_SKILL_SEGMENT_STAGGER_MILLISECONDS,
+          started: false,
+          index: segmentIndex
+        }
+      }
+    )
+    depthSortedLayer?.sortChildren()
+
+    syncPlayerSmashSkillVisual(character, now, originX, originY)
+  }
+  const syncPlayerSmashSkillVisual = (
+    character: CharacterState,
+    now: number,
+    characterCenterX: number = character.position.x * map.tileWidth +
+      characterPixelWidth / 2,
+    characterCenterY: number = character.position.y * map.tileHeight +
+      characterPixelHeight / 2
+  ) => {
+    if (playerSmashSkillStartedAtMilliseconds === undefined) {
+      return
+    }
+
+    const facing = playerSmashSkillFacing ?? character.facing
+    const originX = playerSmashSkillOrigin?.x ?? characterCenterX
+    const originY = playerSmashSkillOrigin?.y ?? characterCenterY
+    const totalLifetimeMilliseconds =
+      PLAYER_SMASH_SKILL_SEGMENT_DURATION_MILLISECONDS +
+      PLAYER_SMASH_SKILL_SEGMENT_STAGGER_MILLISECONDS *
+        (PLAYER_SMASH_SKILL_SEGMENT_COUNT - 1)
+    const elapsedMilliseconds =
+      now - playerSmashSkillStartedAtMilliseconds
+
+    for (const segment of playerSmashSkillSegments) {
+      const segmentElapsedMilliseconds =
+        elapsedMilliseconds - segment.delayMilliseconds
+
+      if (segmentElapsedMilliseconds < 0) {
+        segment.sprite.visible = false
+        continue
+      }
+
+      if (!segment.started) {
+        segment.sprite.gotoAndPlay(0)
+        segment.started = true
+      }
+
+      const progress = Math.min(
+        1,
+        segmentElapsedMilliseconds /
+          PLAYER_SMASH_SKILL_SEGMENT_DURATION_MILLISECONDS
+      )
+      const placement = getPlayerSmashSkillSegmentPlacement({
+        characterCenterX: originX,
+        characterCenterY: originY,
+        facing,
+        segmentIndex: segment.index,
+        progress
+      })
+
+      segment.sprite.visible = placement.alpha > 0
+      segment.sprite.position.set(placement.x, placement.y)
+      segment.sprite.zIndex =
+        Math.round(placement.y + characterPixelHeight / 2) + segment.index
+      segment.sprite.rotation =
+        facing === 'up'
+          ? -Math.PI / 2
+          : facing === 'down'
+            ? Math.PI / 2
+            : 0
+      segment.sprite.scale.set(
+        facing === 'left' ? -placement.scaleX : placement.scaleX,
+        placement.scaleY
+      )
+      segment.sprite.alpha = placement.alpha
+    }
+
+    if (elapsedMilliseconds >= totalLifetimeMilliseconds) {
+      clearPlayerSmashSkillEffectSprites()
+      return
+    }
+
+    depthSortedLayer?.sortChildren()
   }
   const stopPlayerFootsteps = () => {
     gameSoundEffects.stop('grassFootstep')
@@ -1547,9 +1869,15 @@ export const createPixiTiledMapView = async ({
     profile: playerProfile,
     getInventory: () => currentPlayerInventory,
     getQuickslots: () => currentPlayerQuickslots,
+    getSkillSlots: () => currentPlayerSkillSlots,
     onRequestQuickslotChange: (nextQuickslots) => {
       currentPlayerQuickslots = nextQuickslots
       onPlayerQuickslotsChange(nextQuickslots)
+      syncPlayerUiOverlays()
+    },
+    onRequestSkillSlotsChange: (nextSkillSlots) => {
+      currentPlayerSkillSlots = nextSkillSlots
+      onPlayerSkillSlotsChange(nextSkillSlots)
       syncPlayerUiOverlays()
     }
   })
@@ -2021,6 +2349,23 @@ export const createPixiTiledMapView = async ({
     }
 
     if (isPlayer) {
+      playerProtectSkillSprite = new AnimatedSprite(
+        protectVfxTextures.shieldTextures
+      )
+      playerProtectSkillSprite.label = 'character:player:protect-skill-effect'
+      playerProtectSkillSprite.anchor.set(0.5)
+      playerProtectSkillSprite.animationSpeed = PROTECT_VFX_ANIMATION_SPEED
+      playerProtectSkillSprite.loop = true
+      playerProtectSkillSprite.roundPixels = true
+      playerProtectSkillSprite.visible = false
+      playerProtectSkillSprite.alpha = 0.92
+      playerProtectSkillSprite.scale.set(PROTECT_VFX_SCALE)
+      playerProtectSkillSprite.zIndex = 9
+      playerProtectSkillSprite.position.set(
+        Math.round(sprite.width / 2),
+        Math.round(sprite.height / 2)
+      )
+      container.addChild(playerProtectSkillSprite)
       playerWeaponTrailSprites = Array.from(
         { length: PLAYER_ATTACK_TRAIL_SPRITE_COUNT },
         (_, index) => {
@@ -2132,7 +2477,11 @@ export const createPixiTiledMapView = async ({
   }
 
   syncPlayerCharacterVisual = (now = performance.now()) => {
-    syncCharacterSprite(getCharacterStateById(PLAYER_CHARACTER_ID), now)
+    const playerCharacter = getCharacterStateById(PLAYER_CHARACTER_ID)
+
+    syncCharacterSprite(playerCharacter, now)
+    syncPlayerSmashSkillVisual(playerCharacter, now)
+    syncPlayerProtectSkillVisual(playerCharacter, now)
   }
 
   const syncCharacterSprite = (
@@ -2851,24 +3200,18 @@ export const createPixiTiledMapView = async ({
           !isMonsterCombatStateDefeated(character.id) &&
           doCollisionRectsIntersect(
             hitRect,
-            createCollisionRectFromCharacter(character)
+            createPixelCollisionRectFromCharacter(character)
           )
       )
       .sort((leftCharacter, rightCharacter) => {
-        const leftCenterX =
-          leftCharacter.position.x + leftCharacter.collisionSize.width / 2
-        const leftCenterY =
-          leftCharacter.position.y + leftCharacter.collisionSize.height / 2
-        const rightCenterX =
-          rightCharacter.position.x + rightCharacter.collisionSize.width / 2
-        const rightCenterY =
-          rightCharacter.position.y + rightCharacter.collisionSize.height / 2
+        const leftCenter = getCharacterPixelCenter(leftCharacter)
+        const rightCenter = getCharacterPixelCenter(rightCharacter)
         const leftDistance =
-          (leftCenterX - hitRectCenterX) ** 2 +
-          (leftCenterY - hitRectCenterY) ** 2
+          (leftCenter.x - hitRectCenterX) ** 2 +
+          (leftCenter.y - hitRectCenterY) ** 2
         const rightDistance =
-          (rightCenterX - hitRectCenterX) ** 2 +
-          (rightCenterY - hitRectCenterY) ** 2
+          (rightCenter.x - hitRectCenterX) ** 2 +
+          (rightCenter.y - hitRectCenterY) ** 2
 
         if (leftDistance !== rightDistance) {
           return leftDistance - rightDistance
@@ -2876,6 +3219,45 @@ export const createPixiTiledMapView = async ({
 
         return leftCharacter.id.localeCompare(rightCharacter.id)
       })[0]
+  }
+
+  function resolveMonstersInCollisionRect(
+    hitRect: CollisionRect
+  ): CharacterState[] {
+    return characterStates.filter(
+      (character) =>
+        isMonsterCharacter(character) &&
+        !isMonsterCombatStateDefeated(character.id) &&
+        doCollisionRectsIntersect(
+          hitRect,
+          createPixelCollisionRectFromCharacter(character)
+        )
+    )
+  }
+
+  function createPixelCollisionRectFromCharacter(
+    character: CharacterState
+  ): CollisionRect {
+    return {
+      x: character.position.x * map.tileWidth,
+      y: character.position.y * map.tileHeight,
+      width: character.collisionSize.width * map.tileWidth,
+      height: character.collisionSize.height * map.tileHeight
+    }
+  }
+
+  function getCharacterPixelCenter(character: CharacterState): {
+    x: number
+    y: number
+  } {
+    return {
+      x:
+        character.position.x * map.tileWidth +
+        (character.collisionSize.width * map.tileWidth) / 2,
+      y:
+        character.position.y * map.tileHeight +
+        (character.collisionSize.height * map.tileHeight) / 2
+    }
   }
 
   function maybeRespawnMonster(characterId: string, now: number): boolean {
@@ -3099,7 +3481,13 @@ export const createPixiTiledMapView = async ({
     playerAttackResolvedStartedAtMilliseconds = undefined
     playerAttackFacing = undefined
     clearPlayerSlashEffectSprite()
+    clearPlayerProtectSkillEffectSprite()
+    clearPlayerSmashSkillEffectSprites()
+    playerProtectSkillActiveUntilMilliseconds = 0
+    playerProtectSkillReadyAtMilliseconds = now + PLAYER_RESPAWN_DELAY_MILLISECONDS
     playerAttackReadyAtMilliseconds = now + PLAYER_RESPAWN_DELAY_MILLISECONDS
+    playerSmashSkillReadyAtMilliseconds =
+      now + PLAYER_RESPAWN_DELAY_MILLISECONDS
     syncCharacterSprite(getCharacterStateById(PLAYER_CHARACTER_ID), now)
   }
 
@@ -3128,7 +3516,12 @@ export const createPixiTiledMapView = async ({
     playerAttackResolvedStartedAtMilliseconds = undefined
     playerAttackFacing = undefined
     clearPlayerSlashEffectSprite()
+    clearPlayerProtectSkillEffectSprite()
+    clearPlayerSmashSkillEffectSprites()
+    playerProtectSkillActiveUntilMilliseconds = 0
+    playerProtectSkillReadyAtMilliseconds = now
     playerAttackReadyAtMilliseconds = now
+    playerSmashSkillReadyAtMilliseconds = now
     syncCharacterSprite(playerCharacter, now)
     syncPlayerUiOverlays()
     showCharacterDamageText(
@@ -3148,6 +3541,19 @@ export const createPixiTiledMapView = async ({
     const nextDamage = Math.max(0, Math.floor(damage))
 
     if (nextDamage === 0 || playerProfile.hp.current === 0) {
+      return
+    }
+
+    if (
+      sourceCharacter &&
+      playerProtectSkillActiveUntilMilliseconds > now
+    ) {
+      showCharacterDamageText(
+        PLAYER_CHARACTER_ID,
+        '방어!',
+        EVADE_TEXT_DURATION_MILLISECONDS,
+        EVADE_TEXT_STYLE
+      )
       return
     }
 
@@ -3238,6 +3644,14 @@ export const createPixiTiledMapView = async ({
         character.level ?? 1
       )
       grantPlayerExperienceReward(experienceReward)
+      const skillPointReward = getMonsterSkillPointDropAmount(
+        character.level ?? 1
+      )
+      Object.assign(
+        playerProfile,
+        grantPlayerSkillPoints(playerProfile, skillPointReward)
+      )
+      syncPlayerUiOverlays()
 
       spawnMonsterGoldDrop(
         characterId,
@@ -3315,6 +3729,39 @@ export const createPixiTiledMapView = async ({
     }
   }
 
+  function resolvePlayerSmashSkillDamage(now: number): void {
+    if (
+      playerProfile.hp.current === 0 ||
+      playerSmashSkillStartedAtMilliseconds === undefined
+    ) {
+      return
+    }
+
+    const smashSkillDamage =
+      getPlayerSkillDamageById(playerProfile, PLAYER_SMASH_SKILL_ID)
+
+    for (const segment of playerSmashSkillSegments) {
+      if (!segment.sprite.visible) {
+        continue
+      }
+
+      const hitRect = createSlashEffectHitRect(segment.sprite)
+
+      for (const monsterCharacter of resolveMonstersInCollisionRect(hitRect)) {
+        if (playerSmashSkillHitMonsterIds.has(monsterCharacter.id)) {
+          continue
+        }
+
+        playerSmashSkillHitMonsterIds.add(monsterCharacter.id)
+        applyDamageToMonster(
+          monsterCharacter.id,
+          smashSkillDamage,
+          now
+        )
+      }
+    }
+  }
+
   function resolveMonsterContactDamage(now: number): void {
     if (playerProfile.hp.current === 0) {
       return
@@ -3354,6 +3801,20 @@ export const createPixiTiledMapView = async ({
         monsterContactDamageLockedUntilById.get(monsterCharacter.id) ?? 0
 
       if (lockedUntil > now) {
+        continue
+      }
+
+      if (playerProtectSkillActiveUntilMilliseconds > now) {
+        monsterContactDamageLockedUntilById.set(
+          monsterCharacter.id,
+          now + MONSTER_CONTACT_DAMAGE_COOLDOWN_MILLISECONDS
+        )
+        showCharacterDamageText(
+          PLAYER_CHARACTER_ID,
+          '방어!',
+          EVADE_TEXT_DURATION_MILLISECONDS,
+          EVADE_TEXT_STYLE
+        )
         continue
       }
 
@@ -3478,6 +3939,43 @@ export const createPixiTiledMapView = async ({
         createPose(trailProgress),
         PLAYER_ATTACK_TRAIL_ALPHA[index] ?? 0.1
       )
+    }
+  }
+
+  function syncPlayerProtectSkillVisual(
+    character: CharacterState,
+    now: number
+  ): void {
+    if (
+      !playerProtectSkillSprite ||
+      character.id !== PLAYER_CHARACTER_ID ||
+      playerProfile.hp.current === 0
+    ) {
+      return
+    }
+
+    if (playerProtectSkillActiveUntilMilliseconds <= now) {
+      playerProtectSkillSprite.visible = false
+      playerProtectSkillSprite.stop()
+      playerProtectSkillSprite.gotoAndStop(0)
+      return
+    }
+
+    const renderNode = renderedCharacters.get(character.id)
+
+    if (!renderNode) {
+      return
+    }
+
+    playerProtectSkillSprite.visible = true
+    playerProtectSkillSprite.position.set(
+      Math.round(renderNode.sprite.width / 2),
+      Math.round(renderNode.sprite.height / 2)
+    )
+    playerProtectSkillSprite.alpha = 0.92
+
+    if (!playerProtectSkillSprite.playing) {
+      playerProtectSkillSprite.gotoAndPlay(0)
     }
   }
 
@@ -3886,6 +4384,7 @@ export const createPixiTiledMapView = async ({
         clearPressedInputState()
         stopPlayerFootsteps()
         triggeredActions.clear()
+        triggeredSkillSlotIndexes.clear()
         lastRuntimeErrorMessage = undefined
         return
       }
@@ -3893,6 +4392,10 @@ export const createPixiTiledMapView = async ({
       controllerRuntime.syncCharacters(characterStates)
       drainControllerRuntimeEventsIntoQueue()
       maybeRespawnPlayer(now)
+      for (const skillSlotIndex of triggeredSkillSlotIndexes) {
+        triggerPlayerSkillFromSlotIndex(skillSlotIndex, now)
+      }
+      triggeredSkillSlotIndexes.clear()
       let didPlayerMoveThisFrame = false
 
       for (const character of [...characterStates]) {
@@ -3940,6 +4443,7 @@ export const createPixiTiledMapView = async ({
           ) {
             triggerPlayerAttack(now)
           }
+
         }
 
         if (
@@ -4106,6 +4610,7 @@ export const createPixiTiledMapView = async ({
       }
 
       resolvePlayerAttackDamage(now)
+      resolvePlayerSmashSkillDamage(now)
       resolveMonsterContactDamage(now)
       resolveMonsterGoldDropPickups()
       syncActiveMonsterGoldDrops(now)
@@ -4170,6 +4675,7 @@ export const createPixiTiledMapView = async ({
       stopPlayerFootsteps()
       gameEventQueue.clear()
       triggeredActions.clear()
+      triggeredSkillSlotIndexes.clear()
 
       const message = error instanceof Error ? error.message : String(error)
 
@@ -4184,6 +4690,7 @@ export const createPixiTiledMapView = async ({
 
   const handleKeyDown = (event: KeyboardEvent) => {
     const code = event.code
+    const skillSlotIndex = getPlayerSkillSlotIndexFromCode(code)
     const isInventoryToggleKey = code === currentPlayerControlBindings.inventory
     const isStatToggleKey = code === currentPlayerControlBindings.stat
     const isEquipmentToggleKey = code === currentPlayerControlBindings.equipment
@@ -4255,6 +4762,17 @@ export const createPixiTiledMapView = async ({
 
     if (mapOverlay.getIsExpanded()) {
       event.preventDefault()
+      return
+    }
+
+    if (skillSlotIndex !== undefined) {
+      event.preventDefault()
+
+      if (event.repeat || playerProfile.hp.current === 0) {
+        return
+      }
+
+      triggeredSkillSlotIndexes.add(skillSlotIndex)
       return
     }
 
@@ -4395,6 +4913,7 @@ export const createPixiTiledMapView = async ({
 
   const handleKeyUp = (event: KeyboardEvent) => {
     const code = event.code
+
     const action = getPlayerControlActionFromCode(
       currentPlayerControlBindings,
       code
@@ -4525,6 +5044,7 @@ export const createPixiTiledMapView = async ({
     monsterCombatStates.clear()
     monsterContactDamageLockedUntilById.clear()
     monsterRespawnAtById.clear()
+    clearPlayerSmashSkillEffectSprites()
     for (const monsterGoldDrop of monsterGoldDrops.values()) {
       monsterGoldDrop.container.destroy({ children: true })
     }
@@ -4609,7 +5129,44 @@ const createMessagePanelTexture = (): Texture => {
   return texture
 }
 
-  const loadSlashVfxTextures = async (): Promise<SlashVfxRenderResources> => {
+const createFrameTexturesFromGrid = ({
+  imageTexture,
+  frameWidth,
+  frameHeight,
+  columns,
+  rows
+}: {
+  imageTexture: Texture
+  frameWidth: number
+  frameHeight: number
+  columns: number
+  rows: number
+}): Texture[] => {
+  if (
+    imageTexture.source.pixelWidth < frameWidth * columns ||
+    imageTexture.source.pixelHeight < frameHeight * rows
+  ) {
+    throw new Error('Protect VFX sprite sheet is smaller than expected')
+  }
+
+  return Array.from({ length: columns * rows }, (_, index) => {
+    const columnIndex = index % columns
+    const rowIndex = Math.floor(index / columns)
+
+    return new Texture({
+      source: imageTexture.source,
+      frame: new Rectangle(
+        columnIndex * frameWidth,
+        rowIndex * frameHeight,
+        frameWidth,
+        frameHeight
+      ),
+      orig: new Rectangle(0, 0, frameWidth, frameHeight)
+    })
+  })
+}
+
+const loadSlashVfxTextures = async (): Promise<SlashVfxRenderResources> => {
   const textures = await Promise.all(
     WHITE_SLASH_WIDE_FRAME_URLS.map((frameUrl) =>
       Assets.load<Texture>(frameUrl)
@@ -4623,6 +5180,23 @@ const createMessagePanelTexture = (): Texture => {
   return {
     horizontalTextures: textures,
     verticalTextures: textures
+  }
+}
+
+const loadProtectVfxTextures = async (): Promise<ProtectVfxRenderResources> => {
+  const imageTexture = await Assets.load<Texture>(PROTECT_VFX_FRAME_IMAGE_URL)
+
+  imageTexture.source.scaleMode = 'nearest'
+  imageTexture.source.addressMode = 'clamp-to-edge'
+
+  return {
+    shieldTextures: createFrameTexturesFromGrid({
+      imageTexture,
+      frameWidth: PROTECT_VFX_FRAME_WIDTH,
+      frameHeight: PROTECT_VFX_FRAME_HEIGHT,
+      columns: PROTECT_VFX_FRAME_COLUMNS,
+      rows: PROTECT_VFX_FRAME_ROWS
+    })
   }
 }
 

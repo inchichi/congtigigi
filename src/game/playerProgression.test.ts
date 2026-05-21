@@ -2,8 +2,12 @@ import { describe, expect, it } from 'vitest'
 
 import { createInitialPlayerProfile } from './playerProfile'
 import {
+  getPlayerMaxManaBySkillUserLevel,
   getPlayerSkillLevelLabel,
+  getPlayerSkillPointCost,
+  getPlayerSkillUserLevel,
   grantPlayerLevelUpRewards,
+  grantPlayerSkillPoints,
   spendPlayerSkillPoint,
   spendPlayerStatPoint
 } from './playerProgression'
@@ -14,14 +18,9 @@ describe('grantPlayerLevelUpRewards', () => {
       ...createInitialPlayerProfile(),
       level: 2,
       statPoints: 3,
-      skillPoints: 1,
       hp: {
         current: 28,
         max: 28
-      },
-      mp: {
-        current: 14,
-        max: 14
       }
     })
   })
@@ -81,16 +80,16 @@ describe('spendPlayerStatPoint', () => {
 })
 
 describe('spendPlayerSkillPoint', () => {
-  it('spends one point and increases the selected skill level', () => {
-    const profile = grantPlayerLevelUpRewards(createInitialPlayerProfile())
+  it('spends the required points and increases the selected skill level', () => {
+    const profile = grantPlayerSkillPoints(createInitialPlayerProfile(), 2)
 
     expect(spendPlayerSkillPoint(profile, 0)).toEqual({
       ...profile,
-      skillPoints: 0,
+      availableSkillPoints: 0,
       skills: [
         {
           ...profile.skills[0],
-          level: 2
+          level: 1
         },
         profile.skills[1],
         profile.skills[2],
@@ -114,6 +113,72 @@ describe('spendPlayerSkillPoint', () => {
     }
 
     expect(spendPlayerSkillPoint(maxedProfile, 0)).toBeUndefined()
+  })
+})
+
+describe('getPlayerSkillPointCost', () => {
+  it('increases the required points as the skill levels up', () => {
+    const profile = createInitialPlayerProfile()
+
+    expect(getPlayerSkillPointCost(profile.skills[0])).toBe(2)
+    expect(
+      getPlayerSkillPointCost({
+        ...profile.skills[0],
+        level: 2
+      })
+    ).toBe(3)
+    expect(
+      getPlayerSkillPointCost({
+        ...profile.skills[0],
+        level: 3
+      })
+    ).toBe(4)
+    expect(
+      getPlayerSkillPointCost({
+        ...profile.skills[0],
+        level: 4
+      })
+    ).toBe(4)
+    expect(
+      getPlayerSkillPointCost({
+        ...profile.skills[0],
+        level: 5
+      })
+    ).toBe(0)
+  })
+})
+
+describe('grantPlayerSkillPoints', () => {
+  it('adds skill points from monster rewards and raises max mana by skill user level', () => {
+    const profile = createInitialPlayerProfile()
+
+    expect(grantPlayerSkillPoints(profile, 3)).toEqual({
+      ...profile,
+      availableSkillPoints: 3,
+      totalSkillPointsEarned: 3,
+      mp: {
+        current: 24,
+        max: 24
+      }
+    })
+  })
+})
+
+describe('getPlayerSkillUserLevel', () => {
+  it('maps total skill points to the user level without spending penalties', () => {
+    expect(getPlayerSkillUserLevel(0)).toBe(1)
+    expect(getPlayerSkillUserLevel(1)).toBe(2)
+    expect(getPlayerSkillUserLevel(3)).toBe(4)
+  })
+})
+
+describe('getPlayerMaxManaBySkillUserLevel', () => {
+  it('follows the level-based mana table', () => {
+    expect(getPlayerMaxManaBySkillUserLevel(1)).toBe(12)
+    expect(getPlayerMaxManaBySkillUserLevel(2)).toBe(16)
+    expect(getPlayerMaxManaBySkillUserLevel(3)).toBe(20)
+    expect(getPlayerMaxManaBySkillUserLevel(4)).toBe(24)
+    expect(getPlayerMaxManaBySkillUserLevel(5)).toBe(28)
   })
 })
 
