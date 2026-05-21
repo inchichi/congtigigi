@@ -193,6 +193,41 @@ body.game-root--map-focused > :not(.game-root) {
   pointer-events: none;
 }
 
+.quest-tracker-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 43;
+  pointer-events: none;
+}
+
+.quest-tracker-overlay__panel {
+  position: absolute;
+  display: grid;
+  gap: 5px;
+  min-width: 230px;
+  max-width: min(320px, calc(100vw - 32px));
+  padding: 10px 12px;
+  border: 1px solid rgba(244, 231, 197, 0.5);
+  background: rgba(23, 19, 17, 0.88);
+  box-shadow: 0 0 0 2px rgba(244, 231, 197, 0.18), 0 10px 22px rgba(0, 0, 0, 0.32);
+  color: #f4e7c5;
+}
+
+.quest-tracker-overlay__title {
+  color: #ffdf7a;
+  font-size: 0.74rem;
+  letter-spacing: 0;
+  line-height: 1;
+}
+
+.quest-tracker-overlay__objective {
+  color: #f4e7c5;
+  font-size: 0.84rem;
+  letter-spacing: 0;
+  line-height: 1.15;
+  overflow-wrap: anywhere;
+}
+
 .pause-menu-overlay {
   position: fixed;
   inset: 0;

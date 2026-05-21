@@ -24,6 +24,7 @@ import { createInitialPlayerEquipment } from './game/playerEquipment'
 import { createInitialPlayerInventory } from './game/playerInventory'
 import { createInitialPlayerProfile } from './game/playerProfile'
 import { createInitialPlayerQuickslots } from './game/playerQuickslots'
+import { createInitialFirstSlimeHuntQuest } from './game/firstSlimeHuntQuest'
 import { getSceneIntroMessage } from './game/sceneIntro'
 import { createPixiTiledMapView } from './rendering/createPixiTiledMapView'
 import type { AudioSettings } from './rendering/createPauseMenuOverlay'
@@ -96,6 +97,7 @@ const playerProfile = createInitialPlayerProfile()
 let playerEquipment = createInitialPlayerEquipment()
 let playerInventory = createInitialPlayerInventory()
 let playerQuickslots = createInitialPlayerQuickslots()
+let firstSlimeHuntQuest = createInitialFirstSlimeHuntQuest()
 let merchantInventory = createInitialBlacksmithInventory()
 let activeControllerRuntime:
   | ReturnType<typeof createCharacterControllerRuntime>
@@ -148,6 +150,7 @@ const bootstrapScene = async (
     playerEquipment,
     playerInventory,
     playerQuickslots,
+    firstSlimeHuntQuest,
     merchantInventory,
     sceneIntroMessage: getSceneIntroMessage(sceneId),
     cameraTargetCharacterId: PLAYER_CHARACTER_ID,
@@ -168,6 +171,9 @@ const bootstrapScene = async (
     },
     onPlayerQuickslotsChange: (nextQuickslots) => {
       playerQuickslots = nextQuickslots
+    },
+    onFirstSlimeHuntQuestChange: (nextQuest) => {
+      firstSlimeHuntQuest = nextQuest
     },
     onMerchantInventoryChange: (nextInventory) => {
       merchantInventory = nextInventory

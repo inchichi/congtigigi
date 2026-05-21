@@ -190,6 +190,7 @@
   </object>
   <object id="3" name="wizard" type="character" x="831.323" y="542.823">
    <properties>
+    <property name="displayText" value="마법사"/>
     <property name="type" value="character_wizard_purple"/>
    </properties>
   </object>
