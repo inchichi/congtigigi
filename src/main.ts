@@ -29,7 +29,10 @@ import { createInitialPlayerEquipment } from './game/playerEquipment'
 import { createInitialPlayerInventory } from './game/playerInventory'
 import { createInitialPlayerProfile } from './game/playerProfile'
 import { createInitialPlayerQuickslots } from './game/playerQuickslots'
-import { createInitialQuestLog } from './game/questLog'
+import {
+  createInitialQuestLog,
+  recordSceneEnterQuestProgress
+} from './game/questLog'
 import { getSceneIntroMessage } from './game/sceneIntro'
 import { createPixiTiledMapView } from './rendering/createPixiTiledMapView'
 import type { AudioSettings } from './rendering/createPauseMenuOverlay'
@@ -167,6 +170,7 @@ const bootstrapScene = async (
     questLog,
     merchantInventory,
     potionMerchantInventory,
+    sceneId,
     sceneIntroMessage: getSceneIntroMessage(sceneId),
     cameraTargetCharacterId: PLAYER_CHARACTER_ID,
     characterSpriteSheet: {
@@ -348,6 +352,7 @@ const scheduleSceneTransition = (request: SceneTransitionRequest) => {
         return
       }
 
+      questLog = recordSceneEnterQuestProgress(questLog, nextRequest.sceneId)
       await bootstrapScene(nextRequest.sceneId as SceneId, {
         x: nextRequest.spawn.x,
         y: nextRequest.spawn.y,
