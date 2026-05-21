@@ -17,7 +17,7 @@ This document is a short guide for module boundaries and code placement.
 - `src/game/blacksmithShop.ts`: blacksmith merchant inventory, buy/sell trade rules, and stock initialization for the shop NPC.
 - `src/game/monsterCombat.ts`: monster HP, contact damage, and defeat-state rules shared by combat scenes.
 - `src/game/monsterRewards.ts`: monster reward amounts such as beginner gold and experience drops.
-- `src/game/firstSlimeHuntQuest.ts`: pure state transitions, tracker text, and reward data for the first Korean story quest from the town wizard.
+- `src/game/questLog.ts`: pure quest definitions, quest progress state transitions, tracker visibility, NPC badge state, and reward data. The first Korean story quest from the town wizard is the first registered quest.
 - `src/game/playerExperience.ts`: player experience gain, level-up application, and the level 100 cap.
 - `src/game/playerEquipment.ts`: player-facing equipment state, starter gear data, blacksmith gear data, item price metadata, and item icon metadata used by the combined player panel.
 - `src/game/playerProfile.ts`: player-facing name, starter beginner class, 10-level promotion check, level 100 cap, future job-to-primary-stat mapping, resource, exp, stat, and skill data used by the HUD.
@@ -43,7 +43,8 @@ This document is a short guide for module boundaries and code placement.
 - `src/rendering/createPlayerSkillOverlay.ts`: fixed-screen player skill window opened with `K` that spends skill points on individual skill levels while staying non-modal.
 - `src/rendering/createBlacksmithShopOverlay.ts`: fixed-screen blacksmith service overlay that starts with a service menu and then shows the blacksmith trade view with portrait headers, category tabs, and side-by-side purchase/sale lists without blocking the rest of the game UI.
 - `src/rendering/createPauseMenuOverlay.ts`: fixed-screen pause/audio menu overlay with resume, BGM volume, and SFX volume controls.
-- `src/rendering/createQuestTrackerOverlay.ts`: fixed-screen quest tracker panel that displays the active first story quest objective.
+- `src/rendering/createQuestLogOverlay.ts`: fixed-screen quest window opened with `B`, showing accepted quest lists, quest details, objective progress, tracker toggles, and abandon confirmation.
+- `src/rendering/createQuestTrackerOverlay.ts`: fixed-screen quest tracker panel that displays quests whose per-quest tracker visibility is enabled, with a close button that hides tracker entries without changing quest progress.
 - `src/rendering/createPixiTiledMapView.ts`: also resolves basic player-versus-monster combat, including player attack hits, monster contact damage, player death and respawn timing, monster aggro, auto-aggro at close range, monster attack timing, hit recoil, respawn timing, defeat visibility, floating damage text, and gold drops.
 - `scripts/`: project automation scripts such as third-party fetch/build steps.
 - `third_party/`: vendored external source code kept in-repo for deterministic builds.

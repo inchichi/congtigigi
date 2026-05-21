@@ -203,7 +203,7 @@ body.game-root--map-focused > :not(.game-root) {
 .quest-tracker-overlay__panel {
   position: absolute;
   display: grid;
-  gap: 5px;
+  gap: 6px;
   min-width: 230px;
   max-width: min(320px, calc(100vw - 32px));
   padding: 10px 12px;
@@ -211,6 +211,14 @@ body.game-root--map-focused > :not(.game-root) {
   background: rgba(23, 19, 17, 0.88);
   box-shadow: 0 0 0 2px rgba(244, 231, 197, 0.18), 0 10px 22px rgba(0, 0, 0, 0.32);
   color: #f4e7c5;
+  pointer-events: auto;
+}
+
+.quest-tracker-overlay__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
 }
 
 .quest-tracker-overlay__title {
@@ -220,12 +228,350 @@ body.game-root--map-focused > :not(.game-root) {
   line-height: 1;
 }
 
+.quest-tracker-overlay__close {
+  appearance: none;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border: 1px solid rgba(244, 231, 197, 0.4);
+  background: rgba(72, 45, 34, 0.64);
+  color: #f4e7c5;
+  font: inherit;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.quest-tracker-overlay__close:focus-visible {
+  outline: 2px solid rgba(255, 223, 122, 0.72);
+  outline-offset: 2px;
+}
+
+.quest-tracker-overlay__close-icon {
+  font-size: 0.82rem;
+  line-height: 1;
+}
+
+.quest-tracker-overlay__list {
+  display: grid;
+  gap: 4px;
+}
+
 .quest-tracker-overlay__objective {
   color: #f4e7c5;
   font-size: 0.84rem;
   letter-spacing: 0;
   line-height: 1.15;
   overflow-wrap: anywhere;
+}
+
+.quest-log-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 51;
+  pointer-events: none;
+}
+
+.quest-log-overlay__close,
+.quest-log-overlay__tab,
+.quest-log-overlay__quest-row,
+.quest-log-overlay__tracker-toggle,
+.quest-log-overlay__abandon,
+.quest-log-overlay__confirm-abandon,
+.quest-log-overlay__confirm-cancel {
+  appearance: none;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+
+.quest-log-overlay__panel {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  z-index: 1;
+  display: grid;
+  transform-origin: center;
+  pointer-events: auto;
+  overflow: hidden;
+  width: min(720px, calc(100vw - 28px));
+  max-height: min(430px, calc(100vh - 28px));
+  background: #fff9ee;
+  box-shadow: 0 0 0 1px rgba(111, 89, 58, 0.3), 0 18px 36px rgba(0, 0, 0, 0.34);
+  color: #2e2313;
+}
+
+.quest-log-overlay__panel-body {
+  display: grid;
+  grid-template-columns: minmax(210px, 0.42fr) minmax(280px, 0.58fr);
+  grid-template-areas:
+    'header header'
+    'region detail';
+  gap: 8px;
+  padding: 10px;
+  min-height: 360px;
+}
+
+.quest-log-overlay__header {
+  grid-area: header;
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding-right: 36px;
+}
+
+.quest-log-overlay__title-group {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.quest-log-overlay__title {
+  color: #2e2313;
+  font-size: 1rem;
+  letter-spacing: 0.06em;
+  line-height: 1;
+}
+
+.quest-log-overlay__summary,
+.quest-log-overlay__detail-meta,
+.quest-log-overlay__empty-state {
+  color: #6b5534;
+  font-size: 0.68rem;
+  letter-spacing: 0.04em;
+  line-height: 1.2;
+}
+
+.quest-log-overlay__close {
+  position: absolute;
+  right: 0;
+  top: 0;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 22px;
+  border: 1px solid rgba(111, 89, 58, 0.34);
+  background: #f7ecd4;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.quest-log-overlay__close:focus-visible,
+.quest-log-overlay__tab:focus-visible,
+.quest-log-overlay__quest-row:focus-visible,
+.quest-log-overlay__tracker-toggle:focus-visible,
+.quest-log-overlay__abandon:focus-visible,
+.quest-log-overlay__confirm-abandon:focus-visible,
+.quest-log-overlay__confirm-cancel:focus-visible {
+  outline: 2px solid rgba(111, 89, 58, 0.52);
+  outline-offset: 2px;
+}
+
+.quest-log-overlay__close-icon {
+  font-size: 0.9rem;
+  line-height: 1;
+}
+
+.quest-log-overlay__region-pane {
+  grid-area: region;
+  display: grid;
+  grid-template-rows: max-content 1fr;
+  gap: 6px;
+  min-width: 0;
+  min-height: 0;
+}
+
+.quest-log-overlay__tab-bar {
+  display: flex;
+  gap: 2px;
+  min-width: 0;
+}
+
+.quest-log-overlay__tab {
+  min-height: 22px;
+  padding: 3px 10px 4px;
+  border: 1px solid rgba(111, 89, 58, 0.28);
+  background: #fff9ee;
+  color: #2e2313;
+  font-size: 0.62rem;
+  letter-spacing: 0.04em;
+  line-height: 1;
+  cursor: default;
+}
+
+.quest-log-overlay__quest-list {
+  display: grid;
+  align-content: start;
+  gap: 3px;
+  min-height: 0;
+  overflow: auto;
+  border: 1px solid rgba(111, 89, 58, 0.24);
+  background: #f7ecd4;
+  padding: 5px;
+}
+
+.quest-log-overlay__quest-row {
+  display: block;
+  width: 100%;
+  min-height: 28px;
+  padding: 6px 8px;
+  border: 1px solid rgba(111, 89, 58, 0.22);
+  background: rgba(255, 249, 238, 0.86);
+  color: #2e2313;
+  font-size: 0.72rem;
+  letter-spacing: 0;
+  line-height: 1.2;
+  text-align: left;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.quest-log-overlay__quest-row:hover,
+.quest-log-overlay__quest-row--active {
+  border-color: rgba(111, 89, 58, 0.52);
+  background: #fff9ee;
+}
+
+.quest-log-overlay__empty-state {
+  display: grid;
+  place-items: center;
+  min-height: 120px;
+  border: 1px solid rgba(111, 89, 58, 0.24);
+  background: #f7ecd4;
+  text-align: center;
+}
+
+.quest-log-overlay__detail-empty {
+  color: #6b5534;
+  font-size: 0.74rem;
+  letter-spacing: 0;
+  line-height: 1.2;
+  text-align: center;
+}
+
+.quest-log-overlay__detail-pane {
+  grid-area: detail;
+  display: grid;
+  align-content: start;
+  gap: 9px;
+  min-width: 0;
+  min-height: 0;
+  border: 1px solid rgba(111, 89, 58, 0.24);
+  background: #fffdf8;
+  padding: 10px;
+  overflow: auto;
+}
+
+.quest-log-overlay__detail-pane--empty {
+  align-content: center;
+  justify-items: center;
+}
+
+.quest-log-overlay__detail-header {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.quest-log-overlay__portrait {
+  flex: none;
+  border: 1px solid rgba(111, 89, 58, 0.34);
+  background-color: #f7ecd4;
+  image-rendering: pixelated;
+}
+
+.quest-log-overlay__detail-title-group {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.quest-log-overlay__detail-title {
+  color: #2e2313;
+  font-size: 0.9rem;
+  letter-spacing: 0;
+  line-height: 1.1;
+  overflow-wrap: anywhere;
+}
+
+.quest-log-overlay__description {
+  margin: 0;
+  color: #3d3020;
+  font-size: 0.74rem;
+  letter-spacing: 0;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.quest-log-overlay__objective-list {
+  display: grid;
+  gap: 4px;
+}
+
+.quest-log-overlay__objective-row {
+  min-height: 24px;
+  padding: 5px 7px;
+  border: 1px solid rgba(111, 89, 58, 0.24);
+  background: #f7ecd4;
+  color: #2e2313;
+  font-size: 0.76rem;
+  letter-spacing: 0;
+  line-height: 1.1;
+}
+
+.quest-log-overlay__action-row,
+.quest-log-overlay__confirm-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.quest-log-overlay__tracker-toggle,
+.quest-log-overlay__abandon,
+.quest-log-overlay__confirm-abandon,
+.quest-log-overlay__confirm-cancel {
+  min-height: 28px;
+  padding: 5px 10px;
+  border: 1px solid rgba(111, 89, 58, 0.34);
+  background: #f7ecd4;
+  color: #2e2313;
+  font-size: 0.68rem;
+  letter-spacing: 0;
+  line-height: 1;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.quest-log-overlay__tracker-toggle--active {
+  border-color: rgba(87, 116, 67, 0.56);
+  background: #e4f0c7;
+}
+
+.quest-log-overlay__abandon,
+.quest-log-overlay__confirm-abandon {
+  border-color: rgba(127, 68, 58, 0.42);
+  color: #6f2c23;
+}
+
+.quest-log-overlay__confirm {
+  display: grid;
+  gap: 7px;
+  padding: 8px;
+  border: 1px solid rgba(127, 68, 58, 0.3);
+  background: #fff1e7;
+}
+
+.quest-log-overlay__confirm-text {
+  color: #6f2c23;
+  font-size: 0.72rem;
+  letter-spacing: 0;
+  line-height: 1.2;
 }
 
 .pause-menu-overlay {
@@ -2430,6 +2776,28 @@ body.game-root--map-focused > :not(.game-root) {
 }
 
 @media (max-width: 920px) {
+  .quest-log-overlay__panel-body {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      'header'
+      'region'
+      'detail';
+    min-height: 0;
+    max-height: calc(100vh - 48px);
+  }
+
+  .quest-log-overlay__panel {
+    width: min(520px, calc(100vw - 20px));
+  }
+
+  .quest-log-overlay__quest-list {
+    max-height: 116px;
+  }
+
+  .quest-log-overlay__detail-pane {
+    max-height: 220px;
+  }
+
   .blacksmith-shop-overlay__panel-body {
     grid-template-columns: 1fr;
     grid-template-areas:
