@@ -150,7 +150,7 @@ type TilesetRenderResources = {
   tileTextures: Texture[]
 }
 
-type SmearVfxRenderResources = {
+type SlashVfxRenderResources = {
   horizontalTextures: Texture[]
   verticalTextures: Texture[]
 }
@@ -440,15 +440,41 @@ const PLAYER_WEAPON_TILE_FRAME_SOURCE: TileTextureFrameSource = {
   tileWidth: 16,
   tileHeight: 16
 }
-const SMEAR_VFX_HORIZONTAL_SPRITESHEET_URL = new URL(
-  '../assets/vfx/smear-vfx-01/smear-vfx-01-horizontal-1.png',
-  import.meta.url
-).href
-const SMEAR_VFX_VERTICAL_SPRITESHEET_URL = new URL(
-  '../assets/vfx/smear-vfx-01/smear-vfx-01-vertical-1.png',
-  import.meta.url
-).href
-const SMEAR_VFX_FRAME_SIZE = 48
+const BLUE_SLASH_WIDE_FRAME_URLS = [
+  new URL(
+    '../assets/vfx/Sword Slashes/Blue Slash Wide/File1.png',
+    import.meta.url
+  ).href,
+  new URL(
+    '../assets/vfx/Sword Slashes/Blue Slash Wide/File2.png',
+    import.meta.url
+  ).href,
+  new URL(
+    '../assets/vfx/Sword Slashes/Blue Slash Wide/File3.png',
+    import.meta.url
+  ).href,
+  new URL(
+    '../assets/vfx/Sword Slashes/Blue Slash Wide/File4.png',
+    import.meta.url
+  ).href,
+  new URL(
+    '../assets/vfx/Sword Slashes/Blue Slash Wide/File5.png',
+    import.meta.url
+  ).href,
+  new URL(
+    '../assets/vfx/Sword Slashes/Blue Slash Wide/File6.png',
+    import.meta.url
+  ).href
+]
+const BLUE_SLASH_WIDE_FRAME_BOUNDS: CollisionRect[] = [
+  { x: 63, y: 25, width: 465, height: 345 },
+  { x: 75, y: 165, width: 463, height: 196 },
+  { x: 33, y: 285, width: 373, height: 87 },
+  { x: 11, y: 186, width: 119, height: 181 },
+  { x: 11, y: 103, width: 41, height: 212 },
+  { x: 29, y: 63, width: 23, height: 55 }
+]
+const SLASH_VFX_HIT_PADDING_PIXELS = 2
 const PLAYER_WEAPON_WORLD_SCALE = 1.35
 const PLAYER_ATTACK_TRAIL_PROGRESS_STEP = 0.12
 const PLAYER_ATTACK_TRAIL_ALPHA = [0.42, 0.28, 0.18, 0.1]
@@ -459,10 +485,8 @@ const PLAYER_NAME_BADGE_FOOT_OFFSET = 6
 const PLAYER_STATUS_STACK_CLEARANCE = 6
 const PLAYER_ATTACK_ROTATION_OFFSET = 1.15
 const PLAYER_ATTACK_SCALE_BOOST = 0.06
-const PLAYER_ATTACK_SLASH_EFFECT_SCALE_X = 1.55
-const PLAYER_ATTACK_SLASH_EFFECT_SCALE_Y = 1.35
-const PLAYER_ATTACK_SLASH_EFFECT_WIDE_FRAME_INDEX = 1
-const PLAYER_ATTACK_SLASH_EFFECT_WIDE_FRAME_X_MULTIPLIER = 1.2
+const PLAYER_ATTACK_SLASH_EFFECT_SCALE_X = 0.23
+const PLAYER_ATTACK_SLASH_EFFECT_SCALE_Y = 0.23
 const PLAYER_WEAPON_PLACEMENT_RIGHT = {
   x: 23,
   y: 21,
@@ -480,7 +504,7 @@ const PORTAL_INSIDE_IMAGE_URL = new URL(
 const PORTAL_INSIDE_WORLD_SCALE = 0.08
 const SCENE_INTRO_VISIBLE_DURATION_MILLISECONDS = 3000
 const PLAYER_ATTACK_DURATION_MILLISECONDS = 320
-const PLAYER_ATTACK_COOLDOWN_MILLISECONDS = 420
+const PLAYER_ATTACK_COOLDOWN_MILLISECONDS = 300
 const WIZARD_NPC_ID = 'wizard'
 const QUEST_DIALOGUE_DURATION_MILLISECONDS = 3600
 const QUEST_START_TEXT = '퀘스트 시작: 첫 사냥'
@@ -629,13 +653,13 @@ export const createPixiTiledMapView = async ({
   const [
     portalInsideTexture,
     tinyDungeonWeaponImageTexture,
-    smearVfxTextures,
+    slashVfxTextures,
     monsterPigAnimationTextures,
     monsterSlimeAnimationTextures
   ] = await Promise.all([
     Assets.load<Texture>(PORTAL_INSIDE_IMAGE_URL),
     Assets.load<Texture>(TINY_DUNGEON_TILESET_IMAGE_URL),
-    loadSmearVfxTextures(),
+    loadSlashVfxTextures(),
     loadMonsterPigAnimationTextures(),
     loadMonsterSlimeAnimationTextures()
   ])
@@ -1035,39 +1059,25 @@ export const createPixiTiledMapView = async ({
     const isHorizontalSlash =
       character.facing !== 'up' && character.facing !== 'down'
     const slashTextures = isHorizontalSlash
-      ? smearVfxTextures.horizontalTextures
-      : smearVfxTextures.verticalTextures
+      ? slashVfxTextures.horizontalTextures
+      : slashVfxTextures.verticalTextures
     const slashSprite = new AnimatedSprite(slashTextures)
     const slashBaseScaleX =
       character.facing === 'left'
         ? -PLAYER_ATTACK_SLASH_EFFECT_SCALE_X
         : PLAYER_ATTACK_SLASH_EFFECT_SCALE_X
-    const applySlashFrameScale = (frameIndex: number) => {
-      const frameScaleX =
-        isHorizontalSlash &&
-        frameIndex === PLAYER_ATTACK_SLASH_EFFECT_WIDE_FRAME_INDEX
-          ? PLAYER_ATTACK_SLASH_EFFECT_WIDE_FRAME_X_MULTIPLIER
-          : 1
-
-      slashSprite.scale.set(
-        slashBaseScaleX * frameScaleX,
-        PLAYER_ATTACK_SLASH_EFFECT_SCALE_Y
-      )
-    }
 
     slashSprite.label = 'character:player:slash-effect'
     slashSprite.anchor.set(0.5)
     slashSprite.animationSpeed = 0.8
     slashSprite.loop = false
     slashSprite.roundPixels = true
+    slashSprite.rotation = isHorizontalSlash ? 0 : Math.PI / 2
     slashSprite.position.set(
       character.position.x * map.tileWidth + characterPixelWidth / 2,
       character.position.y * map.tileHeight + characterPixelHeight / 2 - 1
     )
-    applySlashFrameScale(0)
-    slashSprite.onFrameChange = (currentFrame) => {
-      applySlashFrameScale(currentFrame)
-    }
+    slashSprite.scale.set(slashBaseScaleX, PLAYER_ATTACK_SLASH_EFFECT_SCALE_Y)
     slashSprite.zIndex =
       getCharacterDepthSortValue(
         character.position.y,
@@ -2620,6 +2630,127 @@ export const createPixiTiledMapView = async ({
     return combatState ? isMonsterDefeated(combatState) : false
   }
 
+  function createSlashEffectHitRect(
+    slashSprite: AnimatedSprite
+  ): CollisionRect {
+    const frameIndex = Math.min(
+      Math.max(0, Math.floor(slashSprite.currentFrame)),
+      BLUE_SLASH_WIDE_FRAME_BOUNDS.length - 1
+    )
+    const frameBounds =
+      BLUE_SLASH_WIDE_FRAME_BOUNDS[frameIndex] ??
+      BLUE_SLASH_WIDE_FRAME_BOUNDS[0]
+    const textureWidth = slashSprite.texture.source.pixelWidth
+    const textureHeight = slashSprite.texture.source.pixelHeight
+    const scaleX = slashSprite.scale.x
+    const scaleY = slashSprite.scale.y
+    const rotation = slashSprite.rotation
+    const cos = Math.cos(rotation)
+    const sin = Math.sin(rotation)
+    const corners = [
+      {
+        x: frameBounds.x - textureWidth / 2 - SLASH_VFX_HIT_PADDING_PIXELS,
+        y: frameBounds.y - textureHeight / 2 - SLASH_VFX_HIT_PADDING_PIXELS
+      },
+      {
+        x:
+          frameBounds.x +
+          frameBounds.width -
+          textureWidth / 2 +
+          SLASH_VFX_HIT_PADDING_PIXELS,
+        y: frameBounds.y - textureHeight / 2 - SLASH_VFX_HIT_PADDING_PIXELS
+      },
+      {
+        x: frameBounds.x - textureWidth / 2 - SLASH_VFX_HIT_PADDING_PIXELS,
+        y:
+          frameBounds.y +
+          frameBounds.height -
+          textureHeight / 2 +
+          SLASH_VFX_HIT_PADDING_PIXELS
+      },
+      {
+        x:
+          frameBounds.x +
+          frameBounds.width -
+          textureWidth / 2 +
+          SLASH_VFX_HIT_PADDING_PIXELS,
+        y:
+          frameBounds.y +
+          frameBounds.height -
+          textureHeight / 2 +
+          SLASH_VFX_HIT_PADDING_PIXELS
+      }
+    ]
+    const worldCorners = corners.map((corner) => {
+      const scaledX = corner.x * scaleX
+      const scaledY = corner.y * scaleY
+
+      return {
+        x:
+          slashSprite.position.x +
+          scaledX * cos -
+          scaledY * sin,
+        y:
+          slashSprite.position.y +
+          scaledX * sin +
+          scaledY * cos
+      }
+    })
+    const xCoordinates = worldCorners.map((corner) => corner.x)
+    const yCoordinates = worldCorners.map((corner) => corner.y)
+    const minX = Math.min(...xCoordinates)
+    const maxX = Math.max(...xCoordinates)
+    const minY = Math.min(...yCoordinates)
+    const maxY = Math.max(...yCoordinates)
+
+    return {
+      x: minX,
+      y: minY,
+      width: maxX - minX,
+      height: maxY - minY
+    }
+  }
+
+  function resolveClosestMonsterInCollisionRect(
+    hitRect: CollisionRect
+  ): CharacterState | undefined {
+    const hitRectCenterX = hitRect.x + hitRect.width / 2
+    const hitRectCenterY = hitRect.y + hitRect.height / 2
+
+    return characterStates
+      .filter(
+        (character) =>
+          isMonsterCharacter(character) &&
+          !isMonsterCombatStateDefeated(character.id) &&
+          doCollisionRectsIntersect(
+            hitRect,
+            createCollisionRectFromCharacter(character)
+          )
+      )
+      .sort((leftCharacter, rightCharacter) => {
+        const leftCenterX =
+          leftCharacter.position.x + leftCharacter.collisionSize.width / 2
+        const leftCenterY =
+          leftCharacter.position.y + leftCharacter.collisionSize.height / 2
+        const rightCenterX =
+          rightCharacter.position.x + rightCharacter.collisionSize.width / 2
+        const rightCenterY =
+          rightCharacter.position.y + rightCharacter.collisionSize.height / 2
+        const leftDistance =
+          (leftCenterX - hitRectCenterX) ** 2 +
+          (leftCenterY - hitRectCenterY) ** 2
+        const rightDistance =
+          (rightCenterX - hitRectCenterX) ** 2 +
+          (rightCenterY - hitRectCenterY) ** 2
+
+        if (leftDistance !== rightDistance) {
+          return leftDistance - rightDistance
+        }
+
+        return leftCharacter.id.localeCompare(rightCharacter.id)
+      })[0]
+  }
+
   function maybeRespawnMonster(characterId: string, now: number): boolean {
     const respawnAt = monsterRespawnAtById.get(characterId)
 
@@ -3052,14 +3183,18 @@ export const createPixiTiledMapView = async ({
     }
 
     const playerCharacter = getCharacterStateById(PLAYER_CHARACTER_ID)
-    const targetCharacter = resolveCharacterInteractionTarget({
-      sourceCharacter: playerCharacter,
-      targetCharacters: characterStates,
-      canReceiveInteraction: (character) =>
-        isMonsterCharacter(character) &&
-        !isMonsterCombatStateDefeated(character.id),
-      interactionProbeDistanceInTiles: PLAYER_ATTACK_PROBE_DISTANCE_IN_TILES
-    })
+    const targetCharacter = playerSlashEffectSprite
+      ? resolveClosestMonsterInCollisionRect(
+          createSlashEffectHitRect(playerSlashEffectSprite)
+        )
+      : resolveCharacterInteractionTarget({
+          sourceCharacter: playerCharacter,
+          targetCharacters: characterStates,
+          canReceiveInteraction: (character) =>
+            isMonsterCharacter(character) &&
+            !isMonsterCombatStateDefeated(character.id),
+          interactionProbeDistanceInTiles: PLAYER_ATTACK_PROBE_DISTANCE_IN_TILES
+        })
 
     if (targetCharacter) {
       applyDamageToMonster(
@@ -3067,9 +3202,9 @@ export const createPixiTiledMapView = async ({
         getPlayerPhysicalAttackPower(playerProfile),
         now
       )
+      playerAttackResolvedStartedAtMilliseconds =
+        playerAttackStartedAtMilliseconds
     }
-
-    playerAttackResolvedStartedAtMilliseconds = playerAttackStartedAtMilliseconds
   }
 
   function resolveMonsterContactDamage(now: number): void {
@@ -4102,16 +4237,25 @@ export const createPixiTiledMapView = async ({
 
     const action = getCharacterActionFromKey(event.key)
 
-    if (action || isAttackKey(event)) {
+    if (isAttackKey(event)) {
       event.preventDefault()
 
-      const nextAction = action ?? 'attack'
-
-      if (!pressedActions.has(nextAction)) {
-        triggeredActions.add(nextAction)
+      if (!pressedActions.has('attack') || event.repeat) {
+        triggeredActions.add('attack')
       }
 
-      pressedActions.add(nextAction)
+      pressedActions.add('attack')
+      return
+    }
+
+    if (action) {
+      event.preventDefault()
+
+      if (!pressedActions.has(action)) {
+        triggeredActions.add(action)
+      }
+
+      pressedActions.add(action)
       return
     }
 
@@ -4339,46 +4483,21 @@ const createMessagePanelTexture = (): Texture => {
   return texture
 }
 
-const loadSmearVfxTextures = async (): Promise<SmearVfxRenderResources> => {
-  const horizontalSpritesheet = await Assets.load<Texture>(
-    SMEAR_VFX_HORIZONTAL_SPRITESHEET_URL
-  )
-  const verticalSpritesheet = await Assets.load<Texture>(
-    SMEAR_VFX_VERTICAL_SPRITESHEET_URL
+const loadSlashVfxTextures = async (): Promise<SlashVfxRenderResources> => {
+  const textures = await Promise.all(
+    BLUE_SLASH_WIDE_FRAME_URLS.map((frameUrl) =>
+      Assets.load<Texture>(frameUrl)
+    )
   )
 
-  horizontalSpritesheet.source.scaleMode = 'nearest'
-  verticalSpritesheet.source.scaleMode = 'nearest'
+  textures.forEach((texture) => {
+    texture.source.scaleMode = 'nearest'
+  })
 
   return {
-    horizontalTextures: createSmearVfxFrameTextures(horizontalSpritesheet),
-    verticalTextures: createSmearVfxFrameTextures(verticalSpritesheet)
+    horizontalTextures: textures,
+    verticalTextures: textures
   }
-}
-
-const createSmearVfxFrameTextures = (imageTexture: Texture): Texture[] => {
-  const frameCount = Math.floor(
-    imageTexture.source.pixelWidth / SMEAR_VFX_FRAME_SIZE
-  )
-
-  if (frameCount < 1) {
-    throw new Error(
-      `Expected at least one smear VFX frame in ${imageTexture.source.label ?? 'texture'}`
-    )
-  }
-
-  return Array.from({ length: frameCount }, (_, frameIndex) =>
-    new Texture({
-      source: imageTexture.source,
-      frame: new Rectangle(
-        frameIndex * SMEAR_VFX_FRAME_SIZE,
-        0,
-        SMEAR_VFX_FRAME_SIZE,
-        SMEAR_VFX_FRAME_SIZE
-      ),
-      orig: new Rectangle(0, 0, SMEAR_VFX_FRAME_SIZE, SMEAR_VFX_FRAME_SIZE)
-    })
-  )
 }
 
 const ensureMessageFontsLoaded = async (): Promise<void> => {
