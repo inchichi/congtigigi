@@ -9,37 +9,58 @@ import {
   createInitialBlacksmithInventory,
   sellBlacksmithShopItem
 } from './blacksmithShop'
+import { getPlayerEquipmentItemDefinitionById } from './playerEquipment'
+
+const BLACKSMITH_STOCK_ITEM_IDS = [
+  'basic-sword',
+  'basic-armor',
+  'basic-boots',
+  'basic-charm',
+  'bronze-sword',
+  'iron-sword',
+  'battle-axe',
+  'long-spear',
+  'quick-dagger',
+  'spiked-mace',
+  'magic-staff',
+  'iron-armor',
+  'Leather_Armor',
+  'Leather_Helmet',
+  'Chain_Armor',
+  'Chain_Helmet',
+  'Iron_Armor',
+  'Iron_Helmet',
+  'leather-boots',
+  'smith-charm'
+] as const
+
+const createExpectedStockSlots = (itemIds: readonly string[]) =>
+  itemIds.map((itemId) => {
+    const definition = getPlayerEquipmentItemDefinitionById(itemId)
+
+    if (!definition) {
+      throw new Error(`Missing expected equipment definition for ${itemId}`)
+    }
+
+    return {
+      id: definition.id,
+      label: definition.label,
+      quantity: 1
+    }
+  })
+
+const createExpectedMerchantInventory = (
+  gold: number,
+  itemIds: readonly string[] = BLACKSMITH_STOCK_ITEM_IDS
+) => ({
+  gold,
+  slots: createExpectedStockSlots(itemIds)
+})
 
 describe('createInitialBlacksmithInventory', () => {
   it('creates stocked merchant inventory with gold', () => {
-    expect(createInitialBlacksmithInventory({ slotCount: 6, gold: 4200 })).toEqual(
-      {
-        gold: 4200,
-        slots: [
-          {
-            id: 'bronze-sword',
-            label: '청동 검',
-            quantity: 1
-          },
-          {
-            id: 'iron-armor',
-            label: '철 옷',
-            quantity: 1
-          },
-          {
-            id: 'leather-boots',
-            label: '가죽 신발',
-            quantity: 1
-          },
-          {
-            id: 'smith-charm',
-            label: '수호 부적',
-            quantity: 1
-          },
-          undefined,
-          undefined
-        ]
-      }
+    expect(createInitialBlacksmithInventory({ gold: 4200 })).toEqual(
+      createExpectedMerchantInventory(4200)
     )
   })
 })
@@ -47,10 +68,7 @@ describe('createInitialBlacksmithInventory', () => {
 describe('buyBlacksmithShopItem', () => {
   it('moves an item from the merchant inventory into the player inventory', () => {
     const playerInventory = createInitialPlayerInventory({ slotCount: 2, gold: 1000 })
-    const merchantInventory = createInitialBlacksmithInventory({
-      slotCount: 6,
-      gold: 5000
-    })
+    const merchantInventory = createInitialBlacksmithInventory({ gold: 5000 })
 
     const result = buyBlacksmithShopItem({
       playerInventory,
@@ -61,37 +79,21 @@ describe('buyBlacksmithShopItem', () => {
     expect(result).toEqual({
       ok: true,
       playerInventory: {
-        gold: 680,
+        gold: 880,
         slots: [
           {
-            id: 'bronze-sword',
-            label: '청동 검',
+            id: 'basic-sword',
+            label: '기본 무기',
             quantity: 1
           },
           undefined
         ]
       },
       merchantInventory: {
-        gold: 5320,
+        gold: 5120,
         slots: [
           undefined,
-          {
-            id: 'iron-armor',
-            label: '철 옷',
-            quantity: 1
-          },
-          {
-            id: 'leather-boots',
-            label: '가죽 신발',
-            quantity: 1
-          },
-          {
-            id: 'smith-charm',
-            label: '수호 부적',
-            quantity: 1
-          },
-          undefined,
-          undefined
+          ...createExpectedStockSlots(BLACKSMITH_STOCK_ITEM_IDS.slice(1))
         ]
       },
       message: '구매했습니다.'
@@ -100,10 +102,7 @@ describe('buyBlacksmithShopItem', () => {
 
   it('rejects purchases when the player cannot afford the item', () => {
     const playerInventory = createInitialPlayerInventory({ slotCount: 2, gold: 100 })
-    const merchantInventory = createInitialBlacksmithInventory({
-      slotCount: 6,
-      gold: 5000
-    })
+    const merchantInventory = createInitialBlacksmithInventory({ gold: 5000 })
 
     const result = buyBlacksmithShopItem({
       playerInventory,
@@ -130,10 +129,7 @@ describe('buyBlacksmithShopItem', () => {
         }
       ]
     }
-    const merchantInventory = createInitialBlacksmithInventory({
-      slotCount: 4,
-      gold: 5000
-    })
+    const merchantInventory = createInitialBlacksmithInventory({ gold: 5000 })
 
     const result = buyBlacksmithShopItem({
       playerInventory,
@@ -161,10 +157,7 @@ describe('sellBlacksmithShopItem', () => {
         quantity: 1
       }
     })
-    const merchantInventory = createInitialBlacksmithInventory({
-      slotCount: 6,
-      gold: 5000
-    })
+    const merchantInventory = createInitialBlacksmithInventory({ gold: 5000 })
 
     const result = sellBlacksmithShopItem({
       playerInventory,
@@ -180,30 +173,7 @@ describe('sellBlacksmithShopItem', () => {
       },
       merchantInventory: {
         gold: 4995,
-        slots: [
-          {
-            id: 'bronze-sword',
-            label: '청동 검',
-            quantity: 1
-          },
-          {
-            id: 'iron-armor',
-            label: '철 옷',
-            quantity: 1
-          },
-          {
-            id: 'leather-boots',
-            label: '가죽 신발',
-            quantity: 1
-          },
-          {
-            id: 'smith-charm',
-            label: '수호 부적',
-            quantity: 1
-          },
-          undefined,
-          undefined
-        ]
+        slots: createExpectedMerchantInventory(4995).slots
       },
       message: '판매했습니다.'
     })
@@ -219,10 +189,7 @@ describe('sellBlacksmithShopItem', () => {
         quantity: 1
       }
     })
-    const merchantInventory = createInitialBlacksmithInventory({
-      slotCount: 6,
-      gold: 5000
-    })
+    const merchantInventory = createInitialBlacksmithInventory({ gold: 5000 })
 
     const result = sellBlacksmithShopItem({
       playerInventory,
