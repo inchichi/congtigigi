@@ -28,6 +28,7 @@ type CreatePlayerInventoryOverlayInput = {
   onRequestInventoryChange: (nextInventory: PlayerInventory) => void
   onRequestEquipmentChange: (nextEquipment: PlayerEquipment) => void
   onRequestProfileChange: (nextProfile: PlayerProfile) => void
+  onConsumableUsed?: (itemId: string) => void
 }
 
 export type PlayerInventoryOverlay = {
@@ -185,7 +186,8 @@ export const createPlayerInventoryOverlay = ({
   onRequestOpenChange,
   onRequestInventoryChange,
   onRequestEquipmentChange,
-  onRequestProfileChange
+  onRequestProfileChange,
+  onConsumableUsed
 }: CreatePlayerInventoryOverlayInput): PlayerInventoryOverlay => {
   const overlayRoot = document.createElement('div')
   const backdropButton = document.createElement('button')
@@ -1060,6 +1062,7 @@ export const createPlayerInventoryOverlay = ({
 
     onRequestProfileChange(nextState.profile)
     onRequestInventoryChange(nextState.inventory)
+    onConsumableUsed?.(item.id)
     syncFrame()
   }
 
