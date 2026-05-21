@@ -30,8 +30,17 @@ import {
 } from '../game/events/createGameEventQueue'
 import { processInteractionEvents } from '../game/interaction/processInteractionEvents'
 import { usePlayerQuickslotConsumable } from '../game/playerConsumables'
-import type { PlayerEquipment } from '../game/playerEquipment'
-import type { PlayerInventory, PlayerInventoryItem } from '../game/playerInventory'
+import {
+  getPlayerEquipmentItemDefinitionById,
+  type PlayerEquipment,
+  type PlayerEquipmentSlotId
+} from '../game/playerEquipment'
+import {
+  findFirstEmptyPlayerInventorySlotIndex,
+  setPlayerInventorySlot,
+  type PlayerInventory,
+  type PlayerInventoryItem
+} from '../game/playerInventory'
 import type { PlayerProfile } from '../game/playerProfile'
 import {
   clearPlayerQuickslotAssignment,
@@ -69,6 +78,7 @@ import {
   shouldPlayerEvadeDamage
 } from '../game/playerStatEffects'
 import { grantPlayerExperience } from '../game/playerExperience'
+import { rollMonsterEquipmentDrop } from '../game/monsterEquipmentDrops'
 import {
   createMonsterPatrolState,
   stepMonsterPatrol,
@@ -223,9 +233,26 @@ type MonsterGoldDrop = {
   createdAt: number
 }
 
+type MonsterEquipmentDrop = {
+  id: string
+  dropId: string
+  itemId: string
+  label: string
+  container: Container
+  sprite: Sprite
+  labelText: Text
+  position: {
+    x: number
+    y: number
+  }
+  createdAt: number
+}
+
 type RenderedCharacterNode = {
   container: Container
   sprite: Sprite
+  playerArmorSprite?: Sprite
+  playerHelmetSprite?: Sprite
   questBadge?: Sprite
   playerHealthBar?: {
     container: Container
@@ -288,11 +315,82 @@ type PlayerHitReactionState = {
   expiresAtMilliseconds: number
 }
 
+type PlayerVisualEquipmentSlotId = Extract<PlayerEquipmentSlotId, 'armor' | 'hat'>
+
+type PlayerEquipmentAppearanceConfig = {
+  slotId: PlayerVisualEquipmentSlotId
+  imageUrl: string
+  width: number
+  height: number
+  position: {
+    x: number
+    y: number
+  }
+  zIndex: number
+}
+
+type PlayerWeaponAppearanceConfig = {
+  imageUrl: string
+  worldScale: number
+  idleOffsetX: number
+  idleOffsetY: number
+}
+
 const DEPTH_SORTED_LAYER_NAME = 'object'
 const TINY_DUNGEON_TILESET_IMAGE_URL = new URL(
   '../assets/tilesets/tiny-dungeon-16.png',
   import.meta.url
 ).href
+const MONSTER_EQUIPMENT_DROP_IMAGE_URL_BY_DROP_ID: Record<string, string> = {
+  'iron-sword_drop': new URL(
+    '../assets/weapons/weapon-sword.png',
+    import.meta.url
+  ).href,
+  'battle-axe_drop': new URL(
+    '../assets/weapons/weapon-axe.png',
+    import.meta.url
+  ).href,
+  'long-spear_drop': new URL(
+    '../assets/weapons/weapon-spear.png',
+    import.meta.url
+  ).href,
+  'quick-dagger_drop': new URL(
+    '../assets/weapons/weapon-dagger.png',
+    import.meta.url
+  ).href,
+  'spiked-mace_drop': new URL(
+    '../assets/weapons/weapon-mace.png',
+    import.meta.url
+  ).href,
+  'magic-staff_drop': new URL(
+    '../assets/weapons/weapon-staff.png',
+    import.meta.url
+  ).href,
+  Leather_Armor_drop: new URL(
+    '../assets/armor/dropimage/Leather_Armor_drop.png',
+    import.meta.url
+  ).href,
+  Leather_Helmet_drop: new URL(
+    '../assets/armor/dropimage/Leather_Helmet_drop.png',
+    import.meta.url
+  ).href,
+  Chain_Armor_drop: new URL(
+    '../assets/armor/dropimage/Chain_Armor_drop.png',
+    import.meta.url
+  ).href,
+  Chain_Helmet_drop: new URL(
+    '../assets/armor/dropimage/Chain_Helmet_drop.png',
+    import.meta.url
+  ).href,
+  Iron_Armor_drop: new URL(
+    '../assets/armor/dropimage/Iron_Armor_drop.png',
+    import.meta.url
+  ).href,
+  Iron_Helmet_drop: new URL(
+    '../assets/armor/dropimage/Iron_Helmet_drop.png',
+    import.meta.url
+  ).href
+}
 const MESSAGE_PANEL_BORDER_SIZE = 8
 const MESSAGE_PANEL_PADDING_X = 12
 const MESSAGE_PANEL_PADDING_Y = 8
@@ -397,6 +495,9 @@ const MONSTER_GOLD_DROP_AMOUNT_TEXT_STYLE = new TextStyle({
 })
 const MONSTER_GOLD_DROP_PICKUP_WIDTH = 14
 const MONSTER_GOLD_DROP_PICKUP_HEIGHT = 14
+const MONSTER_EQUIPMENT_DROP_RENDER_SIZE = 24
+const MONSTER_EQUIPMENT_DROP_PICKUP_WIDTH = 20
+const MONSTER_EQUIPMENT_DROP_PICKUP_HEIGHT = 20
 const MONSTER_LEVEL_BADGE_STYLE = new TextStyle({
   align: 'center',
   fill: 0xf4e7c5,
@@ -517,6 +618,100 @@ const PLAYER_WEAPON_PLACEMENT_LEFT = {
   x: 9,
   y: 21,
   rotation: -0.75
+}
+const PLAYER_WEAPON_APPEARANCE_CONFIG_BY_ITEM_ID: Record<
+  string,
+  PlayerWeaponAppearanceConfig
+> = {
+  'iron-sword': {
+    imageUrl: new URL('../assets/weapons/weapon-sword.png', import.meta.url).href,
+    worldScale: 0.085,
+    idleOffsetX: -3,
+    idleOffsetY: 2
+  },
+  'battle-axe': {
+    imageUrl: new URL('../assets/weapons/weapon-axe.png', import.meta.url).href,
+    worldScale: 0.085,
+    idleOffsetX: -5,
+    idleOffsetY: 4
+  },
+  'long-spear': {
+    imageUrl: new URL('../assets/weapons/weapon-spear.png', import.meta.url).href,
+    worldScale: 0.085,
+    idleOffsetX: -2,
+    idleOffsetY: 3
+  },
+  'quick-dagger': {
+    imageUrl: new URL('../assets/weapons/weapon-dagger.png', import.meta.url).href,
+    worldScale: 0.085,
+    idleOffsetX: -2,
+    idleOffsetY: 1
+  },
+  'spiked-mace': {
+    imageUrl: new URL('../assets/weapons/weapon-mace.png', import.meta.url).href,
+    worldScale: 0.085,
+    idleOffsetX: -4,
+    idleOffsetY: 4
+  },
+  'magic-staff': {
+    imageUrl: new URL('../assets/weapons/weapon-staff.png', import.meta.url).href,
+    worldScale: 0.085,
+    idleOffsetX: -2,
+    idleOffsetY: 3
+  }
+}
+const PLAYER_ARMOR_EQUIPMENT_CONFIG = {
+  width: 24,
+  height: 9,
+  position: {
+    x: 16,
+    y: 24
+  },
+  zIndex: 12
+}
+const PLAYER_HELMET_EQUIPMENT_CONFIG = {
+  width: 22,
+  height: 15,
+  position: {
+    x: 16,
+    y: 9
+  },
+  zIndex: 13
+}
+const PLAYER_EQUIPMENT_APPEARANCE_CONFIG_BY_ITEM_ID: Record<
+  string,
+  PlayerEquipmentAppearanceConfig
+> = {
+  Leather_Armor: {
+    slotId: 'armor',
+    imageUrl: new URL('../assets/armor/Leather_Armor.png', import.meta.url).href,
+    ...PLAYER_ARMOR_EQUIPMENT_CONFIG
+  },
+  Leather_Helmet: {
+    slotId: 'hat',
+    imageUrl: new URL('../assets/armor/Leather_Helmet.png', import.meta.url).href,
+    ...PLAYER_HELMET_EQUIPMENT_CONFIG
+  },
+  Chain_Armor: {
+    slotId: 'armor',
+    imageUrl: new URL('../assets/armor/Chain_Armor.png', import.meta.url).href,
+    ...PLAYER_ARMOR_EQUIPMENT_CONFIG
+  },
+  Chain_Helmet: {
+    slotId: 'hat',
+    imageUrl: new URL('../assets/armor/Chain_Helmet.png', import.meta.url).href,
+    ...PLAYER_HELMET_EQUIPMENT_CONFIG
+  },
+  Iron_Armor: {
+    slotId: 'armor',
+    imageUrl: new URL('../assets/armor/Iron_Armor.png', import.meta.url).href,
+    ...PLAYER_ARMOR_EQUIPMENT_CONFIG
+  },
+  Iron_Helmet: {
+    slotId: 'hat',
+    imageUrl: new URL('../assets/armor/Iron_Helmet.png', import.meta.url).href,
+    ...PLAYER_HELMET_EQUIPMENT_CONFIG
+  }
 }
 const PORTAL_INSIDE_IMAGE_URL = new URL(
   '../assets/tilesets/portal_inside.png',
@@ -686,6 +881,36 @@ export const createPixiTiledMapView = async ({
     loadMonsterPigAnimationTextures(),
     loadMonsterSlimeAnimationTextures()
   ])
+  const playerWeaponAppearanceTexturesByItemId = new Map(
+    await Promise.all(
+      Object.entries(PLAYER_WEAPON_APPEARANCE_CONFIG_BY_ITEM_ID).map(
+        async ([itemId, config]) => [
+          itemId,
+          await Assets.load<Texture>(config.imageUrl)
+        ] as const
+      )
+    )
+  )
+  const monsterEquipmentDropTexturesByDropId = new Map(
+    await Promise.all(
+      Object.entries(MONSTER_EQUIPMENT_DROP_IMAGE_URL_BY_DROP_ID).map(
+        async ([dropId, imageUrl]) => [
+          dropId,
+          await Assets.load<Texture>(imageUrl)
+        ] as const
+      )
+    )
+  )
+  const playerEquipmentTexturesByItemId = new Map(
+    await Promise.all(
+      Object.entries(PLAYER_EQUIPMENT_APPEARANCE_CONFIG_BY_ITEM_ID).map(
+        async ([itemId, config]) => [
+          itemId,
+          await Assets.load<Texture>(config.imageUrl)
+        ] as const
+      )
+    )
+  )
   const messagePanelTexture = createMessagePanelTexture()
 
   const monsterAnimationTexturesByAppearanceType: Record<
@@ -700,6 +925,18 @@ export const createPixiTiledMapView = async ({
   tinyDungeonWeaponImageTexture.source.addressMode = 'clamp-to-edge'
   portalInsideTexture.source.scaleMode = 'nearest'
   portalInsideTexture.source.addressMode = 'clamp-to-edge'
+  for (const texture of playerWeaponAppearanceTexturesByItemId.values()) {
+    texture.source.scaleMode = 'nearest'
+    texture.source.addressMode = 'clamp-to-edge'
+  }
+  for (const texture of monsterEquipmentDropTexturesByDropId.values()) {
+    texture.source.scaleMode = 'nearest'
+    texture.source.addressMode = 'clamp-to-edge'
+  }
+  for (const texture of playerEquipmentTexturesByItemId.values()) {
+    texture.source.scaleMode = 'nearest'
+    texture.source.addressMode = 'clamp-to-edge'
+  }
   await ensureMessageFontsLoaded()
 
   await app.init({
@@ -779,6 +1016,7 @@ export const createPixiTiledMapView = async ({
     ActiveCharacterDamageText
   >()
   const monsterGoldDrops = new Map<string, MonsterGoldDrop>()
+  const monsterEquipmentDrops = new Map<string, MonsterEquipmentDrop>()
   const renderedCharacters = new Map<string, RenderedCharacterNode>()
   const renderedPortals = new Map<string, RenderedPortalNode>()
   const characterPixelWidth =
@@ -796,6 +1034,8 @@ export const createPixiTiledMapView = async ({
   let playerAttackFacing: CharacterMoveDirection | undefined
   let playerWeaponTrailSprites: Sprite[] = []
   let playerWeaponSprite: Sprite | undefined
+  let playerArmorSprite: Sprite | undefined
+  let playerHelmetSprite: Sprite | undefined
   let playerSlashEffectSprite: AnimatedSprite | undefined
   let syncPlayerCharacterVisual: (nowMilliseconds?: number) => void = () => {}
   let isSceneTransitionPending = false
@@ -901,6 +1141,7 @@ export const createPixiTiledMapView = async ({
   const monsterContactDamageLockedUntilById = new Map<string, number>()
   const monsterRespawnAtById = new Map<string, number>()
   let monsterGoldDropSequence = 0
+  let monsterEquipmentDropSequence = 0
   let sceneIntroHideTimeoutId: number | undefined
   let playerRespawnAtMilliseconds: number | undefined
   let playerHitReactionState: PlayerHitReactionState | undefined
@@ -2021,10 +2262,24 @@ export const createPixiTiledMapView = async ({
     }
 
     if (isPlayer) {
+      playerArmorSprite = new Sprite(Texture.EMPTY)
+      playerArmorSprite.label = 'character:player:armor'
+      playerArmorSprite.anchor.set(0.5)
+      playerArmorSprite.visible = false
+      playerArmorSprite.roundPixels = true
+      playerArmorSprite.zIndex = PLAYER_ARMOR_EQUIPMENT_CONFIG.zIndex
+      container.addChild(playerArmorSprite)
+      playerHelmetSprite = new Sprite(Texture.EMPTY)
+      playerHelmetSprite.label = 'character:player:helmet'
+      playerHelmetSprite.anchor.set(0.5)
+      playerHelmetSprite.visible = false
+      playerHelmetSprite.roundPixels = true
+      playerHelmetSprite.zIndex = PLAYER_HELMET_EQUIPMENT_CONFIG.zIndex
+      container.addChild(playerHelmetSprite)
       playerWeaponTrailSprites = Array.from(
         { length: PLAYER_ATTACK_TRAIL_SPRITE_COUNT },
         (_, index) => {
-          const trailSprite = new Sprite(playerWeaponTexture)
+          const trailSprite = new Sprite(Texture.EMPTY)
 
           trailSprite.label = `character:player:weapon-trail:${index}`
           trailSprite.anchor.set(0.5, 1)
@@ -2036,18 +2291,20 @@ export const createPixiTiledMapView = async ({
           return trailSprite
         }
       )
-      playerWeaponSprite = new Sprite(playerWeaponTexture)
+      playerWeaponSprite = new Sprite(Texture.EMPTY)
       playerWeaponSprite.label = 'character:player:weapon'
       playerWeaponSprite.anchor.set(0.5, 1)
       playerWeaponSprite.visible = false
       playerWeaponSprite.roundPixels = true
       playerWeaponSprite.zIndex = PLAYER_ATTACK_TRAIL_SPRITE_COUNT + 1
-        container.addChild(playerWeaponSprite)
+      container.addChild(playerWeaponSprite)
     }
 
     renderedCharacters.set(character.id, {
       container,
       sprite,
+      playerArmorSprite: isPlayer ? playerArmorSprite : undefined,
+      playerHelmetSprite: isPlayer ? playerHelmetSprite : undefined,
       playerHealthBar,
       playerManaBar,
       playerNameBadge,
@@ -2159,6 +2416,7 @@ export const createPixiTiledMapView = async ({
       playerHitReactionState = undefined
       renderNode.container.visible = false
       syncPlayerWeaponSprite(character)
+      syncPlayerEquipmentSprites(renderNode)
       return
     }
 
@@ -2241,8 +2499,51 @@ export const createPixiTiledMapView = async ({
     depthSortedLayer?.sortChildren()
 
     if (character.id === PLAYER_CHARACTER_ID) {
+      syncPlayerEquipmentSprites(renderNode)
       syncPlayerWeaponSprite(character)
     }
+  }
+
+  const syncPlayerEquipmentSprites = (renderNode: RenderedCharacterNode) => {
+    syncPlayerEquipmentSprite(renderNode, 'armor', renderNode.playerArmorSprite)
+    syncPlayerEquipmentSprite(renderNode, 'hat', renderNode.playerHelmetSprite)
+  }
+
+  const syncPlayerEquipmentSprite = (
+    renderNode: RenderedCharacterNode,
+    slotId: PlayerVisualEquipmentSlotId,
+    sprite: Sprite | undefined
+  ) => {
+    if (!sprite) {
+      return
+    }
+
+    const equippedItem = currentPlayerEquipment.slots.find(
+      (slot) => slot.id === slotId
+    )?.item
+    const config = equippedItem
+      ? PLAYER_EQUIPMENT_APPEARANCE_CONFIG_BY_ITEM_ID[equippedItem.id]
+      : undefined
+    const texture = equippedItem
+      ? playerEquipmentTexturesByItemId.get(equippedItem.id)
+      : undefined
+    const shouldShowEquipment =
+      renderNode.container.visible &&
+      playerProfile.hp.current > 0 &&
+      config?.slotId === slotId &&
+      texture !== undefined
+
+    sprite.visible = shouldShowEquipment
+
+    if (!shouldShowEquipment || !config || !texture) {
+      return
+    }
+
+    sprite.texture = texture
+    sprite.position.set(config.position.x, config.position.y)
+    sprite.width = config.width
+    sprite.height = config.height
+    sprite.zIndex = config.zIndex
   }
 
   const syncCharacterLevelBadge = (
@@ -3006,6 +3307,156 @@ export const createPixiTiledMapView = async ({
     depthSortedLayer?.sortChildren()
   }
 
+  function spawnMonsterEquipmentDrop(
+    characterId: string,
+    dropDefinition: ReturnType<typeof rollMonsterEquipmentDrop>,
+    position: {
+      x: number
+      y: number
+    },
+    now: number
+  ): void {
+    if (!dropDefinition) {
+      return
+    }
+
+    const dropTexture = monsterEquipmentDropTexturesByDropId.get(
+      dropDefinition.dropId
+    )
+
+    if (!dropTexture) {
+      return
+    }
+
+    const dropId = `${characterId}:equipment:${++monsterEquipmentDropSequence}`
+    const container = new Container()
+    const sprite = new Sprite(dropTexture)
+    const labelText = new Text({
+      style: MONSTER_GOLD_DROP_AMOUNT_TEXT_STYLE,
+      text: dropDefinition.label
+    })
+
+    container.label = `monster-equipment-drop:${dropId}`
+    container.sortableChildren = true
+    sprite.anchor.set(0.5)
+    sprite.width = MONSTER_EQUIPMENT_DROP_RENDER_SIZE
+    sprite.height = MONSTER_EQUIPMENT_DROP_RENDER_SIZE
+    sprite.roundPixels = true
+    labelText.roundPixels = true
+    labelText.position.set(
+      -Math.round(labelText.width / 2),
+      Math.round(MONSTER_EQUIPMENT_DROP_RENDER_SIZE / 2) + 3
+    )
+    sprite.zIndex = 0
+    labelText.zIndex = 1
+    container.addChild(sprite, labelText)
+    container.position.set(position.x, position.y)
+    container.zIndex = Math.round(position.y + map.tileHeight)
+    depthSortedLayer?.addChild(container)
+    monsterEquipmentDrops.set(dropId, {
+      id: dropId,
+      dropId: dropDefinition.dropId,
+      itemId: dropDefinition.itemId,
+      label: dropDefinition.label,
+      container,
+      sprite,
+      labelText,
+      position: {
+        x: position.x,
+        y: position.y
+      },
+      createdAt: now
+    })
+  }
+
+  const syncMonsterEquipmentDropElement = (
+    drop: MonsterEquipmentDrop,
+    now: number
+  ) => {
+    const bobOffset = Math.sin((now - drop.createdAt) / 240) * 1.75
+
+    drop.container.position.set(drop.position.x, drop.position.y + bobOffset)
+    drop.container.zIndex = Math.round(drop.position.y + map.tileHeight)
+    drop.labelText.text = drop.label
+    drop.labelText.position.set(
+      -Math.round(drop.labelText.width / 2),
+      Math.round(MONSTER_EQUIPMENT_DROP_RENDER_SIZE / 2) + 3
+    )
+  }
+
+  const syncActiveMonsterEquipmentDrops = (now: number) => {
+    for (const drop of monsterEquipmentDrops.values()) {
+      syncMonsterEquipmentDropElement(drop, now)
+    }
+
+    depthSortedLayer?.sortChildren()
+  }
+
+  const resolveMonsterEquipmentDropPickups = () => {
+    const playerCharacter = getCharacterStateById(PLAYER_CHARACTER_ID)
+    const playerRect = {
+      x: playerCharacter.position.x * map.tileWidth,
+      y: playerCharacter.position.y * map.tileHeight,
+      width: playerCharacter.collisionSize.width * map.tileWidth,
+      height: playerCharacter.collisionSize.height * map.tileHeight
+    }
+
+    for (const [dropMapId, drop] of monsterEquipmentDrops) {
+      const dropRect = {
+        x: drop.position.x - MONSTER_EQUIPMENT_DROP_PICKUP_WIDTH / 2,
+        y: drop.position.y - MONSTER_EQUIPMENT_DROP_PICKUP_HEIGHT / 2,
+        width: MONSTER_EQUIPMENT_DROP_PICKUP_WIDTH,
+        height: MONSTER_EQUIPMENT_DROP_PICKUP_HEIGHT
+      }
+
+      if (!doCollisionRectsIntersect(playerRect, dropRect)) {
+        continue
+      }
+
+      const equipmentDefinition = getPlayerEquipmentItemDefinitionById(
+        drop.itemId
+      )
+
+      if (!equipmentDefinition) {
+        continue
+      }
+
+      const emptySlotIndex = findFirstEmptyPlayerInventorySlotIndex(
+        currentPlayerInventory
+      )
+
+      if (emptySlotIndex === undefined) {
+        showCharacterDamageText(
+          PLAYER_CHARACTER_ID,
+          '가방이 가득 찼습니다',
+          DAMAGE_TEXT_DURATION_MILLISECONDS
+        )
+        continue
+      }
+
+      currentPlayerInventory = setPlayerInventorySlot({
+        inventory: currentPlayerInventory,
+        slotIndex: emptySlotIndex,
+        item: {
+          id: drop.itemId,
+          label: equipmentDefinition.label,
+          quantity: 1
+        }
+      })
+      onPlayerInventoryChange(currentPlayerInventory)
+      syncPlayerUiOverlays()
+      showCharacterDamageText(
+        PLAYER_CHARACTER_ID,
+        `${equipmentDefinition.label} 획득!`,
+        DAMAGE_TEXT_DURATION_MILLISECONDS,
+        LEVEL_UP_TEXT_STYLE
+      )
+      drop.container.removeFromParent()
+      drop.container.destroy({ children: true })
+      monsterEquipmentDrops.delete(dropMapId)
+    }
+  }
+
   const resolveMonsterGoldDropPickups = () => {
     const playerCharacter = getCharacterStateById(PLAYER_CHARACTER_ID)
     const playerRect = {
@@ -3238,20 +3689,27 @@ export const createPixiTiledMapView = async ({
         character.level ?? 1
       )
       grantPlayerExperienceReward(experienceReward)
+      const dropPosition = {
+        x:
+          character.position.x * map.tileWidth +
+          (character.collisionSize.width * map.tileWidth) / 2,
+        y:
+          character.position.y * map.tileHeight +
+          (character.collisionSize.height * map.tileHeight) / 2
+      }
 
-      spawnMonsterGoldDrop(
-        characterId,
-        getMonsterGoldDropAmount(character.level ?? 1),
-        {
-          x:
-            character.position.x * map.tileWidth +
-            (character.collisionSize.width * map.tileWidth) / 2,
-          y:
-            character.position.y * map.tileHeight +
-            (character.collisionSize.height * map.tileHeight) / 2
-        },
-        now
-      )
+      const equipmentDrop = rollMonsterEquipmentDrop(Math.random)
+
+      if (equipmentDrop) {
+        spawnMonsterEquipmentDrop(characterId, equipmentDrop, dropPosition, now)
+      } else {
+        spawnMonsterGoldDrop(
+          characterId,
+          getMonsterGoldDropAmount(character.level ?? 1),
+          dropPosition,
+          now
+        )
+      }
       monsterRespawnAtById.set(
         characterId,
         now + MONSTER_PIG_RESPAWN_DELAY_MILLISECONDS
@@ -3392,11 +3850,29 @@ export const createPixiTiledMapView = async ({
       return
     }
 
+    const weaponAppearance = PLAYER_WEAPON_APPEARANCE_CONFIG_BY_ITEM_ID[
+      weaponItem.id
+    ]
+    const weaponTexture = weaponAppearance
+      ? playerWeaponAppearanceTexturesByItemId.get(weaponItem.id) ??
+        playerWeaponTexture
+      : playerWeaponTexture
+
+    if (!weaponTexture) {
+      playerWeaponSprite.visible = false
+      for (const trailSprite of playerWeaponTrailSprites) {
+        trailSprite.visible = false
+      }
+      return
+    }
+
     const attackFacing = playerAttackFacing ?? character.facing
     const placement =
       attackFacing === 'left'
         ? PLAYER_WEAPON_PLACEMENT_LEFT
         : PLAYER_WEAPON_PLACEMENT_RIGHT
+    const weaponWorldScale =
+      weaponAppearance?.worldScale ?? PLAYER_WEAPON_WORLD_SCALE
     const now = performance.now()
     const attackElapsedMilliseconds =
       playerAttackStartedAtMilliseconds === undefined
@@ -3412,10 +3888,10 @@ export const createPixiTiledMapView = async ({
     const createPose = (progress: number | undefined) => {
       if (progress === undefined) {
         return {
-          x: placement.x,
-          y: placement.y,
+          x: placement.x + (weaponAppearance?.idleOffsetX ?? 0),
+          y: placement.y + (weaponAppearance?.idleOffsetY ?? 0),
           rotation: placement.rotation,
-          scale: PLAYER_WEAPON_WORLD_SCALE
+          scale: weaponWorldScale
         }
       }
 
@@ -3430,7 +3906,7 @@ export const createPixiTiledMapView = async ({
         rotation:
           placement.rotation +
           facingMultiplier * PLAYER_ATTACK_ROTATION_OFFSET * swingAmount,
-        scale: PLAYER_WEAPON_WORLD_SCALE + PLAYER_ATTACK_SCALE_BOOST * swingAmount
+        scale: weaponWorldScale + PLAYER_ATTACK_SCALE_BOOST * swingAmount
       }
     }
     const applyPose = (
@@ -3443,6 +3919,7 @@ export const createPixiTiledMapView = async ({
       },
       alpha: number
     ) => {
+      sprite.texture = weaponTexture
       sprite.visible = true
       sprite.position.set(pose.x, pose.y)
       sprite.rotation = pose.rotation
@@ -4108,7 +4585,9 @@ export const createPixiTiledMapView = async ({
       resolvePlayerAttackDamage(now)
       resolveMonsterContactDamage(now)
       resolveMonsterGoldDropPickups()
+      resolveMonsterEquipmentDropPickups()
       syncActiveMonsterGoldDrops(now)
+      syncActiveMonsterEquipmentDrops(now)
 
       const interactionEvents = handleQuestInteractionEvents(
         gameEventQueue.drain(),
@@ -4529,6 +5008,10 @@ export const createPixiTiledMapView = async ({
       monsterGoldDrop.container.destroy({ children: true })
     }
     monsterGoldDrops.clear()
+    for (const monsterEquipmentDrop of monsterEquipmentDrops.values()) {
+      monsterEquipmentDrop.container.destroy({ children: true })
+    }
+    monsterEquipmentDrops.clear()
     monsterPigAnimatedSprites.clear()
     monsterPigAnimationModes.clear()
     monsterPigBehaviorStates.clear()

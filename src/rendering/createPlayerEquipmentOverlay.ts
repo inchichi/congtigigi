@@ -48,12 +48,48 @@ const TOWN_TILESET_IMAGE_URL = new URL(
   '../assets/tilesets/town-32.png',
   import.meta.url
 ).href
+const WEAPON_SWORD_IMAGE_URL = new URL(
+  '../assets/weapons/weapon-sword.png',
+  import.meta.url
+).href
+const WEAPON_AXE_IMAGE_URL = new URL(
+  '../assets/weapons/weapon-axe.png',
+  import.meta.url
+).href
+const WEAPON_SPEAR_IMAGE_URL = new URL(
+  '../assets/weapons/weapon-spear.png',
+  import.meta.url
+).href
+const WEAPON_DAGGER_IMAGE_URL = new URL(
+  '../assets/weapons/weapon-dagger.png',
+  import.meta.url
+).href
+const WEAPON_MACE_IMAGE_URL = new URL(
+  '../assets/weapons/weapon-mace.png',
+  import.meta.url
+).href
+const WEAPON_STAFF_IMAGE_URL = new URL(
+  '../assets/weapons/weapon-staff.png',
+  import.meta.url
+).href
 const UI_SPRITESHEET_WIDTH = 512
 const UI_SPRITESHEET_HEIGHT = 512
 const TINY_DUNGEON_TILESET_WIDTH = 192
 const TINY_DUNGEON_TILESET_HEIGHT = 176
 const TOWN_TILESET_WIDTH = 256
 const TOWN_TILESET_HEIGHT = 2240
+const WEAPON_SWORD_IMAGE_WIDTH = 337
+const WEAPON_SWORD_IMAGE_HEIGHT = 344
+const WEAPON_AXE_IMAGE_WIDTH = 355
+const WEAPON_AXE_IMAGE_HEIGHT = 343
+const WEAPON_SPEAR_IMAGE_WIDTH = 332
+const WEAPON_SPEAR_IMAGE_HEIGHT = 342
+const WEAPON_DAGGER_IMAGE_WIDTH = 219
+const WEAPON_DAGGER_IMAGE_HEIGHT = 229
+const WEAPON_MACE_IMAGE_WIDTH = 323
+const WEAPON_MACE_IMAGE_HEIGHT = 325
+const WEAPON_STAFF_IMAGE_WIDTH = 328
+const WEAPON_STAFF_IMAGE_HEIGHT = 335
 const OVERLAY_MARGIN = 16
 const PANEL_INSET_FRAME = {
   x: 200,
@@ -158,6 +194,72 @@ const EQUIPMENT_ICON_FRAME_BY_KEY: Record<
       y: 1504,
       width: 32,
       height: 32
+    }
+  },
+  'weapon-sword': {
+    imageUrl: WEAPON_SWORD_IMAGE_URL,
+    imageWidth: WEAPON_SWORD_IMAGE_WIDTH,
+    imageHeight: WEAPON_SWORD_IMAGE_HEIGHT,
+    frame: {
+      x: 0,
+      y: 0,
+      width: WEAPON_SWORD_IMAGE_WIDTH,
+      height: WEAPON_SWORD_IMAGE_HEIGHT
+    }
+  },
+  'weapon-axe': {
+    imageUrl: WEAPON_AXE_IMAGE_URL,
+    imageWidth: WEAPON_AXE_IMAGE_WIDTH,
+    imageHeight: WEAPON_AXE_IMAGE_HEIGHT,
+    frame: {
+      x: 0,
+      y: 0,
+      width: WEAPON_AXE_IMAGE_WIDTH,
+      height: WEAPON_AXE_IMAGE_HEIGHT
+    }
+  },
+  'weapon-spear': {
+    imageUrl: WEAPON_SPEAR_IMAGE_URL,
+    imageWidth: WEAPON_SPEAR_IMAGE_WIDTH,
+    imageHeight: WEAPON_SPEAR_IMAGE_HEIGHT,
+    frame: {
+      x: 0,
+      y: 0,
+      width: WEAPON_SPEAR_IMAGE_WIDTH,
+      height: WEAPON_SPEAR_IMAGE_HEIGHT
+    }
+  },
+  'weapon-dagger': {
+    imageUrl: WEAPON_DAGGER_IMAGE_URL,
+    imageWidth: WEAPON_DAGGER_IMAGE_WIDTH,
+    imageHeight: WEAPON_DAGGER_IMAGE_HEIGHT,
+    frame: {
+      x: 0,
+      y: 0,
+      width: WEAPON_DAGGER_IMAGE_WIDTH,
+      height: WEAPON_DAGGER_IMAGE_HEIGHT
+    }
+  },
+  'weapon-mace': {
+    imageUrl: WEAPON_MACE_IMAGE_URL,
+    imageWidth: WEAPON_MACE_IMAGE_WIDTH,
+    imageHeight: WEAPON_MACE_IMAGE_HEIGHT,
+    frame: {
+      x: 0,
+      y: 0,
+      width: WEAPON_MACE_IMAGE_WIDTH,
+      height: WEAPON_MACE_IMAGE_HEIGHT
+    }
+  },
+  'weapon-staff': {
+    imageUrl: WEAPON_STAFF_IMAGE_URL,
+    imageWidth: WEAPON_STAFF_IMAGE_WIDTH,
+    imageHeight: WEAPON_STAFF_IMAGE_HEIGHT,
+    frame: {
+      x: 0,
+      y: 0,
+      width: WEAPON_STAFF_IMAGE_WIDTH,
+      height: WEAPON_STAFF_IMAGE_HEIGHT
     }
   },
   'ui-circle-beige': {
