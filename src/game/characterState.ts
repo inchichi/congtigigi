@@ -4,7 +4,7 @@ export const PLAYER_CHARACTER_APPEARANCE_TYPE =
 export const DEFAULT_CHARACTER_MOVE_SPEED_TILES_PER_SECOND = 8
 
 export type CharacterMoveDirection = 'up' | 'down' | 'left' | 'right'
-export type CharacterAction = 'interact' | 'attack'
+export type CharacterAction = 'interact'
 export type CharacterControllerIntent = {
   movement?: {
     x: number
@@ -16,8 +16,6 @@ export type CharacterControllerIntent = {
 export type CharacterState = {
   id: string
   appearanceType: string
-  level?: number
-  displayText?: string
   position: {
     x: number
     y: number
@@ -76,8 +74,6 @@ type CreateInitialPlayerCharacterInput = {
 type CreateNpcCharacterInput = {
   id: string
   appearanceType: string
-  level?: number
-  displayText?: string
   position: {
     x: number
     y: number
@@ -167,34 +163,20 @@ export const createInitialPlayerCharacter = ({
 export const createNpcCharacter = ({
   id,
   appearanceType,
-  level,
-  displayText,
   position,
   facing = 'down',
   collisionSize,
   blocksMovement = true,
   controller = createIdleNpcCharacterController()
-}: CreateNpcCharacterInput): CharacterState => {
-  const character: CharacterState = {
-    id,
-    appearanceType,
-    position,
-    facing,
-    collisionSize,
-    blocksMovement,
-    controller
-  }
-
-  if (level !== undefined) {
-    character.level = level
-  }
-
-  if (displayText !== undefined) {
-    character.displayText = displayText
-  }
-
-  return character
-}
+}: CreateNpcCharacterInput): CharacterState => ({
+  id,
+  appearanceType,
+  position,
+  facing,
+  collisionSize,
+  blocksMovement,
+  controller
+})
 
 export const getCharacterMoveDirectionFromKey = (
   key: string
@@ -241,8 +223,7 @@ export const getCharacterControllerIntent = ({
           moveSpeedTilesPerSecond: character.controller.moveSpeedTilesPerSecond,
           deltaMilliseconds
         }),
-        actions:
-          triggeredActions.size > 0 ? Array.from(triggeredActions) : undefined
+        actions: triggeredActions.has('interact') ? ['interact'] : undefined
       })
     case 'npc':
       return createCharacterControllerIntent({
