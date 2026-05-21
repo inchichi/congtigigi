@@ -24,8 +24,10 @@ import { createInitialPlayerEquipment } from './game/playerEquipment'
 import { createInitialPlayerInventory } from './game/playerInventory'
 import { createInitialPlayerProfile } from './game/playerProfile'
 import { createInitialPlayerQuickslots } from './game/playerQuickslots'
+import { createInitialFirstSlimeHuntQuest } from './game/firstSlimeHuntQuest'
 import { getSceneIntroMessage } from './game/sceneIntro'
 import { createPixiTiledMapView } from './rendering/createPixiTiledMapView'
+import type { AudioSettings } from './rendering/createPauseMenuOverlay'
 import type {
   SceneTransitionRequest
 } from './rendering/createPixiTiledMapView'
@@ -41,6 +43,12 @@ type SceneSpawn = {
 
 type SceneRenderer = {
   destroy: () => void
+}
+
+const AUDIO_SETTINGS_STORAGE_KEY = 'my-sample-rpg:audio-settings'
+const DEFAULT_AUDIO_SETTINGS: AudioSettings = {
+  bgmVolume: 1,
+  sfxVolume: 1
 }
 
 const rootElement = document.querySelector<HTMLDivElement>('#app')
@@ -89,6 +97,7 @@ const playerProfile = createInitialPlayerProfile()
 let playerEquipment = createInitialPlayerEquipment()
 let playerInventory = createInitialPlayerInventory()
 let playerQuickslots = createInitialPlayerQuickslots()
+let firstSlimeHuntQuest = createInitialFirstSlimeHuntQuest()
 let merchantInventory = createInitialBlacksmithInventory()
 let activeControllerRuntime:
   | ReturnType<typeof createCharacterControllerRuntime>
@@ -99,6 +108,7 @@ let activeSceneMusicUrl = ''
 let isSceneMusicRetryQueued = false
 let pendingSceneTransition: SceneTransitionRequest | undefined
 let isSceneTransitionScheduled = false
+let audioSettings = readStoredAudioSettings()
 
 rootElement.className = 'game-root'
 
@@ -140,6 +150,7 @@ const bootstrapScene = async (
     playerEquipment,
     playerInventory,
     playerQuickslots,
+    firstSlimeHuntQuest,
     merchantInventory,
     sceneIntroMessage: getSceneIntroMessage(sceneId),
     cameraTargetCharacterId: PLAYER_CHARACTER_ID,
@@ -161,9 +172,14 @@ const bootstrapScene = async (
     onPlayerQuickslotsChange: (nextQuickslots) => {
       playerQuickslots = nextQuickslots
     },
+    onFirstSlimeHuntQuestChange: (nextQuest) => {
+      firstSlimeHuntQuest = nextQuest
+    },
     onMerchantInventoryChange: (nextInventory) => {
       merchantInventory = nextInventory
     },
+    audioSettings,
+    onAudioSettingsChange: updateAudioSettings,
     onRequestSceneChange: scheduleSceneTransition
   })
 }
@@ -238,6 +254,7 @@ const playSceneMusic = (sceneId: SceneId) => {
   const musicUrl = sceneMusicUrls[sceneId]
 
   if (activeSceneMusic && activeSceneMusicUrl === musicUrl) {
+    applyActiveSceneMusicVolume()
     playActiveSceneMusic()
     return
   }
@@ -247,6 +264,7 @@ const playSceneMusic = (sceneId: SceneId) => {
   activeSceneMusic = new Audio(musicUrl)
   activeSceneMusic.loop = true
   activeSceneMusicUrl = musicUrl
+  applyActiveSceneMusicVolume()
 
   playActiveSceneMusic()
 }
@@ -257,6 +275,21 @@ const playActiveSceneMusic = () => {
   }
 
   void activeSceneMusic.play().catch(queueSceneMusicRetry)
+}
+
+const applyActiveSceneMusicVolume = () => {
+  if (activeSceneMusic) {
+    activeSceneMusic.volume = audioSettings.bgmVolume
+  }
+}
+
+const updateAudioSettings = (nextAudioSettings: AudioSettings) => {
+  audioSettings = {
+    bgmVolume: clampVolume(nextAudioSettings.bgmVolume),
+    sfxVolume: clampVolume(nextAudioSettings.sfxVolume)
+  }
+  saveAudioSettings(audioSettings)
+  applyActiveSceneMusicVolume()
 }
 
 const queueSceneMusicRetry = () => {
@@ -305,6 +338,39 @@ const scheduleSceneTransition = (request: SceneTransitionRequest) => {
 
 const clampSpawnCoordinate = (value: number, max: number): number =>
   Math.max(0, Math.min(value, Math.max(0, max)))
+
+const clampVolume = (value: number): number =>
+  Number.isFinite(value) ? Math.max(0, Math.min(value, 1)) : 1
+
+function readStoredAudioSettings(): AudioSettings {
+  const storedAudioSettings = window.localStorage.getItem(AUDIO_SETTINGS_STORAGE_KEY)
+
+  if (!storedAudioSettings) {
+    return DEFAULT_AUDIO_SETTINGS
+  }
+
+  try {
+    const parsedAudioSettings = JSON.parse(storedAudioSettings) as Partial<AudioSettings>
+
+    return {
+      bgmVolume: clampVolume(
+        parsedAudioSettings.bgmVolume ?? DEFAULT_AUDIO_SETTINGS.bgmVolume
+      ),
+      sfxVolume: clampVolume(
+        parsedAudioSettings.sfxVolume ?? DEFAULT_AUDIO_SETTINGS.sfxVolume
+      )
+    }
+  } catch {
+    return DEFAULT_AUDIO_SETTINGS
+  }
+}
+
+function saveAudioSettings(nextAudioSettings: AudioSettings): void {
+  window.localStorage.setItem(
+    AUDIO_SETTINGS_STORAGE_KEY,
+    JSON.stringify(nextAudioSettings)
+  )
+}
 
 const renderFatalError = (error: unknown) => {
   const message = error instanceof Error ? error.message : String(error)

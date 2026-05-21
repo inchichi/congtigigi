@@ -26,12 +26,21 @@ import type {
   CharacterState
 } from '../game/characterState'
 import type { CharacterControllerRuntime } from '../game/createCharacterControllerRuntime'
-import { createGameEventQueue } from '../game/events/createGameEventQueue'
+import {
+  createGameEventQueue,
+  type GameEvent
+} from '../game/events/createGameEventQueue'
 import { processInteractionEvents } from '../game/interaction/processInteractionEvents'
 import type { PlayerEquipment } from '../game/playerEquipment'
 import type { PlayerInventory } from '../game/playerInventory'
 import type { PlayerProfile } from '../game/playerProfile'
 import type { PlayerQuickslots } from '../game/playerQuickslots'
+import {
+  completeFirstSlimeHuntQuest,
+  recordFirstSlimeHuntSlimeDefeat,
+  startFirstSlimeHuntQuest,
+  type FirstSlimeHuntQuestState
+} from '../game/firstSlimeHuntQuest'
 import {
   getPlayerMovementSpeedTilesPerSecond,
   getPlayerPhysicalAttackPower,
@@ -82,6 +91,11 @@ import type { MonsterAnimationTextures } from './monsterAnimationTextures'
 import { loadMonsterPigAnimationTextures } from './loadMonsterPigAnimationTextures'
 import { loadMonsterSlimeAnimationTextures } from './loadMonsterSlimeAnimationTextures'
 import { createGameSoundEffects } from './createGameSoundEffects'
+import {
+  createPauseMenuOverlay,
+  type AudioSettings
+} from './createPauseMenuOverlay'
+import { createQuestTrackerOverlay } from './createQuestTrackerOverlay'
 
 type CreatePixiTiledMapViewInput = {
   mountElement: HTMLElement
@@ -91,6 +105,7 @@ type CreatePixiTiledMapViewInput = {
   playerEquipment: PlayerEquipment
   playerInventory: PlayerInventory
   playerQuickslots: PlayerQuickslots
+  firstSlimeHuntQuest: FirstSlimeHuntQuestState
   merchantInventory: PlayerInventory
   sceneIntroMessage: string
   cameraTargetCharacterId: string
@@ -103,7 +118,10 @@ type CreatePixiTiledMapViewInput = {
   onPlayerInventoryChange: (nextInventory: PlayerInventory) => void
   onPlayerEquipmentChange: (nextEquipment: PlayerEquipment) => void
   onPlayerQuickslotsChange: (nextQuickslots: PlayerQuickslots) => void
+  onFirstSlimeHuntQuestChange: (nextQuest: FirstSlimeHuntQuestState) => void
   onMerchantInventoryChange: (nextInventory: PlayerInventory) => void
+  audioSettings: AudioSettings
+  onAudioSettingsChange: (nextAudioSettings: AudioSettings) => void
   onRequestSceneChange: (request: SceneTransitionRequest) => void
 }
 
@@ -308,6 +326,8 @@ const BLACKSMITH_SHOP_NPC_ID = 'blacksmith'
 const SIGN_POST_APPEARANCE_TYPE = 'sign_inn'
 const MONSTER_PIG_APPEARANCE_TYPE = 'monster_pig'
 const MONSTER_SLIME_APPEARANCE_TYPE = 'monster_slime'
+const GROUND_LAYER_NAME = 'ground'
+const GRASS_TILE_TYPES = new Set(['garden_round_mid_01'])
 const GAME_VIEWPORT_WIDTH = 960
 const GAME_VIEWPORT_HEIGHT = 540
 const CAMERA_DEFAULT_ZOOM = 1.1
@@ -432,6 +452,8 @@ const PLAYER_ATTACK_TRAIL_ALPHA = [0.42, 0.28, 0.18, 0.1]
 const PLAYER_ATTACK_TRAIL_SPRITE_COUNT = PLAYER_ATTACK_TRAIL_ALPHA.length
 const PLAYER_ATTACK_SWING_X_OFFSET = 4
 const PLAYER_ATTACK_LIFT_Y_OFFSET = 3
+const PLAYER_NAME_BADGE_FOOT_OFFSET = 6
+const PLAYER_STATUS_STACK_CLEARANCE = 6
 const PLAYER_ATTACK_ROTATION_OFFSET = 1.15
 const PLAYER_ATTACK_SCALE_BOOST = 0.06
 const PLAYER_ATTACK_SLASH_EFFECT_SCALE_X = 1.55
@@ -456,6 +478,11 @@ const PORTAL_INSIDE_WORLD_SCALE = 0.08
 const SCENE_INTRO_VISIBLE_DURATION_MILLISECONDS = 3000
 const PLAYER_ATTACK_DURATION_MILLISECONDS = 320
 const PLAYER_ATTACK_COOLDOWN_MILLISECONDS = 420
+const WIZARD_NPC_ID = 'wizard'
+const QUEST_DIALOGUE_DURATION_MILLISECONDS = 3600
+const QUEST_START_TEXT = '퀘스트 시작: 첫 사냥'
+const QUEST_OBJECTIVE_COMPLETE_TEXT = '퀘스트 목표 완료!\n마법사에게 돌아가기'
+const QUEST_COMPLETE_TEXT = '퀘스트 완료: 첫 사냥\n100골드 · 경험치 60'
 type MonsterAppearanceType =
   | typeof MONSTER_PIG_APPEARANCE_TYPE
   | typeof MONSTER_SLIME_APPEARANCE_TYPE
@@ -561,6 +588,7 @@ export const createPixiTiledMapView = async ({
   playerEquipment,
   playerInventory,
   playerQuickslots,
+  firstSlimeHuntQuest,
   merchantInventory,
   sceneIntroMessage,
   cameraTargetCharacterId,
@@ -570,7 +598,10 @@ export const createPixiTiledMapView = async ({
   onPlayerInventoryChange,
   onPlayerEquipmentChange,
   onPlayerQuickslotsChange,
+  onFirstSlimeHuntQuestChange,
   onMerchantInventoryChange,
+  audioSettings,
+  onAudioSettingsChange,
   onRequestSceneChange
 }: CreatePixiTiledMapViewInput): Promise<{ destroy: () => void }> => {
   const app = new Application()
@@ -673,7 +704,10 @@ export const createPixiTiledMapView = async ({
   const pressedActions = new Set<CharacterAction>()
   const triggeredActions = new Set<CharacterAction>()
   const gameEventQueue = createGameEventQueue()
-  const gameSoundEffects = createGameSoundEffects()
+  let currentAudioSettings = audioSettings
+  const gameSoundEffects = createGameSoundEffects({
+    masterVolume: currentAudioSettings.sfxVolume
+  })
   const interactionLockUntilByCharacterPair = new Map<string, number>()
   const activeCharacterMessages = new Map<string, ActiveCharacterMessage>()
   const activeCharacterDamageTexts = new Map<
@@ -690,6 +724,7 @@ export const createPixiTiledMapView = async ({
   let currentPlayerEquipment = playerEquipment
   let currentPlayerInventory = playerInventory
   let currentPlayerQuickslots = playerQuickslots
+  let currentFirstSlimeHuntQuest = firstSlimeHuntQuest
   let currentBlacksmithInventory = merchantInventory
   let playerAttackStartedAtMilliseconds: number | undefined
   let playerAttackFacing: CharacterMoveDirection | undefined
@@ -709,6 +744,7 @@ export const createPixiTiledMapView = async ({
   let isPlayerEquipmentOpen = false
   let isPlayerSkillOpen = false
   let isBlacksmithShopOpen = false
+  let isPauseMenuOpen = false
   let playerHudOverlay: {
     syncFrame: () => void
     destroy: () => void
@@ -751,6 +787,20 @@ export const createPixiTiledMapView = async ({
     syncFrame: () => {},
     destroy: () => {}
   }
+  let pauseMenuOverlay: {
+    syncFrame: () => void
+    destroy: () => void
+  } = {
+    syncFrame: () => {},
+    destroy: () => {}
+  }
+  let questTrackerOverlay: {
+    syncFrame: () => void
+    destroy: () => void
+  } = {
+    syncFrame: () => {},
+    destroy: () => {}
+  }
   const monsterPatrolStates = new Map<string, MonsterPatrolState>()
   const monsterSpawnStates = new Map<string, CharacterState>()
   const monsterPigAnimatedSprites = new Map<string, AnimatedSprite>()
@@ -787,6 +837,8 @@ export const createPixiTiledMapView = async ({
     facing: initialPlayerCharacter.facing
   }
   const mapPortals = createMapPortalsFromEventLayers({ map })
+  const grassTiles = createGrassTileLookup(map)
+  let handleMapOverlayExpandedChange = (_isExpanded: boolean) => {}
   const mapOverlay = createMapOverlay({
     mountElement,
     cameraElement: viewportElement,
@@ -812,7 +864,8 @@ export const createPixiTiledMapView = async ({
           focusCharacter.position.y * map.tileHeight +
           characterPixelHeight / 2
       }
-    }
+    },
+    onExpandedChange: (isExpanded) => handleMapOverlayExpandedChange(isExpanded)
   })
   const syncViewportDisplayScale = () => {
     const displayScale = Math.max(
@@ -853,6 +906,8 @@ export const createPixiTiledMapView = async ({
     playerStatOverlay.syncFrame()
     playerSkillOverlay.syncFrame()
     playerShopOverlay.syncFrame()
+    pauseMenuOverlay.syncFrame()
+    questTrackerOverlay.syncFrame()
   }
   const syncPlayerDerivedCharacterStats = () => {
     const playerCharacter = getCharacterStateById(PLAYER_CHARACTER_ID)
@@ -962,6 +1017,29 @@ export const createPixiTiledMapView = async ({
     depthSortedLayer?.sortChildren()
     slashSprite.play()
   }
+  const stopPlayerFootsteps = () => {
+    gameSoundEffects.stop('grassFootstep')
+  }
+  const syncPlayerFootsteps = (didPlayerMove: boolean) => {
+    if (
+      !didPlayerMove ||
+      playerProfile.hp.current === 0 ||
+      isPauseMenuOpen ||
+      mapOverlay.getIsExpanded()
+    ) {
+      stopPlayerFootsteps()
+      return
+    }
+
+    const playerCharacter = getCharacterStateById(PLAYER_CHARACTER_ID)
+
+    if (!isCharacterOnGrass(playerCharacter, grassTiles)) {
+      stopPlayerFootsteps()
+      return
+    }
+
+    gameSoundEffects.startLoop('grassFootstep')
+  }
   const setPlayerUiOpen = (nextIsOpen: boolean) => {
     if (isPlayerUiOpen === nextIsOpen) {
       return
@@ -1002,15 +1080,89 @@ export const createPixiTiledMapView = async ({
     isBlacksmithShopOpen = nextIsOpen
     syncPlayerUiOverlays()
   }
-  const closeAllOverlays = () => {
+  const setPauseMenuOpen = (nextIsOpen: boolean) => {
+    if (isPauseMenuOpen === nextIsOpen) {
+      return
+    }
+
+    isPauseMenuOpen = nextIsOpen
+    if (nextIsOpen) {
+      isPlayerUiOpen = false
+      isPlayerStatOpen = false
+      isPlayerEquipmentOpen = false
+      isPlayerSkillOpen = false
+      isBlacksmithShopOpen = false
+      mapOverlay.setExpanded(false)
+      gameSoundEffects.stopAllLoops()
+    }
+    clearPressedInputState()
+    syncPlayerUiOverlays()
+  }
+  const updateCurrentAudioSettings = (nextAudioSettings: AudioSettings) => {
+    currentAudioSettings = nextAudioSettings
+    gameSoundEffects.setMasterVolume(currentAudioSettings.sfxVolume)
+    onAudioSettingsChange(currentAudioSettings)
+    pauseMenuOverlay.syncFrame()
+  }
+  const setFirstSlimeHuntQuest = (nextQuest: FirstSlimeHuntQuestState) => {
+    if (currentFirstSlimeHuntQuest === nextQuest) {
+      return
+    }
+
+    currentFirstSlimeHuntQuest = nextQuest
+    onFirstSlimeHuntQuestChange(nextQuest)
+    questTrackerOverlay.syncFrame()
+  }
+  const grantPlayerExperienceReward = (experienceReward: number) => {
+    const nextPlayerProgress = grantPlayerExperience(
+      playerProfile,
+      experienceReward
+    )
+
+    if (nextPlayerProgress.nextProfile === playerProfile) {
+      return nextPlayerProgress
+    }
+
+    Object.assign(playerProfile, nextPlayerProgress.nextProfile)
+    syncPlayerUiOverlays()
+    if (nextPlayerProgress.levelsGained > 0) {
+      gameSoundEffects.play('levelUp')
+      showCharacterDamageText(
+        PLAYER_CHARACTER_ID,
+        nextPlayerProgress.levelsGained > 1
+          ? `레벨 업 x${nextPlayerProgress.levelsGained}!`
+          : '레벨 업!',
+        DAMAGE_TEXT_DURATION_MILLISECONDS,
+        LEVEL_UP_TEXT_STYLE
+      )
+    }
+
+    return nextPlayerProgress
+  }
+  handleMapOverlayExpandedChange = (nextIsExpanded: boolean) => {
+    if (nextIsExpanded) {
+      isPlayerUiOpen = false
+      isPlayerStatOpen = false
+      isPlayerEquipmentOpen = false
+      isPlayerSkillOpen = false
+      isBlacksmithShopOpen = false
+      isPauseMenuOpen = false
+      gameSoundEffects.stopAllLoops()
+    }
+    clearPressedInputState()
+    syncPlayerUiOverlays()
+  }
+  const closeAllOverlays = (): boolean => {
     if (
       !isPlayerUiOpen &&
       !isPlayerStatOpen &&
       !isPlayerEquipmentOpen &&
       !isPlayerSkillOpen &&
-      !isBlacksmithShopOpen
+      !isBlacksmithShopOpen &&
+      !isPauseMenuOpen &&
+      !mapOverlay.getIsExpanded()
     ) {
-      return
+      return false
     }
 
     isPlayerUiOpen = false
@@ -1018,7 +1170,12 @@ export const createPixiTiledMapView = async ({
     isPlayerEquipmentOpen = false
     isPlayerSkillOpen = false
     isBlacksmithShopOpen = false
+    isPauseMenuOpen = false
+    mapOverlay.setExpanded(false)
+    gameSoundEffects.stopAllLoops()
+    clearPressedInputState()
     syncPlayerUiOverlays()
+    return true
   }
   const requestSceneTransition = (portal: MapPortal) => {
     if (isSceneTransitionPending) {
@@ -1028,6 +1185,7 @@ export const createPixiTiledMapView = async ({
     isSceneTransitionPending = true
     closeAllOverlays()
     clearPressedInputState()
+    stopPlayerFootsteps()
     triggeredActions.clear()
     gameEventQueue.clear()
     onRequestSceneChange({
@@ -1045,6 +1203,109 @@ export const createPixiTiledMapView = async ({
     return mapPortals.find((portal) =>
       doCollisionRectsIntersect(characterRect, createCollisionRectFromPortal(portal))
     )
+  }
+  const handleFirstSlimeHuntInteractionEvents = (
+    events: GameEvent[],
+    now: number
+  ) => {
+    for (const event of events) {
+      if (event.kind !== 'interaction-requested') {
+        continue
+      }
+
+      const sourceCharacter = characterStates.find(
+        (character) => character.id === event.sourceCharacterId
+      )
+
+      if (!sourceCharacter) {
+        continue
+      }
+
+      const targetCharacter = resolveCharacterInteractionTarget({
+        sourceCharacter,
+        targetCharacters: characterStates,
+        canReceiveInteraction: (character) => character.id === WIZARD_NPC_ID
+      })
+
+      if (!targetCharacter) {
+        continue
+      }
+
+      const lockKey = `${sourceCharacter.id}:${targetCharacter.id}:quest`
+      const lockedUntil = interactionLockUntilByCharacterPair.get(lockKey) ?? 0
+
+      if (lockedUntil > now) {
+        continue
+      }
+
+      handleWizardQuestInteraction()
+      interactionLockUntilByCharacterPair.set(
+        lockKey,
+        now + QUEST_DIALOGUE_DURATION_MILLISECONDS
+      )
+    }
+  }
+  const handleWizardQuestInteraction = () => {
+    switch (currentFirstSlimeHuntQuest.status) {
+      case 'not-started':
+        setFirstSlimeHuntQuest(
+          startFirstSlimeHuntQuest(currentFirstSlimeHuntQuest)
+        )
+        showCharacterMessage(
+          WIZARD_NPC_ID,
+          '사냥터의 말캉이들이 이상하게 늘어나고 있어.\n초보자라도 괜찮아. 말캉이 3마리만 처치하고 돌아와 줄래?',
+          QUEST_DIALOGUE_DURATION_MILLISECONDS
+        )
+        showCharacterDamageText(
+          PLAYER_CHARACTER_ID,
+          QUEST_START_TEXT,
+          DAMAGE_TEXT_DURATION_MILLISECONDS,
+          LEVEL_UP_TEXT_STYLE
+        )
+        return
+      case 'active':
+        showCharacterMessage(
+          WIZARD_NPC_ID,
+          '아직 말캉이 기운이 남아 있어.\n사냥터에서 말캉이 3마리를 처치하고 돌아와.',
+          QUEST_DIALOGUE_DURATION_MILLISECONDS
+        )
+        return
+      case 'ready-to-turn-in': {
+        const result = completeFirstSlimeHuntQuest(currentFirstSlimeHuntQuest)
+
+        setFirstSlimeHuntQuest(result.nextQuest)
+        showCharacterMessage(
+          WIZARD_NPC_ID,
+          '돌아왔구나. 말캉이 기운이 확실히 줄었어.\n고마워. 진짜 모험가의 첫걸음이라고 할 수 있겠네.',
+          QUEST_DIALOGUE_DURATION_MILLISECONDS
+        )
+
+        if (!result.didComplete) {
+          return
+        }
+
+        currentPlayerInventory = {
+          ...currentPlayerInventory,
+          gold: currentPlayerInventory.gold + result.goldReward
+        }
+        onPlayerInventoryChange(currentPlayerInventory)
+        grantPlayerExperienceReward(result.experienceReward)
+        showCharacterDamageText(
+          PLAYER_CHARACTER_ID,
+          QUEST_COMPLETE_TEXT,
+          DAMAGE_TEXT_DURATION_MILLISECONDS,
+          LEVEL_UP_TEXT_STYLE
+        )
+        syncPlayerUiOverlays()
+        return
+      }
+      case 'completed':
+        showCharacterMessage(
+          WIZARD_NPC_ID,
+          '마을이 조금 조용해졌어. 네가 도와준 덕분이야.',
+          QUEST_DIALOGUE_DURATION_MILLISECONDS
+        )
+    }
   }
   playerHudOverlay = createPlayerHudOverlay({
     mountElement,
@@ -1131,6 +1392,17 @@ export const createPixiTiledMapView = async ({
       onMerchantInventoryChange(nextMerchantInventory)
       syncPlayerUiOverlays()
     }
+  })
+  pauseMenuOverlay = createPauseMenuOverlay({
+    mountElement,
+    getIsOpen: () => isPauseMenuOpen,
+    getAudioSettings: () => currentAudioSettings,
+    onRequestOpenChange: setPauseMenuOpen,
+    onAudioSettingsChange: updateCurrentAudioSettings
+  })
+  questTrackerOverlay = createQuestTrackerOverlay({
+    mountElement,
+    getQuest: () => currentFirstSlimeHuntQuest
   })
 
   const syncRuntimeWarningBanner = () => {
@@ -1355,7 +1627,9 @@ export const createPixiTiledMapView = async ({
       character.displayText === undefined
         ? undefined
         : new Text({
-            style: SIGN_POST_LABEL_STYLE,
+            style: isSignPostCharacter
+              ? SIGN_POST_LABEL_STYLE
+              : PLAYER_NAME_BADGE_STYLE,
             text: character.displayText
           })
     const displayLabelPanel =
@@ -1677,19 +1951,19 @@ export const createPixiTiledMapView = async ({
       return
     }
 
-    if (
-      character.id === PLAYER_CHARACTER_ID &&
-      renderNode.playerNameBadge
-    ) {
+    if (character.id === PLAYER_CHARACTER_ID) {
       renderNode.levelBadge.visible = true
       renderNode.levelBadge.text = `Lv ${character.level}`
+      const playerStatusStackHeight =
+        renderNode.levelBadge.height +
+        PLAYER_HEALTH_BAR_HEIGHT +
+        PLAYER_MANA_BAR_HEIGHT +
+        PLAYER_HEALTH_BAR_GAP +
+        PLAYER_MANA_BAR_GAP +
+        PLAYER_STATUS_STACK_CLEARANCE
       renderNode.levelBadge.position.set(
         Math.round((renderNode.sprite.width - renderNode.levelBadge.width) / 2),
-        Math.round(
-          renderNode.playerNameBadge.position.y +
-            renderNode.playerNameBadge.height +
-            2
-        )
+        -Math.round(playerStatusStackHeight)
       )
       return
     }
@@ -1733,19 +2007,10 @@ export const createPixiTiledMapView = async ({
 
     renderNode.playerNameBadge.visible = true
     renderNode.playerNameBadge.text = playerProfile.name
-    const levelHeight = renderNode.levelBadge?.height ?? 0
-    const stackHeight =
-      renderNode.playerNameBadge.height +
-      levelHeight +
-      PLAYER_HEALTH_BAR_HEIGHT +
-      PLAYER_MANA_BAR_HEIGHT +
-      PLAYER_HEALTH_BAR_GAP +
-      PLAYER_MANA_BAR_GAP +
-      8
 
     renderNode.playerNameBadge.position.set(
       Math.round((renderNode.sprite.width - renderNode.playerNameBadge.width) / 2),
-      -Math.round(stackHeight)
+      Math.round(renderNode.sprite.height + PLAYER_NAME_BADGE_FOOT_OFFSET)
     )
   }
 
@@ -1778,12 +2043,12 @@ export const createPixiTiledMapView = async ({
     const manaInnerHeight = PLAYER_MANA_BAR_HEIGHT - 2
     const healthFilledWidth = Math.max(0, Math.round(healthInnerWidth * healthRatio))
     const manaFilledWidth = Math.max(0, Math.round(manaInnerWidth * manaRatio))
-    const nameHeight = renderNode.playerNameBadge.height
-    const levelBadge = renderNode.levelBadge
-    const levelHeight = levelBadge?.height ?? 0
-    const levelBottomY = levelBadge
-      ? levelBadge.position.y + levelHeight
-      : renderNode.playerNameBadge.position.y + nameHeight
+    const statusStackTopY = -Math.round(
+      PLAYER_HEALTH_BAR_HEIGHT +
+        PLAYER_MANA_BAR_HEIGHT +
+        PLAYER_MANA_BAR_GAP +
+        PLAYER_STATUS_STACK_CLEARANCE
+    )
 
     healthBar.container.visible = true
     healthBar.track.clear()
@@ -1815,7 +2080,7 @@ export const createPixiTiledMapView = async ({
 
     healthBar.container.position.set(
       Math.round((renderNode.sprite.width - PLAYER_HEALTH_BAR_WIDTH) / 2),
-      Math.round(levelBottomY + PLAYER_HEALTH_BAR_GAP)
+      statusStackTopY
     )
     manaBar.container.position.set(
       Math.round((renderNode.sprite.width - PLAYER_MANA_BAR_WIDTH) / 2),
@@ -1850,9 +2115,12 @@ export const createPixiTiledMapView = async ({
       return
     }
 
-    renderNode.displayLabel.anchor.set(0.5, 1)
     renderNode.displayLabel.visible = true
-    renderNode.displayLabel.position.set(Math.round(renderNode.sprite.width / 2), -4)
+    renderNode.displayLabel.anchor.set(0)
+    renderNode.displayLabel.position.set(
+      Math.round((renderNode.sprite.width - renderNode.displayLabel.width) / 2),
+      Math.round(renderNode.sprite.height + PLAYER_NAME_BADGE_FOOT_OFFSET)
+    )
   }
 
   const syncMonsterHealthBar = (
@@ -2366,6 +2634,7 @@ export const createPixiTiledMapView = async ({
       now + PLAYER_RESPAWN_DELAY_MILLISECONDS
     playerHitReactionState = undefined
     clearPressedInputState()
+    stopPlayerFootsteps()
     playerAttackStartedAtMilliseconds = undefined
     playerAttackResolvedStartedAtMilliseconds = undefined
     playerAttackFacing = undefined
@@ -2493,6 +2762,25 @@ export const createPixiTiledMapView = async ({
     if (isMonsterDefeated(nextCombatState)) {
       if (character.appearanceType === MONSTER_SLIME_APPEARANCE_TYPE) {
         gameSoundEffects.play('slimeDeath')
+        const nextQuest = recordFirstSlimeHuntSlimeDefeat(
+          currentFirstSlimeHuntQuest
+        )
+
+        if (nextQuest !== currentFirstSlimeHuntQuest) {
+          const didCompleteObjective =
+            currentFirstSlimeHuntQuest.status === 'active' &&
+            nextQuest.status === 'ready-to-turn-in'
+
+          setFirstSlimeHuntQuest(nextQuest)
+          if (didCompleteObjective) {
+            showCharacterDamageText(
+              PLAYER_CHARACTER_ID,
+              QUEST_OBJECTIVE_COMPLETE_TEXT,
+              DAMAGE_TEXT_DURATION_MILLISECONDS,
+              LEVEL_UP_TEXT_STYLE
+            )
+          }
+        }
       }
       character.blocksMovement = false
       monsterPatrolStates.delete(characterId)
@@ -2502,26 +2790,7 @@ export const createPixiTiledMapView = async ({
       const experienceReward = getMonsterExperienceDropAmount(
         character.level ?? 1
       )
-      const nextPlayerProgress = grantPlayerExperience(
-        playerProfile,
-        experienceReward
-      )
-
-      if (nextPlayerProgress.nextProfile !== playerProfile) {
-        Object.assign(playerProfile, nextPlayerProgress.nextProfile)
-        syncPlayerUiOverlays()
-        if (nextPlayerProgress.levelsGained > 0) {
-          gameSoundEffects.play('levelUp')
-          showCharacterDamageText(
-            PLAYER_CHARACTER_ID,
-            nextPlayerProgress.levelsGained > 1
-              ? `레벨 업 x${nextPlayerProgress.levelsGained}!`
-              : '레벨 업!',
-            DAMAGE_TEXT_DURATION_MILLISECONDS,
-            LEVEL_UP_TEXT_STYLE
-          )
-        }
-      }
+      grantPlayerExperienceReward(experienceReward)
 
       spawnMonsterGoldDrop(
         characterId,
@@ -3018,7 +3287,7 @@ export const createPixiTiledMapView = async ({
     options: {
       preserveFacing?: boolean
     } = {}
-  ) => {
+  ): boolean => {
     const currentCharacter = getCharacterStateById(characterId)
     const desiredFacing = moveCharacterState({
       character: currentCharacter,
@@ -3108,7 +3377,7 @@ export const createPixiTiledMapView = async ({
       nextCharacter.position.y === currentCharacter.position.y &&
       nextCharacter.facing === currentCharacter.facing
     ) {
-      return
+      return false
     }
 
     characterStates = characterStates.map((character) =>
@@ -3129,13 +3398,15 @@ export const createPixiTiledMapView = async ({
 
       if (touchedPortal) {
         requestSceneTransition(touchedPortal)
-        return
+        return didPositionChange
       }
     }
 
     if (nextCharacter.id === cameraTargetCharacterId && didPositionChange) {
       centerCameraOnCharacter(nextCharacter)
     }
+
+    return didPositionChange
   }
 
   const drainControllerRuntimeEventsIntoQueue = () => {
@@ -3146,11 +3417,20 @@ export const createPixiTiledMapView = async ({
 
   const updateCharacters = () => {
     try {
-      controllerRuntime.syncCharacters(characterStates)
-      drainControllerRuntimeEventsIntoQueue()
       const now = performance.now()
 
+      if (isPauseMenuOpen) {
+        clearPressedInputState()
+        stopPlayerFootsteps()
+        triggeredActions.clear()
+        lastRuntimeErrorMessage = undefined
+        return
+      }
+
+      controllerRuntime.syncCharacters(characterStates)
+      drainControllerRuntimeEventsIntoQueue()
       maybeRespawnPlayer(now)
+      let didPlayerMoveThisFrame = false
 
       for (const character of [...characterStates]) {
         if (character.id === PLAYER_CHARACTER_ID && playerProfile.hp.current === 0) {
@@ -3166,10 +3446,19 @@ export const createPixiTiledMapView = async ({
 
         if (intent) {
           if (intent.movement) {
-            tryMoveCharacter(character.id, intent.movement.x, intent.movement.y)
+            const didMove = tryMoveCharacter(
+              character.id,
+              intent.movement.x,
+              intent.movement.y
+            )
+
+            if (character.id === PLAYER_CHARACTER_ID && didMove) {
+              didPlayerMoveThisFrame = true
+            }
           }
 
           if (isSceneTransitionPending) {
+            stopPlayerFootsteps()
             return
           }
 
@@ -3358,8 +3647,11 @@ export const createPixiTiledMapView = async ({
       resolveMonsterGoldDropPickups()
       syncActiveMonsterGoldDrops(now)
 
+      const interactionEvents = gameEventQueue.drain()
+      handleFirstSlimeHuntInteractionEvents(interactionEvents, now)
+
       const emittedEvents = processInteractionEvents({
-        events: gameEventQueue.drain(),
+        events: interactionEvents,
         characters: characterStates,
         controllerRuntime,
         now,
@@ -3400,9 +3692,11 @@ export const createPixiTiledMapView = async ({
       syncActiveCharacterMessages()
       syncActiveCharacterDamageTexts(now)
       syncPlayerCharacterVisual(now)
+      syncPlayerFootsteps(didPlayerMoveThisFrame)
       triggeredActions.clear()
       lastRuntimeErrorMessage = undefined
     } catch (error) {
+      stopPlayerFootsteps()
       gameEventQueue.clear()
       triggeredActions.clear()
 
@@ -3426,6 +3720,52 @@ export const createPixiTiledMapView = async ({
       event.code === 'KeyU' || event.key.toLowerCase() === 'u'
     const isSkillToggleKey =
       event.code === 'KeyK' || event.key.toLowerCase() === 'k'
+    const isMapToggleKey =
+      event.code === 'KeyM' || event.key.toLowerCase() === 'm'
+
+    if (event.key === 'Escape') {
+      event.preventDefault()
+
+      if (event.repeat) {
+        return
+      }
+
+      if (!closeAllOverlays()) {
+        setPauseMenuOpen(true)
+      }
+
+      return
+    }
+
+    if (isPauseMenuOpen) {
+      if (
+        !(event.target instanceof HTMLInputElement) ||
+        event.target.type !== 'range'
+      ) {
+        event.preventDefault()
+      }
+
+      return
+    }
+
+    if (isMapToggleKey) {
+      if (!event.repeat) {
+        event.preventDefault()
+
+        if (mapOverlay.getIsExpanded()) {
+          mapOverlay.setExpanded(false)
+        } else {
+          mapOverlay.toggleVisible()
+        }
+      }
+
+      return
+    }
+
+    if (mapOverlay.getIsExpanded()) {
+      event.preventDefault()
+      return
+    }
 
     if (isInventoryToggleKey) {
       if (!event.repeat) {
@@ -3460,19 +3800,6 @@ export const createPixiTiledMapView = async ({
         setPlayerSkillOpen(!isPlayerSkillOpen)
       }
 
-      return
-    }
-
-    if (
-      event.key === 'Escape' &&
-      (isPlayerUiOpen ||
-        isPlayerStatOpen ||
-        isPlayerEquipmentOpen ||
-        isPlayerSkillOpen ||
-        isBlacksmithShopOpen)
-    ) {
-      event.preventDefault()
-      closeAllOverlays()
       return
     }
 
@@ -3529,6 +3856,7 @@ export const createPixiTiledMapView = async ({
 
   const handleWindowBlur = () => {
     clearPressedInputState()
+    stopPlayerFootsteps()
   }
 
   const handleViewportWheel = (event: WheelEvent) => {
@@ -3585,6 +3913,8 @@ export const createPixiTiledMapView = async ({
     UPDATE_PRIORITY.UTILITY
   )
   app.ticker.add(playerShopOverlay.syncFrame, undefined, UPDATE_PRIORITY.UTILITY)
+  app.ticker.add(pauseMenuOverlay.syncFrame, undefined, UPDATE_PRIORITY.UTILITY)
+  app.ticker.add(questTrackerOverlay.syncFrame, undefined, UPDATE_PRIORITY.UTILITY)
   syncAllCharacterSprites()
   syncViewportDisplayScale()
   centerCameraOnCharacter(getCharacterStateById(cameraTargetCharacterId))
@@ -3596,6 +3926,8 @@ export const createPixiTiledMapView = async ({
   playerStatOverlay.syncFrame()
   playerSkillOverlay.syncFrame()
   playerShopOverlay.syncFrame()
+  pauseMenuOverlay.syncFrame()
+  questTrackerOverlay.syncFrame()
   handleVisibilityChange()
 
   const destroy = () => {
@@ -3618,6 +3950,8 @@ export const createPixiTiledMapView = async ({
     app.ticker.remove(playerStatOverlay.syncFrame)
     app.ticker.remove(playerSkillOverlay.syncFrame)
     app.ticker.remove(playerShopOverlay.syncFrame)
+    app.ticker.remove(pauseMenuOverlay.syncFrame)
+    app.ticker.remove(questTrackerOverlay.syncFrame)
     gameEventQueue.clear()
     monsterPatrolStates.clear()
     monsterSpawnStates.clear()
@@ -3649,6 +3983,8 @@ export const createPixiTiledMapView = async ({
     playerStatOverlay.destroy()
     playerSkillOverlay.destroy()
     playerShopOverlay.destroy()
+    pauseMenuOverlay.destroy()
+    questTrackerOverlay.destroy()
     gameSoundEffects.destroy()
     controllerRuntime.destroy()
     app.destroy({ removeView: true }, { children: true })
@@ -3849,6 +4185,45 @@ const isCharacterPositionBlocked = (
     )
   )
 }
+
+const createGrassTileLookup = (map: ParsedTiledMap): Set<string> => {
+  const groundLayer = map.layers.find(
+    (layer) => layer.name.toLowerCase() === GROUND_LAYER_NAME
+  )
+  const grassTileKeys = new Set<string>()
+
+  if (!groundLayer) {
+    return grassTileKeys
+  }
+
+  for (const tile of groundLayer.tiles) {
+    const tileset = resolveTilesetForTile(tile, map.tilesets)
+    const tileType = tileset.tileTypes[tile.localId]
+
+    if (tileType && GRASS_TILE_TYPES.has(tileType)) {
+      grassTileKeys.add(createTileLookupKey(tile.x, tile.y))
+    }
+  }
+
+  return grassTileKeys
+}
+
+const isCharacterOnGrass = (
+  character: CharacterState,
+  grassTiles: Set<string>
+): boolean => {
+  const tileX = Math.floor(
+    character.position.x + character.collisionSize.width / 2
+  )
+  const tileY = Math.floor(
+    character.position.y + character.collisionSize.height / 2
+  )
+
+  return grassTiles.has(createTileLookupKey(tileX, tileY))
+}
+
+const createTileLookupKey = (tileX: number, tileY: number): string =>
+  `${tileX},${tileY}`
 
 const createCollisionRectFromCharacter = (
   character: CharacterState
