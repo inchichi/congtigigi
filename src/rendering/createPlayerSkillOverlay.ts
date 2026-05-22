@@ -408,6 +408,16 @@ export const createPlayerSkillOverlay = ({
     event.dataTransfer.effectAllowed = 'move'
     event.dataTransfer.setData(PLAYER_SKILL_DRAG_MIME_TYPE, skillId)
     event.dataTransfer.setData('text/plain', skillId)
+
+    const icon = skillIcons[skillIndex]
+
+    if (icon) {
+      event.dataTransfer.setDragImage(
+        icon,
+        Math.round(icon.offsetWidth / 2),
+        Math.round(icon.offsetHeight / 2)
+      )
+    }
   }
 
   const handlePanelClick = (event: MouseEvent) => {

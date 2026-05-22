@@ -1033,13 +1033,12 @@ body.game-root--map-focused > :not(.game-root) {
 .player-hud-overlay__skill-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 4px;
+  gap: 3px;
 }
 
 .player-hud-overlay__skill-slot {
   position: relative;
   display: grid;
-  justify-items: center;
   align-content: start;
   min-width: 0;
   padding: 4px 4px 5px;
@@ -1065,16 +1064,23 @@ body.game-root--map-focused > :not(.game-root) {
 }
 
 .player-hud-overlay__skill-icon {
-  display: grid;
-  flex: none;
-  place-items: center;
-  width: 28px;
-  height: 28px;
-  margin-top: 14px;
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  z-index: 1;
+  display: block;
+  pointer-events: none;
+  transform: translate(-50%, -50%);
   background-position: center;
   background-repeat: no-repeat;
   background-size: contain;
   image-rendering: pixelated;
+}
+
+.player-hud-overlay__skill-slot--filled .player-hud-overlay__skill-icon {
+  width: 34px;
+  height: 34px;
+  margin-top: 0;
 }
 
 .player-hud-overlay__skill-hotkey {
@@ -1090,7 +1096,7 @@ body.game-root--map-focused > :not(.game-root) {
 .player-hud-overlay__skill-name {
   align-self: center;
   justify-self: center;
-  margin-top: 4px;
+  margin-top: 9px;
   color: #2e2313;
   font-size: 0.76rem;
   line-height: 1.1;
@@ -1098,6 +1104,11 @@ body.game-root--map-focused > :not(.game-root) {
 }
 
 .player-hud-overlay__skill-description {
+  display: none;
+}
+
+.player-hud-overlay__skill-slot--filled .player-hud-overlay__skill-name,
+.player-hud-overlay__skill-slot--filled .player-hud-overlay__skill-description {
   display: none;
 }
 

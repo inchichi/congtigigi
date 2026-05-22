@@ -4350,13 +4350,15 @@ export const createPixiTiledMapView = async ({
         ? undefined
         : attackElapsedMilliseconds / PLAYER_ATTACK_DURATION_MILLISECONDS
     const facingMultiplier = attackFacing === 'left' ? -1 : 1
+    const weaponFacingMultiplier = attackFacing === 'right' ? -1 : 1
     const createPose = (progress: number | undefined) => {
       if (progress === undefined) {
         return {
           x: placement.x + (weaponAppearance?.idleOffsetX ?? 0),
           y: placement.y + (weaponAppearance?.idleOffsetY ?? 0),
           rotation: placement.rotation,
-          scale: weaponWorldScale
+          scaleX: weaponWorldScale * weaponFacingMultiplier,
+          scaleY: weaponWorldScale
         }
       }
 
@@ -4371,7 +4373,10 @@ export const createPixiTiledMapView = async ({
         rotation:
           placement.rotation +
           facingMultiplier * PLAYER_ATTACK_ROTATION_OFFSET * swingAmount,
-        scale: weaponWorldScale + PLAYER_ATTACK_SCALE_BOOST * swingAmount
+        scaleX:
+          (weaponWorldScale + PLAYER_ATTACK_SCALE_BOOST * swingAmount) *
+          weaponFacingMultiplier,
+        scaleY: weaponWorldScale + PLAYER_ATTACK_SCALE_BOOST * swingAmount
       }
     }
     const applyPose = (
@@ -4380,7 +4385,8 @@ export const createPixiTiledMapView = async ({
         x: number
         y: number
         rotation: number
-        scale: number
+        scaleX: number
+        scaleY: number
       },
       alpha: number
     ) => {
@@ -4388,7 +4394,7 @@ export const createPixiTiledMapView = async ({
       sprite.visible = true
       sprite.position.set(pose.x, pose.y)
       sprite.rotation = pose.rotation
-      sprite.scale.set(pose.scale)
+      sprite.scale.set(pose.scaleX, pose.scaleY)
       sprite.alpha = alpha
     }
 

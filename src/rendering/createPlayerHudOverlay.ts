@@ -738,6 +738,16 @@ export const createPlayerHudOverlay = ({
     event.dataTransfer.effectAllowed = 'move'
     event.dataTransfer.setData(PLAYER_SKILL_DRAG_MIME_TYPE, skillSlot.skillId)
     event.dataTransfer.setData('text/plain', skillSlot.skillId)
+
+    const skillIcon = skillIcons[skillSlotIndex]
+
+    if (skillIcon) {
+      event.dataTransfer.setDragImage(
+        skillIcon,
+        Math.round(skillIcon.offsetWidth / 2),
+        Math.round(skillIcon.offsetHeight / 2)
+      )
+    }
   }
 
   function handleSkillSlotDragOver(event: DragEvent) {
@@ -883,10 +893,6 @@ export const createPlayerHudOverlay = ({
         'player-hud-overlay__skill-slot--filled',
         Boolean(skill)
       )
-      skillButton.classList.toggle(
-        'player-hud-overlay__skill-slot--empty',
-        !skill
-      )
       skillButton.setAttribute(
         'aria-label',
         skill
@@ -899,7 +905,9 @@ export const createPlayerHudOverlay = ({
       hotkeyLabel.textContent = PLAYER_SKILL_SLOT_HOTKEY_LABELS[index]
       nameLabel.textContent = skill ? skill.label : '비어있음'
       descriptionLabel.textContent = skill ? skill.description : ''
-      renderSkillIcon(skillIcon, skill?.iconUrl)
+      nameLabel.hidden = Boolean(skill)
+      descriptionLabel.hidden = Boolean(skill)
+      renderSkillIcon(skillIcon, skill?.iconUrl, skill ? 1 : 0.92)
     }
 
     const quickslots = getQuickslots()
