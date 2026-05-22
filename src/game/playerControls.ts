@@ -17,6 +17,7 @@ export type PlayerControlBindingId =
   | 'skill'
   | 'quest'
   | 'map'
+  | 'portal'
   | 'pause'
   | 'quickslot-1'
   | 'quickslot-2'
@@ -48,6 +49,7 @@ const PLAYER_CONTROL_BINDING_DEFINITIONS: readonly PlayerControlBindingDefinitio
     { id: 'skill', label: '스킬', defaultCode: 'KeyK' },
     { id: 'quest', label: '퀘스트', defaultCode: 'KeyB' },
     { id: 'map', label: '지도', defaultCode: 'KeyM' },
+    { id: 'portal', label: '포탈 입장', defaultCode: 'KeyF' },
     { id: 'pause', label: '메뉴 닫기', defaultCode: 'Escape' },
     { id: 'quickslot-1', label: '퀵슬롯 1', defaultCode: 'Digit1' },
     { id: 'quickslot-2', label: '퀵슬롯 2', defaultCode: 'Digit2' },

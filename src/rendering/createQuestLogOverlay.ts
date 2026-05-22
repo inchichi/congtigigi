@@ -110,6 +110,7 @@ export const createQuestLogOverlay = ({
   const cancelAbandonButton = document.createElement('button')
   let selectedQuestId: string | undefined
   let isAbandonConfirmVisible = false
+  let previousRenderSignature = ''
 
   overlayRoot.className = 'quest-log-overlay'
   panel.className = 'quest-log-overlay__panel'
@@ -228,6 +229,28 @@ export const createQuestLogOverlay = ({
       ? getQuestProgress(questLog, selectedQuestId)
       : undefined
     const uiScale = getResponsiveUiScale()
+    const renderSignature = JSON.stringify({
+      uiScale,
+      playerName: getPlayerName(),
+      selectedQuestId,
+      isAbandonConfirmVisible,
+      quests: visibleDefinitions.map((definition) => {
+        const quest = getQuestProgress(questLog, definition.id)
+
+        return {
+          id: definition.id,
+          status: quest.status,
+          objectives: quest.objectives,
+          trackerVisible: quest.trackerVisible
+        }
+      })
+    })
+
+    if (previousRenderSignature === renderSignature) {
+      return
+    }
+
+    previousRenderSignature = renderSignature
 
     panel.style.transform = `translate(-50%, -50%) scale(${uiScale})`
     summary.textContent = `${visibleDefinitions.length}개 진행 중`

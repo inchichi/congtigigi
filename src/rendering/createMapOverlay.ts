@@ -74,12 +74,12 @@ export const createMapOverlay = ({
   backdropButton.type = 'button'
   backdropButton.className = 'world-map-overlay__backdrop'
   backdropButton.hidden = true
-  backdropButton.setAttribute('aria-label', 'Close the world map')
+  backdropButton.setAttribute('aria-label', '월드맵 닫기')
   backdropButton.tabIndex = -1
 
   panelButton.type = 'button'
   panelButton.className = 'world-map-overlay__panel'
-  panelButton.setAttribute('aria-label', 'Open the world map')
+  panelButton.setAttribute('aria-label', '월드맵 열기')
   panelButton.setAttribute('aria-expanded', 'false')
 
   mapFrame.className = 'world-map-overlay__frame'
@@ -88,7 +88,7 @@ export const createMapOverlay = ({
   previewCanvas.className = 'world-map-overlay__canvas'
   viewportFrame.className = 'world-map-overlay__viewport'
   badgeElement.className = 'world-map-overlay__badge'
-  badgeElement.textContent = 'WORLD MAP'
+  badgeElement.textContent = '월드맵'
 
   previewCanvas.setAttribute('aria-hidden', 'true')
   viewportFrame.setAttribute('aria-hidden', 'true')
@@ -160,7 +160,7 @@ export const createMapOverlay = ({
       viewportFrame.style.transform = 'none'
       mapFrame.style.borderRadius = '0'
       mapFrame.style.background = 'rgba(16, 16, 14, 0.98)'
-      badgeElement.textContent = 'WORLD MAP'
+      badgeElement.textContent = '월드맵'
       badgeElement.style.left = '8px'
       badgeElement.style.top = '8px'
       badgeElement.style.transform = 'none'
@@ -223,7 +223,7 @@ export const createMapOverlay = ({
     viewportFrame.style.transform = 'none'
     mapFrame.style.borderRadius = '50%'
     mapFrame.style.background = '#10100e'
-    badgeElement.textContent = 'WORLD MAP'
+    badgeElement.textContent = '월드맵'
     badgeElement.style.left = '50%'
     badgeElement.style.top = `${displayHeight + Math.max(6, Math.round(8 * uiScale))}px`
     badgeElement.style.transform = 'translateX(-50%)'
@@ -300,12 +300,12 @@ export const createMapOverlay = ({
     panelButton.style.background = 'transparent'
     panelButton.setAttribute(
       'aria-label',
-      isExpanded ? 'Close the world map' : 'Open the world map'
+      isExpanded ? '월드맵 닫기' : '월드맵 열기'
     )
     panelButton.setAttribute('aria-expanded', String(isExpanded))
     panelButton.title = isExpanded
-      ? 'Click to close the world map'
-      : 'Click to open the world map'
+      ? '월드맵 닫기'
+      : '월드맵 열기'
     backdropButton.hidden = !isExpanded
 
     previewCanvas.width = backingWidth

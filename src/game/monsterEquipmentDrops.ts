@@ -40,32 +40,32 @@ export const MONSTER_EQUIPMENT_DROP_DEFINITIONS: MonsterEquipmentDropDefinition[
   {
     dropId: 'Leather_Armor_drop',
     itemId: 'Leather_Armor',
-    label: 'Leather_Armor_drop'
+    label: '가죽 갑옷'
   },
   {
     dropId: 'Leather_Helmet_drop',
     itemId: 'Leather_Helmet',
-    label: 'Leather_Helmet_drop'
+    label: '가죽 투구'
   },
   {
     dropId: 'Chain_Armor_drop',
     itemId: 'Chain_Armor',
-    label: 'Chain_Armor_drop'
+    label: '사슬 갑옷'
   },
   {
     dropId: 'Chain_Helmet_drop',
     itemId: 'Chain_Helmet',
-    label: 'Chain_Helmet_drop'
+    label: '사슬 투구'
   },
   {
     dropId: 'Iron_Armor_drop',
     itemId: 'Iron_Armor',
-    label: 'Iron_Armor_drop'
+    label: '철 갑옷'
   },
   {
     dropId: 'Iron_Helmet_drop',
     itemId: 'Iron_Helmet',
-    label: 'Iron_Helmet_drop'
+    label: '철 투구'
   }
 ]
 

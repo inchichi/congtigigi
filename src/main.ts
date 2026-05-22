@@ -342,6 +342,8 @@ const queueSceneMusicRetry = () => {
   isSceneMusicRetryQueued = true
 
   const retrySceneMusic = () => {
+    window.removeEventListener('pointerdown', retrySceneMusic)
+    window.removeEventListener('keydown', retrySceneMusic)
     isSceneMusicRetryQueued = false
     playActiveSceneMusic()
   }

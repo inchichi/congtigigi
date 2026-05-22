@@ -338,17 +338,17 @@ export const QUEST_DEFINITIONS: QuestDefinition[] = [
     trackerLabel: '동굴입구 조사',
     prerequisiteQuestIds: [BLACKSMITH_PREPARATION_QUEST_ID],
     requestText:
-      '사냥터 깊은 곳의 동굴입구에서 이상한 기운이 느껴진다고 한다.',
-    guideText: '사냥터의 "동굴입구" 표지판을 따라 동굴에 들어가 보자.',
+      '사냥터 깊은 곳의 동굴 안쪽에서 이상한 기운이 느껴진다고 한다.',
+    guideText: '사냥터의 "동굴입구" 표지판을 따라가 포탈에서 F를 눌러 동굴에 들어가 보자.',
     startDialogueLines: [
       '이제 사냥터의 원인을 확인할 때가 되었구나.',
       '사냥터에 있는 "동굴입구" 표지판을 찾아라.',
       '그 안쪽에서 이상한 마력이 흘러나오고 있다.',
-      '너무 깊이 들어가지는 말고, 먼저 입구 주변만 확인해보거라.'
+      '포탈 앞에서 F를 눌러 동굴 안으로 들어가 보거라.'
     ],
     activeDialogueLines: [
       '사냥터에 있는 "동굴입구" 표지판을 찾아라.',
-      '그 안쪽에서 이상한 마력이 흘러나오고 있다.'
+      '포탈 앞에서 F를 눌러 동굴 안으로 들어가 보거라.'
     ],
     completionDialogueLines: [
       '동굴 안으로 들어갔었구나.',

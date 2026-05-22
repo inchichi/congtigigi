@@ -12,7 +12,7 @@ describe('rollMonsterEquipmentDrop', () => {
     expect(rollMonsterEquipmentDrop(() => randomValues.shift() ?? 0)).toEqual({
       dropId: 'Iron_Helmet_drop',
       itemId: 'Iron_Helmet',
-      label: 'Iron_Helmet_drop'
+      label: '철 투구'
     })
   })
 

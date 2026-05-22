@@ -84,7 +84,7 @@ describe('createInitialPlayerEquipment', () => {
 
     expect(getPlayerEquipmentItemDefinitionById('Chain_Armor')).toMatchObject({
       slotId: 'armor',
-      label: 'Chain_Armor',
+      label: '사슬 갑옷',
       icon: {
         key: 'tiny-knight-open-helmet'
       }
