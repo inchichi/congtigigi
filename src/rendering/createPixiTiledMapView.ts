@@ -509,6 +509,7 @@ const MONSTER_CONTACT_DAMAGE_TOUCH_TOLERANCE_TILES = 0.14
 const MONSTER_ATTACK_RANGE_TOUCH_TOLERANCE_TILES = 0.14
 const PLAYER_RESPAWN_DELAY_MILLISECONDS = 3000
 const PLAYER_HIT_REACTION_DURATION_MILLISECONDS = 180
+const PLAYER_DAMAGE_INVULNERABILITY_MILLISECONDS = 600
 const PLAYER_HIT_REACTION_MAX_OFFSET_PIXELS = 6
 const PLAYER_PROTECT_SKILL_COOLDOWN_MILLISECONDS = 3200
 const MONSTER_GOLD_DROP_ICON_RADIUS = 7
@@ -1087,6 +1088,7 @@ export const createPixiTiledMapView = async ({
   let playerProtectSkillSprite: AnimatedSprite | undefined
   let playerProtectSkillActiveUntilMilliseconds = 0
   let playerProtectSkillReadyAtMilliseconds = 0
+  let playerDamageInvulnerableUntilMilliseconds = 0
   let playerSmashSkillStartedAtMilliseconds: number | undefined
   let playerSmashSkillFacing: CharacterMoveDirection | undefined
   let playerSmashSkillOrigin:
@@ -1431,6 +1433,8 @@ export const createPixiTiledMapView = async ({
     if (!didTrigger) {
       return false
     }
+
+    gameSoundEffects.play('playerSkill')
 
     if (manaCost > 0) {
       playerProfile.mp.current = Math.max(0, playerProfile.mp.current - manaCost)
@@ -1987,6 +1991,21 @@ export const createPixiTiledMapView = async ({
       doCollisionRectsIntersect(characterRect, createCollisionRectFromPortal(portal))
     )
   }
+  const requestPlayerPortalTransition = (): boolean => {
+    if (isSceneTransitionPending || playerProfile.hp.current === 0) {
+      return false
+    }
+
+    const playerCharacter = getCharacterStateById(PLAYER_CHARACTER_ID)
+    const touchedPortal = findTouchedMapPortal(playerCharacter)
+
+    if (!touchedPortal) {
+      return false
+    }
+
+    requestSceneTransition(touchedPortal)
+    return true
+  }
   const handleQuestInteractionEvents = (
     events: GameEvent[],
     now: number
@@ -2063,7 +2082,6 @@ export const createPixiTiledMapView = async ({
           DAMAGE_TEXT_DURATION_MILLISECONDS,
           LEVEL_UP_TEXT_STYLE
         )
-        maybeOpenQuestNpcShop(targetCharacter.id)
         return
       }
       case 'active': {
@@ -2104,6 +2122,11 @@ export const createPixiTiledMapView = async ({
   const maybeOpenQuestNpcShop = (npcId: string) => {
     if (npcId === BLACKSMITH_SHOP_NPC_ID) {
       setBlacksmithShopOpen(true)
+      return
+    }
+
+    if (npcId === POTION_SHOP_NPC_ID) {
+      setPotionShopOpen(true)
     }
   }
   playerHudOverlay = createPlayerHudOverlay({
@@ -2568,7 +2591,7 @@ export const createPixiTiledMapView = async ({
       questBadge.label = `character:${character.id}:quest-badge`
       questBadge.roundPixels = true
       questBadge.zIndex = 22
-      container.addChild(questBadge)
+      messageLayer.addChild(questBadge)
     }
 
     if (isMonsterCharacter) {
@@ -2980,11 +3003,14 @@ export const createPixiTiledMapView = async ({
       renderNode.questBadge.visible = true
       renderNode.questBadge.texture =
         badgeKind === 'new' ? questNewTexture : questFinTexture
+      renderNode.questBadge.zIndex = renderNode.container.zIndex + 2000
       renderNode.questBadge.position.set(
-        Math.round(renderNode.sprite.width / 2),
-        -QUEST_BADGE_Y_OFFSET
+        Math.round(renderNode.container.x + renderNode.sprite.width / 2),
+        Math.round(renderNode.container.y - QUEST_BADGE_Y_OFFSET)
       )
     }
+
+    messageLayer.sortChildren()
   }
 
   const syncPlayerNameBadge = (
@@ -3940,6 +3966,7 @@ export const createPixiTiledMapView = async ({
     clearPlayerSmashSkillEffectSprites()
     playerProtectSkillActiveUntilMilliseconds = 0
     playerProtectSkillReadyAtMilliseconds = now + PLAYER_RESPAWN_DELAY_MILLISECONDS
+    playerDamageInvulnerableUntilMilliseconds = 0
     playerAttackReadyAtMilliseconds = now + PLAYER_RESPAWN_DELAY_MILLISECONDS
     playerSmashSkillReadyAtMilliseconds =
       now + PLAYER_RESPAWN_DELAY_MILLISECONDS
@@ -3975,6 +4002,7 @@ export const createPixiTiledMapView = async ({
     clearPlayerSmashSkillEffectSprites()
     playerProtectSkillActiveUntilMilliseconds = 0
     playerProtectSkillReadyAtMilliseconds = now
+    playerDamageInvulnerableUntilMilliseconds = 0
     playerAttackReadyAtMilliseconds = now
     playerSmashSkillReadyAtMilliseconds = now
     syncCharacterSprite(playerCharacter, now)
@@ -3992,11 +4020,15 @@ export const createPixiTiledMapView = async ({
     damage: number,
     now: number,
     sourceCharacter?: CharacterState
-  ): void {
+  ): boolean {
     const nextDamage = Math.max(0, Math.floor(damage))
 
     if (nextDamage === 0 || playerProfile.hp.current === 0) {
-      return
+      return false
+    }
+
+    if (playerDamageInvulnerableUntilMilliseconds > now) {
+      return false
     }
 
     if (
@@ -4009,7 +4041,7 @@ export const createPixiTiledMapView = async ({
         EVADE_TEXT_DURATION_MILLISECONDS,
         EVADE_TEXT_STYLE
       )
-      return
+      return false
     }
 
     if (
@@ -4022,7 +4054,7 @@ export const createPixiTiledMapView = async ({
         EVADE_TEXT_DURATION_MILLISECONDS,
         EVADE_TEXT_STYLE
       )
-      return
+      return false
     }
 
     const nextHp = Math.max(0, playerProfile.hp.current - nextDamage)
@@ -4030,6 +4062,10 @@ export const createPixiTiledMapView = async ({
       nextHp === 0 ? `-${nextDamage}\n쓰러졌다!` : `-${nextDamage}`
 
     playerProfile.hp.current = nextHp
+    if (nextHp > 0) {
+      playerDamageInvulnerableUntilMilliseconds =
+        now + PLAYER_DAMAGE_INVULNERABILITY_MILLISECONDS
+    }
     gameSoundEffects.play(nextHp === 0 ? 'playerGameOver' : 'playerDamage')
     showCharacterDamageText(
       PLAYER_CHARACTER_ID,
@@ -4045,6 +4081,8 @@ export const createPixiTiledMapView = async ({
       playerHitReactionState = undefined
       beginPlayerDeath(now)
     }
+
+    return true
   }
 
   function applyDamageToMonster(
@@ -4284,8 +4322,19 @@ export const createPixiTiledMapView = async ({
         monsterCharacter.id,
         now + MONSTER_CONTACT_DAMAGE_COOLDOWN_MILLISECONDS
       )
-      applyDamageToPlayer(combatState.contactDamage, now, monsterCharacter)
-      knockbackCharacterAwayFromCharacter(PLAYER_CHARACTER_ID, monsterCharacter, 0.18)
+      const didDamagePlayer = applyDamageToPlayer(
+        combatState.contactDamage,
+        now,
+        monsterCharacter
+      )
+
+      if (didDamagePlayer) {
+        knockbackCharacterAwayFromCharacter(
+          PLAYER_CHARACTER_ID,
+          monsterCharacter,
+          0.18
+        )
+      }
     }
   }
 
@@ -4841,15 +4890,6 @@ export const createPixiTiledMapView = async ({
       syncCharacterSprite(nextCharacter)
     }
 
-    if (nextCharacter.id === PLAYER_CHARACTER_ID && didPositionChange) {
-      const touchedPortal = findTouchedMapPortal(nextCharacter)
-
-      if (touchedPortal) {
-        requestSceneTransition(touchedPortal)
-        return didPositionChange
-      }
-    }
-
     if (nextCharacter.id === cameraTargetCharacterId && didPositionChange) {
       centerCameraOnCharacter(nextCharacter)
     }
@@ -5035,16 +5075,19 @@ export const createPixiTiledMapView = async ({
                   character.id,
                   now + monsterBehaviorConfig.attackDurationMilliseconds
                 )
-                applyDamageToPlayer(
+                const didDamagePlayer = applyDamageToPlayer(
                   Math.max(1, combatState.contactDamage + 1),
                   now,
                   monsterCharacter
                 )
-                knockbackCharacterAwayFromCharacter(
-                  PLAYER_CHARACTER_ID,
-                  monsterCharacter,
-                  0.12
-                )
+
+                if (didDamagePlayer) {
+                  knockbackCharacterAwayFromCharacter(
+                    PLAYER_CHARACTER_ID,
+                    monsterCharacter,
+                    0.12
+                  )
+                }
                 syncMonsterAnimation(character.id, 'attack')
                 continue
               }
@@ -5186,6 +5229,7 @@ export const createPixiTiledMapView = async ({
     const isSkillToggleKey = code === currentPlayerControlBindings.skill
     const isQuestLogToggleKey = code === currentPlayerControlBindings.quest
     const isMapToggleKey = code === currentPlayerControlBindings.map
+    const isPortalEnterKey = code === currentPlayerControlBindings.portal
     const isPauseKey = isPlayerControlPauseKey(
       currentPlayerControlBindings,
       code
@@ -5251,6 +5295,16 @@ export const createPixiTiledMapView = async ({
 
     if (mapOverlay.getIsExpanded()) {
       event.preventDefault()
+      return
+    }
+
+    if (isPortalEnterKey) {
+      event.preventDefault()
+
+      if (!event.repeat) {
+        requestPlayerPortalTransition()
+      }
+
       return
     }
 

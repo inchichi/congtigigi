@@ -30,6 +30,7 @@ export const createQuestTrackerOverlay = ({
   const closeButton = document.createElement('button')
   const closeIcon = document.createElement('span')
   const trackerList = document.createElement('div')
+  let previousRenderSignature = ''
 
   overlayRoot.className = 'quest-tracker-overlay'
   overlayRoot.setAttribute('aria-hidden', 'true')
@@ -56,6 +57,18 @@ export const createQuestTrackerOverlay = ({
     const trackerItems = getVisibleQuestTrackers(getQuestLog())
     const isVisible = trackerItems.length > 0
     const uiScale = getResponsiveUiScale()
+    const renderSignature = isVisible
+      ? JSON.stringify({
+          uiScale,
+          items: trackerItems.map((item) => item.text)
+        })
+      : 'hidden'
+
+    if (previousRenderSignature === renderSignature) {
+      return
+    }
+
+    previousRenderSignature = renderSignature
 
     overlayRoot.hidden = !isVisible
     overlayRoot.style.display = isVisible ? '' : 'none'

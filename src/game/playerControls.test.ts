@@ -26,6 +26,7 @@ describe('playerControls', () => {
       skill: 'KeyK',
       quest: 'KeyB',
       map: 'KeyM',
+      portal: 'KeyF',
       pause: 'Escape',
       'quickslot-1': 'Digit1',
       'quickslot-2': 'Digit2',

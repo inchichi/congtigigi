@@ -213,7 +213,7 @@ const PLAYER_EQUIPMENT_ITEM_DEFINITIONS: PlayerEquipmentItemDefinition[] = [
   {
     id: 'Leather_Armor',
     slotId: 'armor',
-    label: 'Leather_Armor',
+    label: '가죽 갑옷',
     level: 2,
     description: '몬스터에게서 얻은 가죽 갑옷',
     price: 220,
@@ -225,7 +225,7 @@ const PLAYER_EQUIPMENT_ITEM_DEFINITIONS: PlayerEquipmentItemDefinition[] = [
   {
     id: 'Leather_Helmet',
     slotId: 'hat',
-    label: 'Leather_Helmet',
+    label: '가죽 투구',
     level: 2,
     description: '몬스터에게서 얻은 가죽 투구',
     price: 180,
@@ -237,7 +237,7 @@ const PLAYER_EQUIPMENT_ITEM_DEFINITIONS: PlayerEquipmentItemDefinition[] = [
   {
     id: 'Chain_Armor',
     slotId: 'armor',
-    label: 'Chain_Armor',
+    label: '사슬 갑옷',
     level: 2,
     description: '몬스터에게서 얻은 사슬 갑옷',
     price: 300,
@@ -249,7 +249,7 @@ const PLAYER_EQUIPMENT_ITEM_DEFINITIONS: PlayerEquipmentItemDefinition[] = [
   {
     id: 'Chain_Helmet',
     slotId: 'hat',
-    label: 'Chain_Helmet',
+    label: '사슬 투구',
     level: 2,
     description: '몬스터에게서 얻은 사슬 투구',
     price: 240,
@@ -261,7 +261,7 @@ const PLAYER_EQUIPMENT_ITEM_DEFINITIONS: PlayerEquipmentItemDefinition[] = [
   {
     id: 'Iron_Armor',
     slotId: 'armor',
-    label: 'Iron_Armor',
+    label: '철 갑옷',
     level: 3,
     description: '몬스터에게서 얻은 철 갑옷',
     price: 360,
@@ -273,7 +273,7 @@ const PLAYER_EQUIPMENT_ITEM_DEFINITIONS: PlayerEquipmentItemDefinition[] = [
   {
     id: 'Iron_Helmet',
     slotId: 'hat',
-    label: 'Iron_Helmet',
+    label: '철 투구',
     level: 3,
     description: '몬스터에게서 얻은 철 투구',
     price: 300,
