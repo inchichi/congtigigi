@@ -2,6 +2,7 @@ import grassFootstepSoundUrl from '../assets/sounds/grass-footstep.wav'
 import levelUpSoundUrl from '../assets/sounds/level-up.wav'
 import playerDamageSoundUrl from '../assets/sounds/player-damage.wav'
 import playerGameOverSoundUrl from '../assets/sounds/player-game-over.wav'
+import playerRollWhooshSoundUrl from '../assets/sounds/player-roll-whoosh.mp3'
 import playerSkillSoundUrl from '../assets/sounds/player-skill.wav'
 import playerSwordHitSoundUrl from '../assets/sounds/player-sword-hit.wav'
 import slimeAttackSoundUrl from '../assets/sounds/slime-attack.wav'
@@ -12,6 +13,7 @@ export type GameSoundEffectId =
   | 'levelUp'
   | 'playerDamage'
   | 'playerGameOver'
+  | 'playerRollWhoosh'
   | 'playerSkill'
   | 'playerSwordHit'
   | 'slimeAttack'
@@ -60,6 +62,11 @@ const SOUND_EFFECT_CONFIGS: Record<GameSoundEffectId, GameSoundEffectConfig> = {
     url: playerGameOverSoundUrl,
     volume: 0.85,
     poolSize: 1
+  },
+  playerRollWhoosh: {
+    url: playerRollWhooshSoundUrl,
+    volume: 0.72,
+    poolSize: 3
   },
   playerSkill: {
     url: playerSkillSoundUrl,
