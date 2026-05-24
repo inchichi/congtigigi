@@ -28,6 +28,11 @@ import {
   setQuestTrackerVisible,
   startQuest
 } from './questLog'
+import { grantPlayerExperience } from './playerExperience'
+import {
+  PLAYER_JOB_PROMOTION_LEVEL,
+  createInitialPlayerProfile
+} from './playerProfile'
 
 const WIZARD_NPC_ID = 'wizard'
 const POTION_MERCHANT_NPC_ID = 'potion_merchant'
@@ -57,6 +62,21 @@ describe('questLog', () => {
     ])
     expect(QUEST_DEFINITIONS.every((definition) => definition.regionName === '티르코네일 마을')).toBe(true)
     expect(JSON.stringify(QUEST_DEFINITIONS)).not.toContain('준수')
+  })
+
+  it('grants enough quest experience to reach level 10 after the arc', () => {
+    const questExperience = QUEST_DEFINITIONS.reduce(
+      (totalExperience, definition) => totalExperience + definition.rewards.experience,
+      0
+    )
+
+    const result = grantPlayerExperience(
+      createInitialPlayerProfile(),
+      questExperience
+    )
+
+    expect(result.nextProfile.level).toBe(PLAYER_JOB_PROMOTION_LEVEL)
+    expect(result.nextProfile.experience.current).toBe(0)
   })
 
   it('starts only unlocked quests and exposes the next NPC quest interaction', () => {
@@ -204,7 +224,7 @@ describe('questLog', () => {
     expect(completedResult).toMatchObject({
       didComplete: true,
       goldReward: 0,
-      experienceReward: 30,
+      experienceReward: 108,
       itemRewards: [
         {
           id: 'health-potion',
