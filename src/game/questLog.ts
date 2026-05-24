@@ -12,7 +12,7 @@ export const PIG_BOSS_THREAT_QUEST_ID = 'q008-pig-boss-threat'
 export const FIRST_SLIME_HUNT_OBJECTIVE_ID = 'defeat-slimes'
 export const FIRST_SLIME_HUNT_REQUIRED_SLIME_DEFEATS = 3
 export const FIRST_SLIME_HUNT_REWARD_GOLD = 100
-export const FIRST_SLIME_HUNT_REWARD_EXPERIENCE = 60
+export const FIRST_SLIME_HUNT_REWARD_EXPERIENCE = 216
 
 export const WIZARD_NPC_ID = 'wizard'
 export const POTION_MERCHANT_NPC_ID = 'potion_merchant'
@@ -221,7 +221,7 @@ export const QUEST_DEFINITIONS: QuestDefinition[] = [
     ],
     rewards: {
       gold: 0,
-      experience: 30,
+      experience: 108,
       items: [
         {
           ...HEALTH_POTION_REWARD,
@@ -276,7 +276,7 @@ export const QUEST_DEFINITIONS: QuestDefinition[] = [
     ],
     rewards: {
       gold: 120,
-      experience: 80,
+      experience: 288,
       items: []
     }
   },
@@ -319,7 +319,7 @@ export const QUEST_DEFINITIONS: QuestDefinition[] = [
     ],
     rewards: {
       gold: 0,
-      experience: 50,
+      experience: 180,
       items: [
         {
           id: 'smith-charm',
@@ -368,7 +368,7 @@ export const QUEST_DEFINITIONS: QuestDefinition[] = [
     ],
     rewards: {
       gold: 100,
-      experience: 70,
+      experience: 252,
       items: []
     }
   },
@@ -412,7 +412,7 @@ export const QUEST_DEFINITIONS: QuestDefinition[] = [
     ],
     rewards: {
       gold: 180,
-      experience: 120,
+      experience: 432,
       items: []
     }
   },
@@ -455,7 +455,7 @@ export const QUEST_DEFINITIONS: QuestDefinition[] = [
     ],
     rewards: {
       gold: 0,
-      experience: 40,
+      experience: 144,
       items: [
         {
           ...HEALTH_POTION_REWARD,
@@ -513,7 +513,7 @@ export const QUEST_DEFINITIONS: QuestDefinition[] = [
     ],
     rewards: {
       gold: 300,
-      experience: 200,
+      experience: 720,
       items: []
     }
   }
