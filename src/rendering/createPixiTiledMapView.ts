@@ -69,6 +69,16 @@ import {
   getPlayerSmashSkillSegmentPlacement
 } from '../game/playerSmashSkill'
 import {
+  PLAYER_ROLL_COOLDOWN_MILLISECONDS,
+  getPlayerRollDistanceTiles,
+  getPlayerRollProgress,
+  getPlayerRollVisualState,
+  normalizePlayerRollVector,
+  type PlayerRollState,
+  type PlayerRollVector,
+  type PlayerRollVisualState
+} from '../game/playerRoll'
+import {
   createInitialPlayerControlBindings,
   getPlayerControlActionFromCode,
   getPlayerControlMovementDirectionFromCode,
@@ -281,6 +291,7 @@ type MonsterEquipmentDrop = {
 type RenderedCharacterNode = {
   container: Container
   sprite: Sprite
+  renderScale: number
   playerArmorSprite?: Sprite
   playerHelmetSprite?: Sprite
   questBadge?: Sprite
@@ -343,6 +354,10 @@ type PlayerHitReactionState = {
   directionY: number
   startedAtMilliseconds: number
   expiresAtMilliseconds: number
+}
+
+type PlayerRollInputState = {
+  isModifierPressed: boolean
 }
 
 type PlayerVisualEquipmentSlotId = Extract<PlayerEquipmentSlotId, 'armor' | 'hat'>
@@ -1049,6 +1064,9 @@ export const createPixiTiledMapView = async ({
   const wallTiles = createWallTileLookup(map)
   const pressedDirections = new Set<CharacterMoveDirection>()
   const pressedActions = new Set<CharacterAction>()
+  const playerRollInputState: PlayerRollInputState = {
+    isModifierPressed: false
+  }
   const triggeredActions = new Set<CharacterAction>()
   const gameEventQueue = createGameEventQueue()
   let currentAudioSettings = audioSettings
@@ -1119,6 +1137,8 @@ export const createPixiTiledMapView = async ({
   const clearPressedInputState = () => {
     pressedDirections.clear()
     pressedActions.clear()
+    playerRollInputState.isModifierPressed = false
+    playerAttackQueuedAfterRoll = false
     triggeredActions.clear()
     triggeredSkillSlotIndexes.clear()
   }
@@ -1214,6 +1234,9 @@ export const createPixiTiledMapView = async ({
   let sceneIntroHideTimeoutId: number | undefined
   let playerRespawnAtMilliseconds: number | undefined
   let playerHitReactionState: PlayerHitReactionState | undefined
+  let playerRollState: PlayerRollState | undefined
+  let playerRollReadyAtMilliseconds = 0
+  let playerAttackQueuedAfterRoll = false
   let playerAttackResolvedStartedAtMilliseconds: number | undefined
   let playerAttackReadyAtMilliseconds = 0
   let lastRuntimeErrorMessage: string | undefined
@@ -1353,6 +1376,142 @@ export const createPixiTiledMapView = async ({
     playerAttackReadyAtMilliseconds =
       now + PLAYER_ATTACK_COOLDOWN_MILLISECONDS
     startPlayerWeaponAttackMotion(playerCharacter, now)
+  }
+  const triggerPlayerRoll = (
+    vector: PlayerRollVector,
+    now: number
+  ): boolean => {
+    const normalizedVector = normalizePlayerRollVector(vector)
+
+    if (
+      !normalizedVector ||
+      playerProfile.hp.current === 0 ||
+      isSceneTransitionPending ||
+      now < playerRollReadyAtMilliseconds
+    ) {
+      return false
+    }
+
+    const playerCharacter = getCharacterStateById(PLAYER_CHARACTER_ID)
+    const facing = getFacingFromRollVector(normalizedVector, playerCharacter.facing)
+
+    playerRollState = {
+      vector: normalizedVector,
+      startedAtMilliseconds: now,
+      previousDistanceTiles: 0
+    }
+    playerRollReadyAtMilliseconds =
+      now + PLAYER_ROLL_COOLDOWN_MILLISECONDS
+    playerHitReactionState = undefined
+    gameSoundEffects.play('playerRollWhoosh')
+    characterStates = characterStates.map((character) =>
+      character.id === PLAYER_CHARACTER_ID
+        ? {
+            ...playerCharacter,
+            facing
+          }
+        : character
+    )
+    syncPlayerCharacterVisual(now)
+
+    return true
+  }
+  const triggerPlayerRollFromPressedDirection = (now: number): boolean => {
+    const vector = getRollVectorFromPressedDirections()
+
+    return vector ? triggerPlayerRoll(vector, now) : false
+  }
+  const getRollVectorFromPressedDirections = ():
+    | PlayerRollVector
+    | undefined => {
+    let x = 0
+    let y = 0
+
+    if (pressedDirections.has('left')) {
+      x -= 1
+    }
+
+    if (pressedDirections.has('right')) {
+      x += 1
+    }
+
+    if (pressedDirections.has('up')) {
+      y -= 1
+    }
+
+    if (pressedDirections.has('down')) {
+      y += 1
+    }
+
+    return normalizePlayerRollVector({ x, y })
+  }
+  const isPlayerRolling = (now: number): boolean =>
+    playerRollState !== undefined &&
+    getPlayerRollProgress({
+      nowMilliseconds: now,
+      startedAtMilliseconds: playerRollState.startedAtMilliseconds
+    }) < 1
+  const finishPlayerRoll = (now: number): void => {
+    playerRollState = undefined
+    playerRollReadyAtMilliseconds =
+      now + PLAYER_ROLL_COOLDOWN_MILLISECONDS
+    syncPlayerCharacterVisual(now)
+
+    if (!playerAttackQueuedAfterRoll) {
+      return
+    }
+
+    playerAttackQueuedAfterRoll = false
+    triggerPlayerAttack(now)
+  }
+  const stepPlayerRoll = (now: number): boolean => {
+    if (!playerRollState) {
+      return false
+    }
+
+    const progress = getPlayerRollProgress({
+      nowMilliseconds: now,
+      startedAtMilliseconds: playerRollState.startedAtMilliseconds
+    })
+    const nextDistanceTiles = getPlayerRollDistanceTiles(progress)
+    const deltaDistanceTiles =
+      nextDistanceTiles - playerRollState.previousDistanceTiles
+    const isRollComplete = progress >= 1
+
+    playerRollState = {
+      ...playerRollState,
+      previousDistanceTiles: nextDistanceTiles
+    }
+
+    if (deltaDistanceTiles <= 0) {
+      if (isRollComplete) {
+        finishPlayerRoll(now)
+      } else {
+        syncPlayerCharacterVisual(now)
+      }
+      return false
+    }
+
+    const didMove = tryMoveCharacter(
+      PLAYER_CHARACTER_ID,
+      playerRollState.vector.x * deltaDistanceTiles,
+      playerRollState.vector.y * deltaDistanceTiles,
+      {
+        ignoreMonsterBlocking: true,
+        preserveFacing: true
+      }
+    )
+
+    if (!didMove) {
+      finishPlayerRoll(now)
+      return false
+    }
+
+    if (isRollComplete) {
+      finishPlayerRoll(now)
+    }
+
+    return didMove
   }
   const triggerPlayerProtectSkill = (now: number): boolean => {
     if (playerProfile.hp.current === 0) {
@@ -2672,6 +2831,7 @@ export const createPixiTiledMapView = async ({
     renderedCharacters.set(character.id, {
       container,
       sprite,
+      renderScale,
       playerArmorSprite: isPlayer ? playerArmorSprite : undefined,
       playerHelmetSprite: isPlayer ? playerHelmetSprite : undefined,
       playerHealthBar,
@@ -2797,6 +2957,10 @@ export const createPixiTiledMapView = async ({
     let playerHitReactionOffsetY = 0
     let monsterRunMotionOffsetX = 0
     let monsterRunMotionOffsetY = 0
+    const playerRollVisualState =
+      character.id === PLAYER_CHARACTER_ID
+        ? getActivePlayerRollVisualState(now)
+        : undefined
 
     if (character.id === PLAYER_CHARACTER_ID && playerHitReactionState) {
       if (playerHitReactionState.expiresAtMilliseconds <= now) {
@@ -2865,6 +3029,7 @@ export const createPixiTiledMapView = async ({
       renderNode.sprite.height,
       map.tileHeight
     ) + (character.appearanceType === SIGN_POST_APPEARANCE_TYPE ? 1 : 0)
+    syncPlayerRollSpriteVisual(renderNode, playerRollVisualState)
     syncCharacterDisplayLabel(renderNode)
     syncPlayerNameBadge(renderNode, character)
     syncCharacterLevelBadge(renderNode, character)
@@ -2875,6 +3040,52 @@ export const createPixiTiledMapView = async ({
       syncPlayerEquipmentSprites(renderNode)
       syncPlayerWeaponSprite(character)
     }
+  }
+
+  const getActivePlayerRollVisualState = (
+    now: number
+  ): PlayerRollVisualState | undefined => {
+    if (!playerRollState) {
+      return undefined
+    }
+
+    const progress = getPlayerRollProgress({
+      nowMilliseconds: now,
+      startedAtMilliseconds: playerRollState.startedAtMilliseconds
+    })
+
+    if (progress >= 1) {
+      return undefined
+    }
+
+    return getPlayerRollVisualState({
+      vector: playerRollState.vector,
+      progress
+    })
+  }
+
+  const syncPlayerRollSpriteVisual = (
+    renderNode: RenderedCharacterNode,
+    visualState: PlayerRollVisualState | undefined
+  ) => {
+    renderNode.sprite.scale.set(
+      renderNode.renderScale * (visualState?.scaleX ?? 1),
+      renderNode.renderScale * (visualState?.scaleY ?? 1)
+    )
+
+    if (!visualState) {
+      renderNode.sprite.anchor.set(0)
+      renderNode.sprite.position.set(0, 0)
+      renderNode.sprite.rotation = 0
+      return
+    }
+
+    renderNode.sprite.anchor.set(0.5)
+    renderNode.sprite.position.set(
+      renderNode.sprite.width / 2 + visualState.offsetX,
+      renderNode.sprite.height / 2 + visualState.offsetY
+    )
+    renderNode.sprite.rotation = visualState.rotation
   }
 
   const syncPlayerEquipmentSprites = (renderNode: RenderedCharacterNode) => {
@@ -2913,7 +3124,13 @@ export const createPixiTiledMapView = async ({
     }
 
     sprite.texture = texture
-    sprite.position.set(config.position.x, config.position.y)
+    const playerRollVisualState = getActivePlayerRollVisualState(performance.now())
+
+    sprite.position.set(
+      config.position.x + (playerRollVisualState?.offsetX ?? 0),
+      config.position.y + (playerRollVisualState?.offsetY ?? 0)
+    )
+    sprite.rotation = playerRollVisualState?.rotation ?? 0
     sprite.width = config.width
     sprite.height = config.height
     sprite.zIndex = config.zIndex
@@ -4044,6 +4261,16 @@ export const createPixiTiledMapView = async ({
       return false
     }
 
+    if (sourceCharacter && isPlayerRolling(now)) {
+      showCharacterDamageText(
+        PLAYER_CHARACTER_ID,
+        '회피!',
+        EVADE_TEXT_DURATION_MILLISECONDS,
+        EVADE_TEXT_STYLE
+      )
+      return false
+    }
+
     if (
       sourceCharacter &&
       shouldPlayerEvadeDamage(playerProfile)
@@ -4343,7 +4570,7 @@ export const createPixiTiledMapView = async ({
       return
     }
 
-    if (playerProfile.hp.current === 0) {
+    if (playerProfile.hp.current === 0 || playerRollState) {
       playerWeaponSprite.visible = false
       for (const trailSprite of playerWeaponTrailSprites) {
         trailSprite.visible = false
@@ -4768,12 +4995,17 @@ export const createPixiTiledMapView = async ({
   }
 
   const getBlockingCollisionRects = (
-    excludedCharacterId: string
+    excludedCharacterId: string,
+    options: {
+      ignoreMonsters?: boolean
+    } = {}
   ): CollisionRect[] =>
     characterStates
       .filter(
         (character) =>
-          character.blocksMovement && character.id !== excludedCharacterId
+          character.blocksMovement &&
+          character.id !== excludedCharacterId &&
+          !(options.ignoreMonsters === true && isMonsterCharacter(character))
       )
       .map((character) => createCollisionRectFromCharacter(character))
 
@@ -4783,6 +5015,7 @@ export const createPixiTiledMapView = async ({
     deltaY: number,
     options: {
       preserveFacing?: boolean
+      ignoreMonsterBlocking?: boolean
     } = {}
   ): boolean => {
     const currentCharacter = getCharacterStateById(characterId)
@@ -4798,7 +5031,9 @@ export const createPixiTiledMapView = async ({
     const nextFacing = options.preserveFacing
       ? currentCharacter.facing
       : desiredFacing
-    const blockingRects = getBlockingCollisionRects(characterId)
+    const blockingRects = getBlockingCollisionRects(characterId, {
+      ignoreMonsters: options.ignoreMonsterBlocking
+    })
     let nextCharacter =
       nextFacing === currentCharacter.facing
         ? currentCharacter
@@ -4923,10 +5158,14 @@ export const createPixiTiledMapView = async ({
         triggerPlayerSkillFromSlotIndex(skillSlotIndex, now)
       }
       triggeredSkillSlotIndexes.clear()
-      let didPlayerMoveThisFrame = false
+      let didPlayerMoveThisFrame = stepPlayerRoll(now)
 
       for (const character of [...characterStates]) {
         if (character.id === PLAYER_CHARACTER_ID && playerProfile.hp.current === 0) {
+          continue
+        }
+
+        if (character.id === PLAYER_CHARACTER_ID && isPlayerRolling(now)) {
           continue
         }
 
@@ -5368,6 +5607,17 @@ export const createPixiTiledMapView = async ({
       return
     }
 
+    if (isPlayerRollModifierCode(code)) {
+      event.preventDefault()
+      playerRollInputState.isModifierPressed = true
+
+      if (!event.repeat) {
+        triggerPlayerRollFromPressedDirection(performance.now())
+      }
+
+      return
+    }
+
     const quickslotIndex = getQuickslotIndexFromKeyboardEvent(event)
 
     if (quickslotIndex !== undefined) {
@@ -5433,6 +5683,15 @@ export const createPixiTiledMapView = async ({
     if (action) {
       event.preventDefault()
 
+      if (
+        action === 'attack' &&
+        playerRollState &&
+        !event.repeat
+      ) {
+        playerAttackQueuedAfterRoll = true
+        return
+      }
+
       if (!pressedActions.has(action)) {
         triggeredActions.add(action)
       }
@@ -5452,10 +5711,22 @@ export const createPixiTiledMapView = async ({
 
     event.preventDefault()
     pressedDirections.add(direction)
+
+    if (
+      !event.repeat &&
+      (playerRollInputState.isModifierPressed || event.shiftKey)
+    ) {
+      triggerPlayerRollFromPressedDirection(performance.now())
+    }
   }
 
   const handleKeyUp = (event: KeyboardEvent) => {
     const code = event.code
+
+    if (isPlayerRollModifierCode(code)) {
+      playerRollInputState.isModifierPressed = false
+      return
+    }
 
     const action = getPlayerControlActionFromCode(
       currentPlayerControlBindings,
@@ -5944,6 +6215,24 @@ const doCollisionRectsIntersect = (
   left.x + left.width > right.x &&
   left.y < right.y + right.height &&
   left.y + left.height > right.y
+
+const isPlayerRollModifierCode = (code: string): boolean =>
+  code === 'ShiftLeft' || code === 'ShiftRight'
+
+const getFacingFromRollVector = (
+  vector: PlayerRollVector,
+  fallbackFacing: CharacterMoveDirection
+): CharacterMoveDirection => {
+  if (Math.abs(vector.x) >= Math.abs(vector.y) && vector.x !== 0) {
+    return vector.x > 0 ? 'right' : 'left'
+  }
+
+  if (vector.y !== 0) {
+    return vector.y > 0 ? 'down' : 'up'
+  }
+
+  return fallbackFacing
+}
 
 const resolveCharacterTexture = (
   appearanceType: string,
