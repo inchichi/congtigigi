@@ -188,6 +188,18 @@
     <property name="type" value="character_villager_flower_dress"/>
    </properties>
   </object>
+  <object id="11" name="santa" type="character" x="544" y="515.737">
+   <properties>
+    <property name="controller.dialogueLines" type="list">
+     <item value="메리 크리스마스!"/>
+     <item value="오늘은 특별한 날이란다."/>
+    </property>
+    <property name="controller.messageDurationSeconds" type="float" value="2.5"/>
+    <property name="controller.scriptId" value="reply-with-message"/>
+    <property name="displayText" value="산타"/>
+    <property name="type" value="character_villager_brown_tunic"/>
+   </properties>
+  </object>
   <object id="3" name="wizard" type="character" x="831.323" y="542.823">
    <properties>
     <property name="displayText" value="마법사"/>

@@ -31,6 +31,19 @@ import { createInitialPlayerProfile } from './game/playerProfile'
 import { createInitialPlayerQuickslots } from './game/playerQuickslots'
 import { createInitialPlayerSkillSlots } from './game/playerSkillSlots'
 import {
+  createHolidayDialogueEventDraftFromText,
+} from './game/eventDrafting'
+import {
+  OPENAI_HOLIDAY_EVENT_DRAFT_MODEL,
+  generateHolidayDialogueEventDraftWithOpenAi
+} from './game/openaiHolidayEventDraft'
+import {
+  type HolidayDialogueEventSpec,
+  HOLIDAY_DIALOGUE_CONTROLLER_SCRIPT_ID,
+  createHolidayDialogueEventValidationErrors,
+  createTiledNpcEventObject
+} from './game/eventGeneration'
+import {
   normalizeStoredPlayerControlBindings,
   PLAYER_CONTROL_BINDINGS_STORAGE_KEY,
   type PlayerControlBindings
@@ -41,6 +54,7 @@ import {
 } from './game/questLog'
 import { getSceneIntroMessage } from './game/sceneIntro'
 import { createPixiTiledMapView } from './rendering/createPixiTiledMapView'
+import { createLlmPanel } from './ui/createLlmPanel'
 import type { AudioSettings } from './rendering/createPauseMenuOverlay'
 import type {
   SceneTransitionRequest
@@ -57,19 +71,37 @@ type SceneSpawn = {
 
 type SceneRenderer = {
   destroy: () => void
+  applyEventDraft: (
+    draft: HolidayDialogueEventSpec,
+    input?: { targetCharacterId?: string }
+  ) => { didApply: boolean; targetCharacterId?: string }
 }
 
 const AUDIO_SETTINGS_STORAGE_KEY = 'my-sample-rpg:audio-settings'
+const EVENT_DRAFT_MODE_STORAGE_KEY = 'my-sample-rpg:event-draft-mode'
+const OPENAI_API_KEY_STORAGE_KEY = 'my-sample-rpg:openai-api-key'
 const DEFAULT_AUDIO_SETTINGS: AudioSettings = {
   bgmVolume: 1,
   sfxVolume: 1
 }
+type EventDraftMode = 'rule' | 'llm'
+const DEFAULT_EVENT_DRAFT_MODE: EventDraftMode = 'rule'
+const EVENT_DRAFT_TARGET_CHARACTER_ID = 'santa'
+const DEFAULT_OPENAI_MODEL = OPENAI_HOLIDAY_EVENT_DRAFT_MODEL
 
-const rootElement = document.querySelector<HTMLDivElement>('#app')
+const appRootElement = document.querySelector<HTMLDivElement>('#app')
 
-if (!rootElement) {
+if (!appRootElement) {
   throw new Error('Missing #app root element')
 }
+
+const gameRootElement = document.createElement('div')
+const uiRootElement = document.createElement('div')
+
+appRootElement.className = 'app-shell'
+gameRootElement.className = 'game-root'
+uiRootElement.className = 'ui-root'
+appRootElement.replaceChildren(gameRootElement, uiRootElement)
 
 const parsedTownMap = parseTiledMap({
   mapXml: townMapXml,
@@ -134,8 +166,11 @@ let isSceneMusicRetryQueued = false
 let pendingSceneTransition: SceneTransitionRequest | undefined
 let isSceneTransitionScheduled = false
 let audioSettings = readStoredAudioSettings()
-
-rootElement.className = 'game-root'
+let refreshEventDraftPreview: (() => void) | undefined
+const llmPanelController = createLlmPanel({
+  mountElement: uiRootElement,
+  getSceneRenderer: () => activeSceneRenderer
+})
 
 const bootstrapScene = async (
   sceneId: SceneId,
@@ -168,7 +203,7 @@ const bootstrapScene = async (
 
   activeControllerRuntime = controllerRuntime
   activeSceneRenderer = await createPixiTiledMapView({
-    mountElement: rootElement,
+    mountElement: gameRootElement,
     map: sceneMap,
     characters,
     playerProfile,
@@ -224,6 +259,8 @@ const bootstrapScene = async (
     onAudioSettingsChange: updateAudioSettings,
     onRequestSceneChange: scheduleSceneTransition
   })
+
+  llmPanelController.refresh()
 }
 
 const createSceneCharacters = ({
@@ -417,6 +454,300 @@ function saveAudioSettings(nextAudioSettings: AudioSettings): void {
   )
 }
 
+function readStoredEventDraftMode(): EventDraftMode {
+  const storedEventDraftMode = window.localStorage.getItem(
+    EVENT_DRAFT_MODE_STORAGE_KEY
+  )
+
+  if (storedEventDraftMode === 'llm' || storedEventDraftMode === 'rule') {
+    return storedEventDraftMode
+  }
+
+  return DEFAULT_EVENT_DRAFT_MODE
+}
+
+function saveEventDraftMode(nextEventDraftMode: EventDraftMode): void {
+  window.localStorage.setItem(EVENT_DRAFT_MODE_STORAGE_KEY, nextEventDraftMode)
+}
+
+function readStoredOpenAiApiKey(): string {
+  return window.localStorage.getItem(OPENAI_API_KEY_STORAGE_KEY) ?? ''
+}
+
+function saveStoredOpenAiApiKey(nextApiKey: string): void {
+  window.localStorage.setItem(OPENAI_API_KEY_STORAGE_KEY, nextApiKey)
+}
+
+export function createEventDraftPanel(mountElement: HTMLDivElement): () => void {
+  const overlayRoot = document.createElement('section')
+  const panel = document.createElement('div')
+  const header = document.createElement('header')
+  const title = document.createElement('h2')
+  const hint = document.createElement('p')
+  const modeRow = document.createElement('div')
+  const ruleModeButton = document.createElement('button')
+  const llmModeButton = document.createElement('button')
+  const textarea = document.createElement('textarea')
+  const apiKeySection = document.createElement('section')
+  const apiKeyLabel = document.createElement('label')
+  const apiKeyInput = document.createElement('input')
+  const apiKeyHint = document.createElement('p')
+  const modelHint = document.createElement('p')
+  const actionRow = document.createElement('div')
+  const generateButton = document.createElement('button')
+  const status = document.createElement('p')
+  const jsonLabel = document.createElement('p')
+  const jsonOutput = document.createElement('pre')
+  const tiledLabel = document.createElement('p')
+  const tiledOutput = document.createElement('pre')
+
+  let eventDraftMode = readStoredEventDraftMode()
+  let openAiApiKey = readStoredOpenAiApiKey()
+  let isGenerating = false
+
+  overlayRoot.className = 'event-draft-panel'
+  panel.className = 'event-draft-panel__window'
+  header.className = 'event-draft-panel__header'
+  title.className = 'event-draft-panel__title'
+  hint.className = 'event-draft-panel__hint'
+  modeRow.className = 'event-draft-panel__mode-row'
+  ruleModeButton.className = 'event-draft-panel__mode-button'
+  llmModeButton.className = 'event-draft-panel__mode-button'
+  textarea.className = 'event-draft-panel__textarea'
+  apiKeySection.className = 'event-draft-panel__api-key'
+  apiKeyLabel.className = 'event-draft-panel__api-key-label'
+  apiKeyInput.className = 'event-draft-panel__api-key-input'
+  apiKeyHint.className = 'event-draft-panel__hint'
+  modelHint.className = 'event-draft-panel__hint'
+  actionRow.className = 'event-draft-panel__actions'
+  generateButton.className = 'event-draft-panel__button'
+  status.className = 'event-draft-panel__status'
+  jsonLabel.className = 'event-draft-panel__section-title'
+  jsonOutput.className = 'event-draft-panel__output'
+  tiledLabel.className = 'event-draft-panel__section-title'
+  tiledOutput.className = 'event-draft-panel__output'
+
+  title.textContent = '이벤트 초안'
+  hint.textContent =
+    '자연어를 입력하면 규칙 모드에서는 즉시 초안을 만들고, LLM 모드에서는 OpenAI Responses API를 호출한다.'
+  textarea.value =
+    '크리스마스 이벤트를 만들어줘. 산타 NPC가 등장하고 대화하면 선물을 주도록 해줘.'
+  textarea.rows = 5
+  textarea.spellcheck = false
+  ruleModeButton.type = 'button'
+  llmModeButton.type = 'button'
+  generateButton.type = 'button'
+  apiKeyLabel.htmlFor = 'event-draft-openai-api-key'
+  apiKeyInput.id = 'event-draft-openai-api-key'
+  apiKeyInput.type = 'password'
+  apiKeyInput.value = openAiApiKey
+  apiKeyInput.placeholder = 'sk-...'
+  apiKeyInput.autocomplete = 'off'
+  apiKeyInput.spellcheck = false
+  apiKeyHint.textContent = 'API 키는 브라우저 localStorage에 저장한다.'
+  modelHint.textContent = `LLM 모드 모델: ${DEFAULT_OPENAI_MODEL} / structured outputs 사용`
+  jsonLabel.textContent = 'JSON 초안'
+  tiledLabel.textContent = 'Tiled 미리보기'
+
+  const setStatus = (message: string) => {
+    status.textContent = message
+  }
+
+  const syncModeUi = () => {
+    const isRuleMode = eventDraftMode === 'rule'
+
+    ruleModeButton.textContent = isRuleMode ? '규칙 모드' : '규칙 모드'
+    llmModeButton.textContent = isRuleMode ? 'LLM 모드' : 'LLM 모드'
+    ruleModeButton.dataset.active = isRuleMode ? 'true' : 'false'
+    llmModeButton.dataset.active = isRuleMode ? 'false' : 'true'
+    generateButton.textContent = isRuleMode ? 'JSON 생성' : 'LLM 생성'
+    apiKeySection.hidden = isRuleMode
+    modelHint.hidden = isRuleMode
+    apiKeyHint.hidden = isRuleMode
+    apiKeyInput.disabled = isGenerating || isRuleMode
+    generateButton.disabled = isGenerating
+    generateButton.textContent = isRuleMode ? 'JSON 생성' : 'LLM 생성'
+    ruleModeButton.disabled = isGenerating
+    llmModeButton.disabled = isGenerating
+  }
+
+  const applyDraftToPreview = (
+    draft: HolidayDialogueEventSpec,
+    sourceLabel: string
+  ) => {
+    const validationErrors = createHolidayDialogueEventValidationErrors(draft)
+    const tiledNpcObject = createTiledNpcEventObject(draft)
+
+    jsonOutput.textContent = JSON.stringify(draft, null, 2)
+    tiledOutput.textContent = JSON.stringify(tiledNpcObject, null, 2)
+
+    if (validationErrors.length > 0) {
+      setStatus(`검증 실패: ${validationErrors.join(', ')}`)
+      return
+    }
+
+    const applyResult = activeSceneRenderer
+      ? activeSceneRenderer.applyEventDraft(draft, {
+          targetCharacterId: EVENT_DRAFT_TARGET_CHARACTER_ID
+        })
+      : undefined
+    const appliedMessage = activeSceneRenderer
+      ? applyResult?.didApply
+        ? `적용됨: ${applyResult.targetCharacterId ?? EVENT_DRAFT_TARGET_CHARACTER_ID}`
+        : '적용 실패: 씬에서 대상 NPC를 찾지 못했습니다.'
+      : '씬 준비 전'
+
+    setStatus(
+      `${sourceLabel} 생성 완료: ${draft.event_name} / controller.scriptId = ${HOLIDAY_DIALOGUE_CONTROLLER_SCRIPT_ID} / ${appliedMessage}`
+    )
+  }
+
+  const updateRulePreview = () => {
+    const draft = createHolidayDialogueEventDraftFromText(textarea.value)
+
+    if (!draft) {
+      setStatus(
+        '지원하지 않는 요청입니다. 크리스마스 또는 할로윈 이벤트를 입력해 주세요.'
+      )
+      jsonOutput.textContent = ''
+      tiledOutput.textContent = ''
+      return
+    }
+
+    applyDraftToPreview(draft, '규칙 모드')
+  }
+
+  const runLlmPreview = async () => {
+    const trimmedApiKey = openAiApiKey.trim()
+
+    if (trimmedApiKey.length === 0) {
+      setStatus('LLM 모드에서는 OpenAI API 키가 필요합니다.')
+      return
+    }
+
+    isGenerating = true
+    syncModeUi()
+    setStatus('OpenAI Responses API로 JSON 초안을 생성 중이다.')
+
+    try {
+      const draft = await generateHolidayDialogueEventDraftWithOpenAi({
+        apiKey: trimmedApiKey,
+        userPrompt: textarea.value
+      })
+
+      applyDraftToPreview(draft, 'LLM 모드')
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      setStatus(`LLM 생성 실패: ${message}`)
+    } finally {
+      isGenerating = false
+      syncModeUi()
+    }
+  }
+
+  const updatePreview = () => {
+    if (eventDraftMode === 'rule') {
+      updateRulePreview()
+      return
+    }
+
+    setStatus(
+      'LLM 모드입니다. API 키를 입력한 뒤 JSON 생성 버튼을 눌러 OpenAI를 호출한다.'
+    )
+  }
+
+  const switchMode = (nextMode: EventDraftMode) => {
+    eventDraftMode = nextMode
+    saveEventDraftMode(nextMode)
+    syncModeUi()
+
+    if (nextMode === 'rule') {
+      updateRulePreview()
+      return
+    }
+
+    setStatus(
+      'LLM 모드입니다. API 키를 입력한 뒤 JSON 생성 버튼을 눌러 OpenAI를 호출한다.'
+    )
+  }
+
+  refreshEventDraftPreview = updatePreview
+
+  ruleModeButton.addEventListener('click', () => {
+    switchMode('rule')
+  })
+  llmModeButton.addEventListener('click', () => {
+    switchMode('llm')
+  })
+  generateButton.addEventListener('click', () => {
+    if (eventDraftMode === 'rule') {
+      updateRulePreview()
+      return
+    }
+
+    void runLlmPreview()
+  })
+  textarea.addEventListener('input', () => {
+    if (eventDraftMode === 'rule') {
+      updateRulePreview()
+      return
+    }
+
+    setStatus(
+      'LLM 모드입니다. 변경한 문장을 반영하려면 JSON 생성 버튼을 다시 눌러야 한다.'
+    )
+  })
+  textarea.addEventListener('keydown', (event) => {
+    event.stopPropagation()
+
+    if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+      if (eventDraftMode === 'rule') {
+        updateRulePreview()
+      } else {
+        void runLlmPreview()
+      }
+    }
+  })
+  textarea.addEventListener('keyup', (event) => {
+    event.stopPropagation()
+  })
+  apiKeyInput.addEventListener('input', () => {
+    openAiApiKey = apiKeyInput.value
+    saveStoredOpenAiApiKey(openAiApiKey)
+  })
+
+  header.append(title, hint)
+  modeRow.append(ruleModeButton, llmModeButton)
+  apiKeyLabel.append('OpenAI API 키')
+  apiKeySection.append(apiKeyLabel, apiKeyInput, apiKeyHint, modelHint)
+  actionRow.append(generateButton)
+  panel.append(
+    header,
+    modeRow,
+    textarea,
+    apiKeySection,
+    actionRow,
+    status,
+    jsonLabel,
+    jsonOutput,
+    tiledLabel,
+    tiledOutput
+  )
+  overlayRoot.append(panel)
+  mountElement.append(overlayRoot)
+
+  syncModeUi()
+  updatePreview()
+
+  return () => {
+    if (refreshEventDraftPreview === updatePreview) {
+      refreshEventDraftPreview = undefined
+    }
+
+    overlayRoot.remove()
+  }
+}
+
 function readStoredPlayerControlBindings(): PlayerControlBindings {
   const storedControlBindings = window.localStorage.getItem(
     PLAYER_CONTROL_BINDINGS_STORAGE_KEY
@@ -445,13 +776,37 @@ function savePlayerControlBindings(
 const renderFatalError = (error: unknown) => {
   const message = error instanceof Error ? error.message : String(error)
 
-  rootElement.innerHTML = `
+  appRootElement.innerHTML = `
     <div class="error-panel">
       <h2>Renderer Failed</h2>
       <p>${message}</p>
     </div>
   `
 }
+
+const isEditableTarget = (target: EventTarget | null): boolean => {
+  if (!(target instanceof HTMLElement)) {
+    return false
+  }
+
+  return (
+    target.matches('input, textarea, select, button') ||
+    target.isContentEditable === true
+  )
+}
+
+window.addEventListener('keydown', (event) => {
+  if (event.code !== 'KeyL') {
+    return
+  }
+
+  if (isEditableTarget(event.target)) {
+    return
+  }
+
+  event.preventDefault()
+  llmPanelController.toggle()
+})
 
 if (import.meta.hot) {
   import.meta.hot.accept('./assets/lua/reply-with-message.lua?raw', (nextModule) => {

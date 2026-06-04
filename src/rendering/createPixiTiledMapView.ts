@@ -16,6 +16,7 @@ import {
 
 import {
   PLAYER_CHARACTER_ID,
+  createLuaCharacterController,
   moveCharacterState
 } from '../game/characterState'
 import type {
@@ -28,6 +29,7 @@ import {
   createGameEventQueue,
   type GameEvent
 } from '../game/events/createGameEventQueue'
+import type { HolidayDialogueEventSpec } from '../game/eventGeneration'
 import { processInteractionEvents } from '../game/interaction/processInteractionEvents'
 import { usePlayerQuickslotConsumable } from '../game/playerConsumables'
 import {
@@ -202,6 +204,10 @@ type CreatePixiTiledMapViewInput = {
   onRequestSceneChange: (request: SceneTransitionRequest) => void
 }
 
+type ApplyEventDraftInput = {
+  targetCharacterId?: string
+}
+
 export type SceneTransitionRequest = {
   sceneId: string
   spawn: {
@@ -209,6 +215,11 @@ export type SceneTransitionRequest = {
     y: number
   }
   facing?: CharacterMoveDirection
+}
+
+export type ApplyEventDraftResult = {
+  didApply: boolean
+  targetCharacterId?: string
 }
 
 type TilesetRenderResources = {
@@ -922,7 +933,13 @@ export const createPixiTiledMapView = async ({
   audioSettings,
   onAudioSettingsChange,
   onRequestSceneChange
-}: CreatePixiTiledMapViewInput): Promise<{ destroy: () => void }> => {
+}: CreatePixiTiledMapViewInput): Promise<{
+  destroy: () => void
+  applyEventDraft: (
+    draft: HolidayDialogueEventSpec,
+    input?: ApplyEventDraftInput
+  ) => ApplyEventDraftResult
+}> => {
   const app = new Application()
   let cameraZoom = CAMERA_DEFAULT_ZOOM
   let scaledMapPixelWidth = Math.round(map.pixelWidth * cameraZoom)
@@ -4851,6 +4868,88 @@ export const createPixiTiledMapView = async ({
     activeCharacterMessages.delete(characterId)
   }
 
+  const applyEventDraft = (
+    draft: HolidayDialogueEventSpec,
+    input?: ApplyEventDraftInput
+  ): ApplyEventDraftResult => {
+    const targetCharacter =
+      resolveEventDraftTargetCharacter(input?.targetCharacterId, draft.npc.id)
+
+    if (!targetCharacter) {
+      return { didApply: false }
+    }
+
+    const nextCharacter: CharacterState = {
+      ...targetCharacter,
+      appearanceType: draft.npc.appearance_type,
+      displayText: draft.npc.display_name,
+      controller: createLuaCharacterController({
+        scriptId: 'reply-with-message',
+        radiusInTiles:
+          targetCharacter.controller.kind === 'lua'
+            ? targetCharacter.controller.radiusInTiles
+            : 0,
+        moveSpeedTilesPerSecond:
+          targetCharacter.controller.kind === 'lua'
+            ? targetCharacter.controller.moveSpeedTilesPerSecond
+            : 8,
+        config: {
+          dialogueLines: [...draft.dialogue.opening_lines],
+          messageDurationSeconds: draft.duration
+        }
+      })
+    }
+
+    characterStates = characterStates.map((character) =>
+      character.id === nextCharacter.id ? nextCharacter : character
+    )
+
+    syncCharacterSprite(nextCharacter)
+    controllerRuntime.syncCharacters(characterStates)
+    showCharacterMessage(
+      nextCharacter.id,
+      draft.dialogue.opening_lines[0],
+      Math.round(draft.duration * 1000)
+    )
+    syncQuestNpcBadges()
+
+    return {
+      didApply: true,
+      targetCharacterId: nextCharacter.id
+    }
+  }
+
+  const resolveEventDraftTargetCharacter = (
+    preferredCharacterId: string | undefined,
+    fallbackCharacterId: string
+  ): CharacterState | undefined => {
+    if (preferredCharacterId) {
+      const preferredTarget = characterStates.find(
+        (character) => character.id === preferredCharacterId
+      )
+
+      if (preferredTarget) {
+        return preferredTarget
+      }
+    }
+
+    const fallbackTarget = characterStates.find(
+      (character) => character.id === fallbackCharacterId
+    )
+
+    if (fallbackTarget) {
+      return fallbackTarget
+    }
+
+    const santaTarget = characterStates.find((character) => character.id === 'santa')
+
+    if (santaTarget) {
+      return santaTarget
+    }
+
+    return characterStates.find((character) => character.controller.kind === 'lua')
+  }
+
   const pruneExpiredCharacterMessages = (now: number) => {
     for (const [characterId, activeMessage] of activeCharacterMessages) {
       if (activeMessage.expiresAt > now) {
@@ -5460,6 +5559,10 @@ export const createPixiTiledMapView = async ({
   }
 
   const handleKeyDown = (event: KeyboardEvent) => {
+    if (isEditableUiTarget(event.target)) {
+      return
+    }
+
     const code = event.code
     const skillSlotIndex = getPlayerSkillSlotIndexFromCode(code)
     const isInventoryToggleKey = code === currentPlayerControlBindings.inventory
@@ -5721,6 +5824,10 @@ export const createPixiTiledMapView = async ({
   }
 
   const handleKeyUp = (event: KeyboardEvent) => {
+    if (isEditableUiTarget(event.target)) {
+      return
+    }
+
     const code = event.code
 
     if (isPlayerRollModifierCode(code)) {
@@ -5753,6 +5860,17 @@ export const createPixiTiledMapView = async ({
   const handleWindowBlur = () => {
     clearPressedInputState()
     stopPlayerFootsteps()
+  }
+
+  const isEditableUiTarget = (target: EventTarget | null): boolean => {
+    if (!(target instanceof HTMLElement)) {
+      return false
+    }
+
+    return (
+      target.matches('input, textarea, select, button') ||
+      target.isContentEditable
+    )
   }
 
   const handleViewportWheel = (event: WheelEvent) => {
@@ -5903,7 +6021,8 @@ export const createPixiTiledMapView = async ({
   }
 
   return {
-    destroy
+    destroy,
+    applyEventDraft
   }
 }
 
