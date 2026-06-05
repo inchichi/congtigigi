@@ -9,7 +9,7 @@ describe('gusCalculator', () => {
 
     expect(report.gus_score).toBeGreaterThanOrEqual(75)
     expect(report.status).toBe('passed')
-    expect(report.details.map_coverage).toBeGreaterThan(0)
-    expect(report.details.npc_coverage).toBeGreaterThan(0)
+    expect(report.details.qa_correctness).toBeGreaterThan(0)
+    expect(report.details.dependency_f1).toBeGreaterThan(0)
   })
 })

@@ -51,13 +51,25 @@ type EditableFieldDescriptor = {
 }
 
 type FieldRowController = {
+  label: string
   root: HTMLDivElement
   input: HTMLInputElement | HTMLTextAreaElement
   sync: (json: GeneratedEventJson) => void
+  setExpanded: (expanded: boolean) => void
+  isExpanded: () => boolean
 }
 
 const DEFAULT_EVENT_PROMPT =
   '크리스마스 이벤트를 만들어줘. 산타 NPC가 등장하고 대화하면 선물을 주도록 해줘.'
+const OPENAI_API_KEY_STORAGE_KEY = 'my-sample-rpg:openai-api-key'
+const PANEL_POSITION_STORAGE_KEY = 'my-sample-rpg:llm-panel-position'
+
+type PanelBounds = {
+  left: number
+  top: number
+  width: number
+  height: number
+}
 
 export const createLlmPanel = ({
   mountElement,
@@ -65,11 +77,24 @@ export const createLlmPanel = ({
 }: CreateLlmPanelInput): LlmPanelController => {
   const overlayRoot = document.createElement('section')
   const panel = document.createElement('div')
+  const titleBar = document.createElement('div')
+  const titleText = document.createElement('h2')
+  const titleActions = document.createElement('div')
+  const minimizeButton = document.createElement('button')
+  const maximizeButton = document.createElement('button')
+  const closeButton = document.createElement('button')
+  const contentArea = document.createElement('div')
   const header = document.createElement('header')
-  const title = document.createElement('h2')
   const hint = document.createElement('p')
-  const topBar = document.createElement('div')
-  const analyzeButton = document.createElement('button')
+  const pageTabs = document.createElement('div')
+  const analysisTab = document.createElement('button')
+  const draftTab = document.createElement('button')
+  const codeTab = document.createElement('button')
+  const apiKeyGate = document.createElement('section')
+  const apiKeyLabel = document.createElement('label')
+  const apiKeyInput = document.createElement('input')
+  const apiKeyHint = document.createElement('p')
+  const apiKeyConfirmButton = document.createElement('button')
   const toggleButton = document.createElement('button')
   const analysisSummary = document.createElement('p')
   const progressWrap = document.createElement('div')
@@ -87,28 +112,49 @@ export const createLlmPanel = ({
   const analysisNotesList = document.createElement('ul')
   const profileTitle = document.createElement('p')
   const profilePreview = document.createElement('pre')
-  const generatorSection = document.createElement('section')
-  const generatorTitle = document.createElement('p')
+  const draftPage = document.createElement('section')
+  const codePage = document.createElement('section')
+  const draftTitle = document.createElement('p')
   const promptLabel = document.createElement('label')
   const promptInput = document.createElement('textarea')
-  const actionRow = document.createElement('div')
+  const draftActionRow = document.createElement('div')
   const generateButton = document.createElement('button')
+  const draftPreviewTitle = document.createElement('p')
+  const draftPreview = document.createElement('pre')
+  const editTitle = document.createElement('p')
+  const editActionRow = document.createElement('div')
   const confirmButton = document.createElement('button')
+  const codeTitle = document.createElement('p')
+  const codeActionRow = document.createElement('div')
   const codeButton = document.createElement('button')
+  const applyTitle = document.createElement('p')
+  const applyActionRow = document.createElement('div')
   const applyButton = document.createElement('button')
   const jsonStatus = document.createElement('p')
   const fieldEditorTitle = document.createElement('p')
   const fieldEditorList = document.createElement('div')
   const fieldHint = document.createElement('p')
-  const jsonPreviewTitle = document.createElement('p')
-  const jsonPreview = document.createElement('pre')
   const codePreviewTitle = document.createElement('p')
   const codePreview = document.createElement('pre')
   const generatedEventTitle = document.createElement('p')
   const generatedEventHistory = document.createElement('ul')
+  const analysisPage = document.createElement('section')
+  const draftPageBody = document.createElement('section')
+  const codePageBody = document.createElement('section')
+  const leftResizeHandle = document.createElement('div')
+  const rightResizeHandle = document.createElement('div')
+  const topResizeHandle = document.createElement('div')
+  const bottomResizeHandle = document.createElement('div')
 
   let isOpen = false
   let isAnalyzing = false
+  let isMinimized = false
+  let isMaximized = false
+  let apiKeyConfirmed = false
+  let openAiApiKey = loadOpenAiApiKey()
+  let panelBounds = loadPanelBounds()
+  let restoreBounds: PanelBounds | undefined
+  let currentPage: 'analysis' | 'draft' | 'code' = 'analysis'
   let analysisResult: GameStructureAnalysisResult | undefined
   let currentDraft: GeneratedEventJson | undefined
   let confirmedDraft: GeneratedEventJson | undefined
@@ -118,11 +164,24 @@ export const createLlmPanel = ({
 
   overlayRoot.className = 'event-draft-panel llm-panel'
   panel.className = 'event-draft-panel__window llm-panel__window'
+  titleBar.className = 'llm-panel__titlebar'
+  titleText.className = 'llm-panel__window-title'
+  titleActions.className = 'llm-panel__window-actions'
+  minimizeButton.className = 'llm-panel__window-button'
+  maximizeButton.className = 'llm-panel__window-button'
+  closeButton.className = 'llm-panel__window-button llm-panel__window-button--close'
+  contentArea.className = 'llm-panel__content'
   header.className = 'event-draft-panel__header llm-panel__header'
-  title.className = 'event-draft-panel__title'
   hint.className = 'event-draft-panel__hint'
-  topBar.className = 'llm-panel__top-bar'
-  analyzeButton.className = 'event-draft-panel__button'
+  pageTabs.className = 'llm-panel__tabs'
+  analysisTab.className = 'llm-panel__tab'
+  draftTab.className = 'llm-panel__tab'
+  codeTab.className = 'llm-panel__tab'
+  apiKeyGate.className = 'event-draft-panel__api-key'
+  apiKeyLabel.className = 'event-draft-panel__api-key-label'
+  apiKeyInput.className = 'event-draft-panel__api-key-input'
+  apiKeyHint.className = 'event-draft-panel__hint'
+  apiKeyConfirmButton.className = 'event-draft-panel__button'
   toggleButton.className = 'event-draft-panel__mode-button'
   analysisSummary.className = 'event-draft-panel__status'
   progressWrap.className = 'llm-panel__progress'
@@ -140,33 +199,68 @@ export const createLlmPanel = ({
   analysisNotesList.className = 'llm-panel__detail-list'
   profileTitle.className = 'event-draft-panel__section-title'
   profilePreview.className = 'event-draft-panel__output'
-  generatorSection.className = 'llm-panel__generator'
-  generatorTitle.className = 'event-draft-panel__section-title'
+  draftPage.className = 'llm-panel__page'
+  codePage.className = 'llm-panel__page'
+  draftPageBody.className = 'llm-panel__page-body'
+  codePageBody.className = 'llm-panel__page-body'
+  leftResizeHandle.className = 'llm-panel__resize-handle llm-panel__resize-handle--left'
+  rightResizeHandle.className = 'llm-panel__resize-handle llm-panel__resize-handle--right'
+  topResizeHandle.className = 'llm-panel__resize-handle llm-panel__resize-handle--top'
+  bottomResizeHandle.className = 'llm-panel__resize-handle llm-panel__resize-handle--bottom'
+  draftTitle.className = 'event-draft-panel__section-title'
   promptLabel.className = 'event-draft-panel__section-title'
   promptInput.className = 'event-draft-panel__textarea'
-  actionRow.className = 'event-draft-panel__actions llm-panel__actions'
+  draftActionRow.className = 'event-draft-panel__actions llm-panel__actions'
   generateButton.className = 'event-draft-panel__button'
+  draftPreviewTitle.className = 'event-draft-panel__section-title'
+  draftPreview.className = 'event-draft-panel__output'
+  editTitle.className = 'event-draft-panel__section-title'
+  editActionRow.className = 'event-draft-panel__actions llm-panel__actions'
   confirmButton.className = 'event-draft-panel__button'
+  codeTitle.className = 'event-draft-panel__section-title'
+  codeActionRow.className = 'event-draft-panel__actions llm-panel__actions'
   codeButton.className = 'event-draft-panel__button'
+  applyTitle.className = 'event-draft-panel__section-title'
+  applyActionRow.className = 'event-draft-panel__actions llm-panel__actions'
   applyButton.className = 'event-draft-panel__button'
   jsonStatus.className = 'event-draft-panel__status'
   fieldEditorTitle.className = 'event-draft-panel__section-title'
   fieldEditorList.className = 'llm-panel__field-list'
   fieldHint.className = 'event-draft-panel__hint'
-  jsonPreviewTitle.className = 'event-draft-panel__section-title'
-  jsonPreview.className = 'event-draft-panel__output'
   codePreviewTitle.className = 'event-draft-panel__section-title'
   codePreview.className = 'event-draft-panel__output'
   generatedEventTitle.className = 'event-draft-panel__section-title'
   generatedEventHistory.className = 'llm-panel__detail-list'
 
-  title.textContent = 'LLM 분석 패널'
+  titleText.textContent = 'LLM Game Analyzer'
+  minimizeButton.type = 'button'
+  minimizeButton.textContent = '_'
+  maximizeButton.type = 'button'
+  maximizeButton.textContent = '□'
+  closeButton.type = 'button'
+  closeButton.textContent = 'X'
   hint.textContent =
     'L 키로 열고 닫는다. 먼저 게임 구조를 분석해서 GUS가 기준을 넘으면 이벤트 생성 영역이 활성화된다.'
-  analyzeButton.type = 'button'
-  analyzeButton.textContent = '분석 시작'
   toggleButton.type = 'button'
   toggleButton.textContent = '패널 닫기'
+  toggleButton.hidden = true
+  analysisTab.type = 'button'
+  analysisTab.textContent = '현 게임 분석'
+  draftTab.type = 'button'
+  draftTab.textContent = 'JSON 생성'
+  codeTab.type = 'button'
+  codeTab.textContent = '코드 생성'
+  apiKeyLabel.htmlFor = 'llm-panel-openai-api-key'
+  apiKeyLabel.textContent = 'OpenAI API 키'
+  apiKeyInput.id = 'llm-panel-openai-api-key'
+  apiKeyInput.type = 'password'
+  apiKeyInput.placeholder = 'sk-...'
+  apiKeyInput.autocomplete = 'off'
+  apiKeyInput.spellcheck = false
+  apiKeyInput.value = openAiApiKey
+  apiKeyHint.textContent = 'API 키를 입력하고 확인을 누르면 구조 분석을 시작한다.'
+  apiKeyConfirmButton.type = 'button'
+  apiKeyConfirmButton.textContent = '확인 후 분석 시작'
   promptLabel.textContent = '자연어 입력'
   promptInput.value = DEFAULT_EVENT_PROMPT
   promptInput.rows = 5
@@ -184,36 +278,22 @@ export const createLlmPanel = ({
   lockingNotice.textContent = '분석이 끝나지 않았거나 GUS가 기준 미만이면 이벤트 생성 영역은 잠긴다.'
   analysisNotesTitle.textContent = '분석 메모'
   profileTitle.textContent = 'Game Structure Profile'
-  generatorTitle.textContent = '이벤트 생성'
+  draftTitle.textContent = '이벤트 생성'
+  draftPreviewTitle.textContent = 'JSON 초안'
+  editTitle.textContent = 'JSON 내용 수정'
   fieldEditorTitle.textContent = 'JSON 내용 수정'
   fieldHint.textContent =
-    '보이는 값을 바로 수정한다. dialogue는 줄 단위로 수정한다. 형식: speaker: text'
-  jsonPreviewTitle.textContent = 'JSON 초안'
+    '수정할 필드를 토글로 열고 닫는다. 여러 필드를 동시에 펼쳐서 수정할 수 있다.'
+  codeTitle.textContent = '코드 미리보기'
   codePreviewTitle.textContent = '코드 미리보기'
   generatedEventTitle.textContent = '생성 기록'
 
   progressWrap.append(progressBar, progressBarFill)
   gusCard.append(gusTitle, gusScore, gusMeta, gusThreshold, gusDetailList)
-  actionRow.append(generateButton, confirmButton, codeButton, applyButton)
-  generatorSection.append(
-    generatorTitle,
-    promptLabel,
-    promptInput,
-    actionRow,
-    jsonStatus,
-    fieldEditorTitle,
-    fieldHint,
-    fieldEditorList,
-    jsonPreviewTitle,
-    jsonPreview,
-    codePreviewTitle,
-    codePreview,
-    generatedEventTitle,
-    generatedEventHistory
-  )
-  panel.append(
-    header,
-    topBar,
+  draftActionRow.append(generateButton, confirmButton)
+  codeActionRow.append(codeButton, applyButton)
+  apiKeyGate.append(apiKeyLabel, apiKeyInput, apiKeyHint, apiKeyConfirmButton)
+  analysisPage.append(
     analysisSummary,
     progressWrap,
     progressLabel,
@@ -222,19 +302,76 @@ export const createLlmPanel = ({
     analysisNotesTitle,
     analysisNotesList,
     profileTitle,
-    profilePreview,
-    generatorSection
+    profilePreview
   )
+  draftPageBody.append(
+    draftTitle,
+    promptLabel,
+    promptInput,
+    jsonStatus,
+    draftActionRow,
+    draftPreviewTitle,
+    draftPreview,
+    editTitle,
+    fieldEditorTitle,
+    fieldHint,
+    fieldEditorList
+  )
+  codePageBody.append(
+    codeTitle,
+    codePreviewTitle,
+    codePreview,
+    codeActionRow,
+    generatedEventTitle,
+    generatedEventHistory
+  )
+  pageTabs.append(analysisTab, draftTab, codeTab)
+  draftPage.append(draftPageBody)
+  codePage.append(codePageBody)
+  titleActions.append(minimizeButton, maximizeButton, closeButton)
+  titleBar.append(titleText, titleActions)
+  contentArea.append(header, apiKeyGate, pageTabs, analysisPage, draftPage, codePage)
+  panel.append(titleBar, contentArea, leftResizeHandle, rightResizeHandle, topResizeHandle, bottomResizeHandle)
   overlayRoot.append(panel)
   mountElement.append(overlayRoot)
 
   const refresh = () => {
     overlayRoot.hidden = !isOpen
-    analyzeButton.disabled = isAnalyzing
     toggleButton.textContent = isOpen ? '패널 닫기' : '패널 열기'
+    apiKeyInput.value = openAiApiKey
+    if (!isMaximized) {
+      panelBounds = normalizePanelBounds(panelBounds)
+    }
+    applyPanelBounds(panel, panelBounds)
+    contentArea.hidden = isMinimized || !isOpen
+    leftResizeHandle.hidden = isMinimized || !isOpen || isMaximized
+    rightResizeHandle.hidden = isMinimized || !isOpen || isMaximized
+    topResizeHandle.hidden = isMinimized || !isOpen || isMaximized
+    bottomResizeHandle.hidden = isMinimized || !isOpen || isMaximized
+    minimizeButton.textContent = isMinimized ? '▢' : '_'
+    maximizeButton.textContent = isMaximized ? '❐' : '□'
+    maximizeButton.title = isMaximized ? '복원' : '최대화'
+    minimizeButton.title = isMinimized ? '복원' : '최소화'
+    closeButton.title = '닫기'
+    syncPageUi()
     renderAnalysisUi()
     renderGenerationGate()
     renderDraftUi()
+    renderCodeUi()
+  }
+
+  const syncPageUi = () => {
+    const shouldShowGate = isOpen && !apiKeyConfirmed
+
+    apiKeyGate.hidden = !shouldShowGate
+    pageTabs.hidden = shouldShowGate
+    analysisPage.hidden = shouldShowGate || currentPage !== 'analysis'
+    draftPage.hidden = shouldShowGate || currentPage !== 'draft'
+    codePage.hidden = shouldShowGate || currentPage !== 'code'
+
+    analysisTab.dataset.active = String(!shouldShowGate && currentPage === 'analysis')
+    draftTab.dataset.active = String(!shouldShowGate && currentPage === 'draft')
+    codeTab.dataset.active = String(!shouldShowGate && currentPage === 'code')
   }
 
   const renderAnalysisUi = () => {
@@ -285,7 +422,6 @@ export const createLlmPanel = ({
   const renderGenerationGate = () => {
     const analysisReady = analysisResult?.gus.status === 'passed'
 
-    generatorSection.hidden = false
     lockingNotice.hidden = false
     generateButton.disabled = !analysisReady || isAnalyzing
     confirmButton.disabled = !analysisReady || !currentDraft || hasDraftValidationErrors()
@@ -306,23 +442,26 @@ export const createLlmPanel = ({
 
   const renderDraftUi = () => {
     if (!currentDraft) {
-      jsonPreview.textContent = ''
-      codePreview.textContent = ''
+      draftPreview.textContent = ''
       jsonStatus.textContent = analysisResult
         ? '자연어를 입력한 뒤 JSON 생성 버튼을 누르라.'
         : '분석이 먼저 필요하다.'
       fieldEditorList.replaceChildren()
-      generatedEventHistory.replaceChildren()
+      fieldEditorTitle.textContent = 'JSON 내용 수정'
       return
     }
 
-    jsonPreview.textContent = JSON.stringify(currentDraft, null, 2)
+    draftPreview.textContent = JSON.stringify(currentDraft, null, 2)
     jsonStatus.textContent = getValidationSummary(currentDraft)
 
     if (fieldRows.length === 0) {
       rebuildFieldEditors(currentDraft)
     }
 
+    renderFieldEditors()
+  }
+
+  const renderCodeUi = () => {
     codePreview.textContent = generatedCode || '코드 생성 버튼을 누르면 미리보기가 표시된다.'
   }
 
@@ -345,7 +484,6 @@ export const createLlmPanel = ({
   }
 
   const rebuildFieldEditors = (json: GeneratedEventJson) => {
-    fieldEditorList.replaceChildren()
     fieldRows = createFieldRows({
       json,
       onChange: (nextJson) => {
@@ -355,10 +493,22 @@ export const createLlmPanel = ({
         refresh()
       }
     })
+    renderFieldEditors()
+  }
 
-    for (const row of fieldRows) {
-      fieldEditorList.append(row.root)
-      row.sync(json)
+  const renderFieldEditors = () => {
+    fieldEditorList.replaceChildren()
+
+    if (fieldRows.length === 0) {
+      return
+    }
+
+    fieldEditorList.append(...fieldRows.map((row) => row.root))
+
+    const currentJson = currentDraft
+
+    if (currentJson) {
+      fieldRows.forEach((row) => row.sync(currentJson))
     }
   }
 
@@ -523,17 +673,19 @@ export const createLlmPanel = ({
       }
     ]
 
-    const rows: FieldRowController[] = descriptors.map((descriptor) =>
+    const rows: FieldRowController[] = descriptors.map((descriptor, index) =>
       createFieldRow({
         descriptor,
         json,
-        onChange
+        onChange,
+        defaultExpanded: index === 0
       })
     )
 
     const dialogueRow = createDialogueRow({
       json,
-      onChange
+      onChange,
+      defaultExpanded: false
     })
 
     rows.push(dialogueRow)
@@ -544,23 +696,33 @@ export const createLlmPanel = ({
   const createFieldRow = ({
     descriptor,
     json,
-    onChange
+    onChange,
+    defaultExpanded
   }: {
     descriptor: EditableFieldDescriptor
     json: GeneratedEventJson
     onChange: (nextJson: GeneratedEventJson) => void
+    defaultExpanded: boolean
   }): FieldRowController => {
     const root = document.createElement('div')
-    const header = document.createElement('label')
+    const header = document.createElement('button')
     const labelText = document.createElement('span')
+    const previewText = document.createElement('span')
+    const body = document.createElement('div')
     const input =
       descriptor.kind === 'textarea'
         ? document.createElement('textarea')
         : document.createElement('input')
+    let expanded = defaultExpanded
 
     root.className = 'llm-panel__field-row'
+    root.dataset.expanded = String(expanded)
     header.className = 'llm-panel__field-toggle'
+    header.type = 'button'
     labelText.textContent = descriptor.label
+    previewText.className = 'llm-panel__field-toggle-preview'
+    previewText.textContent = formatFieldPreview(descriptor.getValue(json))
+    body.className = 'llm-panel__field-body'
 
     if (descriptor.kind !== 'textarea') {
       const inputElement = input as HTMLInputElement
@@ -578,6 +740,7 @@ export const createLlmPanel = ({
       })
       inputElement.addEventListener('keydown', stopPropagationWhenEditing)
       inputElement.addEventListener('keyup', stopPropagationWhenEditing)
+      body.append(inputElement)
     } else {
       const textarea = input as HTMLTextAreaElement
       textarea.className = 'llm-panel__field-textarea'
@@ -589,41 +752,71 @@ export const createLlmPanel = ({
       })
       textarea.addEventListener('keydown', stopPropagationWhenEditing)
       textarea.addEventListener('keyup', stopPropagationWhenEditing)
+      body.append(textarea)
     }
 
-    header.append(labelText)
-    root.append(header, input)
+    const setExpanded = (nextExpanded: boolean) => {
+      expanded = nextExpanded
+      root.dataset.expanded = String(expanded)
+      header.dataset.expanded = String(expanded)
+      header.setAttribute('aria-expanded', String(expanded))
+      header.textContent = ''
+      labelText.textContent = descriptor.label
+      header.append(labelText, previewText)
+      body.hidden = !expanded
+    }
+
+    header.addEventListener('click', () => {
+      setExpanded(!expanded)
+    })
+
+    setExpanded(expanded)
+    root.append(header, body)
 
     return {
+      label: descriptor.label,
       root,
       input,
       sync: (nextJson) => {
         const nextValue = descriptor.getValue(nextJson)
+        previewText.textContent = formatFieldPreview(nextValue)
 
         if (input instanceof HTMLInputElement) {
           input.value = String(nextValue)
         } else {
           input.value = String(nextValue)
         }
-      }
+      },
+      setExpanded,
+      isExpanded: () => expanded
     }
   }
 
   const createDialogueRow = ({
     json,
-    onChange
+    onChange,
+    defaultExpanded
   }: {
     json: GeneratedEventJson
     onChange: (nextJson: GeneratedEventJson) => void
+    defaultExpanded: boolean
   }): FieldRowController => {
     const root = document.createElement('div')
-    const header = document.createElement('label')
+    const header = document.createElement('button')
     const labelText = document.createElement('span')
+    const previewText = document.createElement('span')
+    const body = document.createElement('div')
     const textarea = document.createElement('textarea')
+    let expanded = defaultExpanded
 
     root.className = 'llm-panel__field-row'
+    root.dataset.expanded = String(expanded)
     header.className = 'llm-panel__field-toggle'
+    header.type = 'button'
     labelText.textContent = 'dialogue'
+    previewText.className = 'llm-panel__field-toggle-preview'
+    previewText.textContent = formatDialoguePreview(json)
+    body.className = 'llm-panel__field-body'
     textarea.className = 'llm-panel__field-textarea'
     textarea.value = formatDialogueText(json)
 
@@ -635,16 +828,36 @@ export const createLlmPanel = ({
     })
     textarea.addEventListener('keydown', stopPropagationWhenEditing)
     textarea.addEventListener('keyup', stopPropagationWhenEditing)
+    body.append(textarea)
 
-    header.append(labelText)
-    root.append(header, textarea)
+    const setExpanded = (nextExpanded: boolean) => {
+      expanded = nextExpanded
+      root.dataset.expanded = String(expanded)
+      header.dataset.expanded = String(expanded)
+      header.setAttribute('aria-expanded', String(expanded))
+      header.textContent = ''
+      labelText.textContent = 'dialogue'
+      header.append(labelText, previewText)
+      body.hidden = !expanded
+    }
+
+    header.addEventListener('click', () => {
+      setExpanded(!expanded)
+    })
+
+    setExpanded(expanded)
+    root.append(header, body)
 
     return {
+      label: 'dialogue',
       root,
       input: textarea,
       sync: (nextJson) => {
         textarea.value = formatDialogueText(nextJson)
-      }
+        previewText.textContent = formatDialoguePreview(nextJson)
+      },
+      setExpanded,
+      isExpanded: () => expanded
     }
   }
 
@@ -669,6 +882,7 @@ export const createLlmPanel = ({
           refresh()
         }
       })
+      currentPage = 'draft'
     } finally {
       isAnalyzing = false
       analysisProgress = undefined
@@ -690,6 +904,7 @@ export const createLlmPanel = ({
     generatedCode = ''
     rebuildFieldEditors(currentDraft)
     generatedEventHistory.prepend(createEventHistoryItem('JSON 초안 생성 완료'))
+    currentPage = 'draft'
     refresh()
   }
 
@@ -700,6 +915,7 @@ export const createLlmPanel = ({
 
     confirmedDraft = structuredClone(currentDraft)
     generatedEventHistory.prepend(createEventHistoryItem('JSON 저장/확정 완료'))
+    currentPage = 'code'
     refresh()
   }
 
@@ -727,6 +943,7 @@ export const createLlmPanel = ({
         createEventHistoryItem(`경고: ${preview.warnings.join(' / ')}`)
       )
     }
+    currentPage = 'code'
     refresh()
   }
 
@@ -766,16 +983,13 @@ export const createLlmPanel = ({
           : '게임 적용 실패: 대상 NPC를 찾지 못했다.'
       )
     )
+    currentPage = 'code'
     refresh()
   }
 
   const open = () => {
     isOpen = true
     refresh()
-
-    if (!analysisResult && !isAnalyzing) {
-      void runAnalysis()
-    }
   }
 
   const close = () => {
@@ -803,20 +1017,145 @@ export const createLlmPanel = ({
     }
   }
 
-  analyzeButton.addEventListener('click', () => {
-    void runAnalysis()
-  })
   toggleButton.addEventListener('click', toggle)
+  analysisTab.addEventListener('click', () => {
+    currentPage = 'analysis'
+    syncPageUi()
+  })
+  draftTab.addEventListener('click', () => {
+    currentPage = 'draft'
+    syncPageUi()
+  })
+  codeTab.addEventListener('click', () => {
+    currentPage = 'code'
+    syncPageUi()
+  })
   generateButton.addEventListener('click', runMockGeneration)
   confirmButton.addEventListener('click', runConfirm)
   codeButton.addEventListener('click', runCodeGeneration)
   applyButton.addEventListener('click', runApply)
+  apiKeyInput.addEventListener('input', () => {
+    openAiApiKey = apiKeyInput.value
+    saveOpenAiApiKey(openAiApiKey)
+  })
+  apiKeyInput.addEventListener('keydown', stopPropagationWhenEditing)
+  apiKeyInput.addEventListener('keyup', stopPropagationWhenEditing)
+  apiKeyConfirmButton.addEventListener('click', () => {
+    const nextApiKey = apiKeyInput.value.trim()
+
+    if (nextApiKey.length === 0) {
+      apiKeyHint.textContent = 'OpenAI API 키를 입력한 뒤 확인을 눌러라.'
+      apiKeyInput.focus()
+      return
+    }
+
+    openAiApiKey = nextApiKey
+    saveOpenAiApiKey(openAiApiKey)
+    apiKeyConfirmed = true
+    currentPage = 'analysis'
+    apiKeyHint.textContent = 'API 키가 저장되었다. 구조 분석을 시작한다.'
+    refresh()
+    void runAnalysis()
+  })
   promptInput.addEventListener('keydown', stopPropagationWhenEditing)
   promptInput.addEventListener('keyup', stopPropagationWhenEditing)
 
-  topBar.append(analyzeButton, toggleButton)
+  header.append(hint)
   refresh()
   window.addEventListener('keydown', handlePanelKeydown)
+  enableWindowDragging({
+    handle: titleBar,
+    panel,
+    getPosition: () => panelBounds,
+    setPosition: (nextPosition) => {
+      panelBounds = nextPosition
+      savePanelBounds(nextPosition)
+    },
+    isEnabled: () => isOpen && !isMinimized && !isMaximized
+  })
+  enableWindowEdgeResizing({
+    handle: leftResizeHandle,
+    panel,
+    getBounds: () => panelBounds,
+    setBounds: (nextBounds) => {
+      panelBounds = nextBounds
+      savePanelBounds(nextBounds)
+    },
+    edge: 'left',
+    isEnabled: () => isOpen && !isMinimized && !isMaximized
+  })
+  enableWindowEdgeResizing({
+    handle: rightResizeHandle,
+    panel,
+    getBounds: () => panelBounds,
+    setBounds: (nextBounds) => {
+      panelBounds = nextBounds
+      savePanelBounds(nextBounds)
+    },
+    edge: 'right',
+    isEnabled: () => isOpen && !isMinimized && !isMaximized
+  })
+  enableWindowEdgeResizing({
+    handle: topResizeHandle,
+    panel,
+    getBounds: () => panelBounds,
+    setBounds: (nextBounds) => {
+      panelBounds = nextBounds
+      savePanelBounds(nextBounds)
+    },
+    edge: 'top',
+    isEnabled: () => isOpen && !isMinimized && !isMaximized
+  })
+  enableWindowEdgeResizing({
+    handle: bottomResizeHandle,
+    panel,
+    getBounds: () => panelBounds,
+    setBounds: (nextBounds) => {
+      panelBounds = nextBounds
+      savePanelBounds(nextBounds)
+    },
+    edge: 'bottom',
+    isEnabled: () => isOpen && !isMinimized && !isMaximized
+  })
+  minimizeButton.addEventListener('click', () => {
+    if (isMinimized) {
+      isMinimized = false
+      refresh()
+      return
+    }
+
+    isMinimized = true
+    refresh()
+  })
+  titleBar.addEventListener('click', (event) => {
+    const target = event.target as HTMLElement | null
+
+    if (target?.closest('button')) {
+      return
+    }
+
+    if (isMinimized) {
+      isMinimized = false
+      refresh()
+    }
+  })
+  maximizeButton.addEventListener('click', () => {
+    if (isMaximized) {
+      isMaximized = false
+      if (restoreBounds) {
+        panelBounds = restoreBounds
+      }
+      refresh()
+      return
+    }
+
+    isMinimized = false
+    restoreBounds = { ...panelBounds }
+    isMaximized = true
+    panelBounds = createMaximizedBounds()
+    refresh()
+  })
+  closeButton.addEventListener('click', close)
 
   return {
     open,
@@ -835,6 +1174,278 @@ const stopPropagationWhenEditing = (event: KeyboardEvent) => {
   event.stopPropagation()
 }
 
+const enableWindowDragging = ({
+  handle,
+  panel,
+  getPosition,
+  setPosition,
+  isEnabled
+}: {
+  handle: HTMLElement
+  panel: HTMLDivElement
+  getPosition: () => PanelBounds
+  setPosition: (nextPosition: PanelBounds) => void
+  isEnabled: () => boolean
+}) => {
+  let pointerOffsetX = 0
+  let pointerOffsetY = 0
+  let activePointerId: number | undefined
+
+  const onPointerMove = (event: PointerEvent) => {
+    if (activePointerId !== event.pointerId) {
+      return
+    }
+
+    const nextLeft = clamp(
+      event.clientX - pointerOffsetX,
+      8,
+      Math.max(window.innerWidth - panel.offsetWidth - 8, 8)
+    )
+    const nextTop = clamp(
+      event.clientY - pointerOffsetY,
+      8,
+      Math.max(window.innerHeight - panel.offsetHeight - 8, 8)
+    )
+
+    const nextBounds = { ...getPosition(), left: nextLeft, top: nextTop }
+    setPosition(nextBounds)
+    applyPanelBounds(panel, nextBounds)
+  }
+
+  const onPointerUp = (event: PointerEvent) => {
+    if (activePointerId !== event.pointerId) {
+      return
+    }
+
+    activePointerId = undefined
+    window.removeEventListener('pointermove', onPointerMove)
+    window.removeEventListener('pointerup', onPointerUp)
+    window.removeEventListener('pointercancel', onPointerUp)
+  }
+
+  handle.addEventListener('pointerdown', (event) => {
+    const target = event.target as HTMLElement | null
+
+    if (!isEnabled() || event.button !== 0 || target?.closest('button')) {
+      return
+    }
+
+    event.preventDefault()
+    activePointerId = event.pointerId
+    const rect = panel.getBoundingClientRect()
+    pointerOffsetX = event.clientX - rect.left
+    pointerOffsetY = event.clientY - rect.top
+
+    handle.setPointerCapture(event.pointerId)
+    window.addEventListener('pointermove', onPointerMove)
+    window.addEventListener('pointerup', onPointerUp)
+    window.addEventListener('pointercancel', onPointerUp)
+  })
+}
+
+const enableWindowEdgeResizing = ({
+  handle,
+  panel,
+  getBounds,
+  setBounds,
+  edge,
+  isEnabled
+}: {
+  handle: HTMLElement
+  panel: HTMLDivElement
+  getBounds: () => PanelBounds
+  setBounds: (nextBounds: PanelBounds) => void
+  edge: 'left' | 'right' | 'top' | 'bottom'
+  isEnabled: () => boolean
+}) => {
+  let activePointerId: number | undefined
+  let pointerStartX = 0
+  let pointerStartY = 0
+  let startBounds: PanelBounds | undefined
+
+  const onPointerMove = (event: PointerEvent) => {
+    if (activePointerId !== event.pointerId || !startBounds) {
+      return
+    }
+
+    const minWidth = 420
+    const minHeight = 300
+    const maxWidth = Math.max(window.innerWidth - 16, minWidth)
+    const maxHeight = Math.max(window.innerHeight - 16, minHeight)
+    const rightEdge = startBounds.left + startBounds.width
+    const bottomEdge = startBounds.top + startBounds.height
+
+    const nextBounds =
+      edge === 'right'
+        ? {
+            ...startBounds,
+            width: clamp(
+              startBounds.width + (event.clientX - pointerStartX),
+              minWidth,
+              Math.max(window.innerWidth - startBounds.left - 8, minWidth)
+            )
+          }
+        : edge === 'left'
+          ? {
+              ...startBounds,
+              left: clamp(
+                startBounds.left + (event.clientX - pointerStartX),
+                8,
+                rightEdge - minWidth - 8
+              ),
+              width: clamp(
+                rightEdge - clamp(
+                  startBounds.left + (event.clientX - pointerStartX),
+                  8,
+                  rightEdge - minWidth - 8
+                ),
+                minWidth,
+                maxWidth
+              )
+            }
+          : edge === 'bottom'
+            ? {
+                ...startBounds,
+                height: clamp(
+                  startBounds.height + (event.clientY - pointerStartY),
+                  minHeight,
+                  Math.max(window.innerHeight - startBounds.top - 8, minHeight)
+                )
+              }
+            : {
+                ...startBounds,
+                top: clamp(
+                  startBounds.top + (event.clientY - pointerStartY),
+                  8,
+                  bottomEdge - minHeight - 8
+                ),
+                height: clamp(
+                  bottomEdge - clamp(
+                    startBounds.top + (event.clientY - pointerStartY),
+                    8,
+                    bottomEdge - minHeight - 8
+                  ),
+                  minHeight,
+                  maxHeight
+                )
+              }
+
+    setBounds(nextBounds)
+    applyPanelBounds(panel, nextBounds)
+  }
+
+  const onPointerUp = (event: PointerEvent) => {
+    if (activePointerId !== event.pointerId) {
+      return
+    }
+
+    activePointerId = undefined
+    startBounds = undefined
+    window.removeEventListener('pointermove', onPointerMove)
+    window.removeEventListener('pointerup', onPointerUp)
+    window.removeEventListener('pointercancel', onPointerUp)
+  }
+
+  handle.addEventListener('pointerdown', (event) => {
+    if (!isEnabled() || event.button !== 0) {
+      return
+    }
+
+    event.preventDefault()
+    activePointerId = event.pointerId
+    startBounds = getBounds()
+    pointerStartX = event.clientX
+    pointerStartY = event.clientY
+    handle.setPointerCapture(event.pointerId)
+    window.addEventListener('pointermove', onPointerMove)
+    window.addEventListener('pointerup', onPointerUp)
+    window.addEventListener('pointercancel', onPointerUp)
+  })
+}
+
+const loadPanelBounds = (): PanelBounds => {
+  if (typeof window === 'undefined') {
+    return { left: 16, top: 16, width: 560, height: 720 }
+  }
+
+  const stored = window.localStorage.getItem(PANEL_POSITION_STORAGE_KEY)
+
+  if (stored) {
+    try {
+      const parsed = JSON.parse(stored) as Partial<PanelBounds>
+      if (typeof parsed.left === 'number' && typeof parsed.top === 'number') {
+        return {
+          left: parsed.left,
+          top: parsed.top,
+          width: typeof parsed.width === 'number' ? parsed.width : 560,
+          height: typeof parsed.height === 'number' ? parsed.height : 720
+        }
+      }
+    } catch {
+      // ignore invalid storage
+    }
+  }
+
+  return {
+    left: Math.max(window.innerWidth - 576 - 16, 16),
+    top: 18,
+    width: 560,
+    height: 720
+  }
+}
+
+const savePanelBounds = (position: PanelBounds): void => {
+  if (typeof window === 'undefined') {
+    return
+  }
+
+  window.localStorage.setItem(PANEL_POSITION_STORAGE_KEY, JSON.stringify(position))
+}
+
+const applyPanelBounds = (panel: HTMLDivElement, position: PanelBounds): void => {
+  panel.style.left = `${position.left}px`
+  panel.style.top = `${position.top}px`
+  panel.style.width = `${position.width}px`
+  panel.style.height = `${position.height}px`
+  panel.style.right = 'auto'
+  panel.style.bottom = 'auto'
+}
+
+const normalizePanelBounds = (bounds: PanelBounds): PanelBounds => {
+  const width = clamp(bounds.width, 420, Math.max(window.innerWidth - 16, 420))
+  const height = clamp(bounds.height, 300, Math.max(window.innerHeight - 16, 300))
+  const left = clamp(bounds.left, 8, Math.max(window.innerWidth - width - 8, 8))
+  const top = clamp(bounds.top, 8, Math.max(window.innerHeight - height - 8, 8))
+
+  return { left, top, width, height }
+}
+
+const createMaximizedBounds = (): PanelBounds => ({
+  left: 16,
+  top: 16,
+  width: Math.max(window.innerWidth - 32, 420),
+  height: Math.max(window.innerHeight - 32, 300)
+})
+
+const clamp = (value: number, min: number, max: number): number =>
+  Math.max(min, Math.min(max, value))
+
+const loadOpenAiApiKey = (): string => {
+  if (typeof window === 'undefined') {
+    return ''
+  }
+
+  return window.localStorage.getItem(OPENAI_API_KEY_STORAGE_KEY) ?? ''
+}
+
+const saveOpenAiApiKey = (value: string): void => {
+  if (typeof window === 'undefined') {
+    return
+  }
+
+  window.localStorage.setItem(OPENAI_API_KEY_STORAGE_KEY, value)
+}
+
 const parseFieldValue = (
   kind: EditableFieldDescriptor['kind'],
   rawValue: string
@@ -844,6 +1455,33 @@ const parseFieldValue = (
   }
 
   return rawValue
+}
+
+const formatFieldPreview = (value: string | number | boolean): string => {
+  const text = String(value).replace(/\s+/g, ' ').trim()
+
+  if (text.length === 0) {
+    return '비어 있음'
+  }
+
+  return text.length > 26 ? `${text.slice(0, 26)}…` : text
+}
+
+const formatDialoguePreview = (json: GeneratedEventJson): string => {
+  const lineCount = json.dialogue.length
+
+  if (lineCount === 0) {
+    return '대사 없음'
+  }
+
+  const firstLine = json.dialogue[0]
+  const preview = `${firstLine.speaker}: ${firstLine.text}`.replace(/\s+/g, ' ').trim()
+
+  if (preview.length > 26) {
+    return `${preview.slice(0, 26)}… · ${lineCount}줄`
+  }
+
+  return `${preview} · ${lineCount}줄`
 }
 
 const formatDialogueText = (json: GeneratedEventJson): string =>

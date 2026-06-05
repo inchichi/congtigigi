@@ -814,34 +814,160 @@ body.game-root--map-focused > :not(.game-root) {
 
 .event-draft-panel {
   position: fixed;
-  bottom: 132px;
-  right: 16px;
+  inset: 0;
   z-index: 50;
-  width: min(420px, calc(100vw - 32px));
   pointer-events: none;
 }
 
 .llm-panel {
-  bottom: 18px;
-  width: min(560px, calc(100vw - 32px));
+  position: fixed;
+  pointer-events: none;
 }
 
 .event-draft-panel__window {
+  position: absolute;
+  left: 16px;
+  top: 16px;
   display: grid;
-  gap: 10px;
-  max-height: calc(100vh - 32px);
-  padding: 14px;
+  grid-template-rows: auto 1fr;
+  gap: 0;
+  min-width: 420px;
+  min-height: 300px;
+  max-width: calc(100vw - 16px);
+  max-height: calc(100vh - 16px);
   border: 1px solid rgba(244, 231, 197, 0.52);
   background: rgba(18, 15, 13, 0.94);
   box-shadow: 0 0 0 2px rgba(244, 231, 197, 0.12), 0 18px 36px rgba(0, 0, 0, 0.45);
   color: #f4e7c5;
   pointer-events: auto;
+  overflow: hidden;
+}
+
+.llm-panel__titlebar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 38px;
+  padding: 8px 10px;
+  border-bottom: 1px solid rgba(244, 231, 197, 0.16);
+  background: rgba(28, 22, 19, 0.98);
+  color: #f4e7c5;
+  user-select: none;
+  touch-action: none;
+}
+
+.llm-panel__window-title {
+  margin: 0;
+  color: #ffdf7a;
+  font-size: 0.92rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  line-height: 1;
+}
+
+.llm-panel__window-actions {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.llm-panel__window-button {
+  appearance: none;
+  width: 28px;
+  height: 24px;
+  border: 1px solid rgba(255, 223, 122, 0.24);
+  background: rgba(40, 28, 22, 0.92);
+  color: #f4e7c5;
+  font: inherit;
+  font-size: 0.85rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.llm-panel__window-button--close {
+  border-color: rgba(255, 152, 122, 0.38);
+  color: #ffb9a2;
+}
+
+.llm-panel__window-button:hover,
+.llm-panel__window-button:focus-visible {
+  outline: 2px solid rgba(255, 223, 122, 0.55);
+  outline-offset: 2px;
+}
+
+.llm-panel__content {
+  position: relative;
+  display: grid;
+  gap: 10px;
+  padding: 12px 14px 14px;
   overflow: auto;
 }
 
 .event-draft-panel__header {
   display: grid;
   gap: 4px;
+}
+
+.llm-panel__titlebar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 38px;
+  padding: 8px 10px;
+  border-bottom: 1px solid rgba(244, 231, 197, 0.16);
+  background: rgba(28, 22, 19, 0.98);
+  color: #f4e7c5;
+  user-select: none;
+  touch-action: none;
+}
+
+.llm-panel__window-title {
+  margin: 0;
+  color: #ffdf7a;
+  font-size: 0.92rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  line-height: 1;
+}
+
+.llm-panel__window-actions {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.llm-panel__window-button {
+  appearance: none;
+  width: 28px;
+  height: 24px;
+  border: 1px solid rgba(255, 223, 122, 0.24);
+  background: rgba(40, 28, 22, 0.92);
+  color: #f4e7c5;
+  font: inherit;
+  font-size: 0.85rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.llm-panel__window-button--close {
+  border-color: rgba(255, 152, 122, 0.38);
+  color: #ffb9a2;
+}
+
+.llm-panel__window-button:hover,
+.llm-panel__window-button:focus-visible {
+  outline: 2px solid rgba(255, 223, 122, 0.55);
+  outline-offset: 2px;
+}
+
+.llm-panel__content {
+  position: relative;
+  display: grid;
+  gap: 10px;
+  padding: 12px 14px 14px;
+  overflow: auto;
 }
 
 .event-draft-panel__mode-row {
@@ -966,6 +1092,138 @@ body.game-root--map-focused > :not(.game-root) {
   flex-wrap: wrap;
 }
 
+.llm-panel__tabs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 4px 0 2px;
+  background: linear-gradient(180deg, rgba(18, 15, 13, 0.98), rgba(18, 15, 13, 0.9));
+}
+
+.llm-panel__header {
+  user-select: none;
+}
+
+.llm-panel__drag-handle {
+  appearance: none;
+  width: fit-content;
+  border: 1px solid rgba(255, 223, 122, 0.22);
+  padding: 4px 10px;
+  background: rgba(40, 28, 22, 0.82);
+  color: rgba(244, 231, 197, 0.72);
+  font: inherit;
+  cursor: grab;
+  touch-action: none;
+}
+
+.llm-panel__drag-handle:active {
+  cursor: grabbing;
+}
+
+.llm-panel__resize-handle {
+  position: absolute;
+  z-index: 2;
+  touch-action: none;
+  pointer-events: auto;
+  opacity: 0.9;
+}
+
+.llm-panel__resize-handle--right {
+  top: 38px;
+  right: 0;
+  bottom: 14px;
+  width: 10px;
+  cursor: ew-resize;
+  background: linear-gradient(
+    90deg,
+    transparent 0 35%,
+    rgba(255, 223, 122, 0.22) 35% 50%,
+    rgba(255, 223, 122, 0.42) 50% 65%,
+    transparent 65% 100%
+  );
+}
+
+.llm-panel__resize-handle--left {
+  top: 38px;
+  left: 0;
+  bottom: 14px;
+  width: 10px;
+  cursor: ew-resize;
+  background: linear-gradient(
+    90deg,
+    transparent 0 35%,
+    rgba(255, 223, 122, 0.42) 35% 50%,
+    rgba(255, 223, 122, 0.22) 50% 65%,
+    transparent 65% 100%
+  );
+}
+
+.llm-panel__resize-handle--top {
+  left: 14px;
+  right: 14px;
+  top: 0;
+  height: 10px;
+  cursor: ns-resize;
+  background: linear-gradient(
+    180deg,
+    transparent 0 35%,
+    rgba(255, 223, 122, 0.42) 35% 50%,
+    rgba(255, 223, 122, 0.22) 50% 65%,
+    transparent 65% 100%
+  );
+}
+
+.llm-panel__resize-handle--bottom {
+  left: 14px;
+  right: 14px;
+  bottom: 0;
+  height: 10px;
+  cursor: ns-resize;
+  background: linear-gradient(
+    180deg,
+    transparent 0 35%,
+    rgba(255, 223, 122, 0.22) 35% 50%,
+    rgba(255, 223, 122, 0.42) 50% 65%,
+    transparent 65% 100%
+  );
+}
+
+.llm-panel__tab {
+  appearance: none;
+  border: 1px solid rgba(255, 223, 122, 0.28);
+  padding: 8px 10px;
+  background: rgba(40, 28, 22, 0.88);
+  color: rgba(244, 231, 197, 0.82);
+  font: inherit;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.llm-panel__tab[data-active='true'] {
+  border-color: rgba(255, 223, 122, 0.72);
+  background: rgba(96, 60, 42, 0.96);
+  color: #ffdf7a;
+}
+
+.llm-panel__tab:hover,
+.llm-panel__tab:focus-visible {
+  outline: 2px solid rgba(255, 223, 122, 0.65);
+  outline-offset: 2px;
+}
+
+.llm-panel__page {
+  display: grid;
+  gap: 10px;
+}
+
+.llm-panel__page-body {
+  display: grid;
+  gap: 10px;
+}
+
 .llm-panel__progress {
   display: grid;
   gap: 6px;
@@ -1026,13 +1284,49 @@ body.game-root--map-focused > :not(.game-root) {
 }
 
 .llm-panel__field-toggle {
+  appearance: none;
   display: flex;
-  gap: 8px;
+  justify-content: space-between;
+  gap: 16px;
   align-items: center;
+  width: 100%;
+  border: 1px solid rgba(244, 231, 197, 0.22);
+  padding: 8px 10px;
+  background: rgba(28, 22, 19, 0.96);
   color: rgba(244, 231, 197, 0.92);
-  font-size: 0.76rem;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+  font: inherit;
+  font-size: 0.78rem;
+  letter-spacing: 0.03em;
+  text-align: left;
+  cursor: pointer;
+}
+
+.llm-panel__field-row[data-expanded='true'] .llm-panel__field-toggle {
+  border-color: rgba(255, 223, 122, 0.42);
+  background: rgba(48, 36, 28, 0.98);
+  color: #ffdf7a;
+}
+
+.llm-panel__field-toggle-preview {
+  flex: 1 1 auto;
+  color: rgba(244, 231, 197, 0.72);
+  font-size: 0.72rem;
+  letter-spacing: 0.01em;
+  text-align: right;
+  word-break: break-word;
+}
+
+.llm-panel__field-row[data-expanded='true'] .llm-panel__field-toggle-preview {
+  color: rgba(255, 223, 122, 0.9);
+}
+
+.llm-panel__field-body {
+  display: grid;
+  gap: 8px;
+}
+
+.llm-panel__field-body[hidden] {
+  display: none;
 }
 
 .llm-panel__field-input,

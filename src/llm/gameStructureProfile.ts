@@ -47,12 +47,12 @@ export type GameStructureProfile = {
 }
 
 export type GameUnderstandingScoreDetails = {
-  map_coverage: number
-  npc_coverage: number
-  item_coverage: number
-  event_system_accuracy: number
-  file_localization_accuracy: number
-  relationship_accuracy: number
+  qa_correctness: number
+  qa_completeness: number
+  dependency_f1: number
+  localization_accuracy: number
+  trace_correctness: number
+  grounding_score: number
 }
 
 export type GameUnderstandingScoreReport = {
