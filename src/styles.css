@@ -824,6 +824,10 @@ body.game-root--map-focused > :not(.game-root) {
   pointer-events: none;
 }
 
+.llm-panel [hidden] {
+  display: none !important;
+}
+
 .event-draft-panel__window {
   position: absolute;
   left: 16px;
