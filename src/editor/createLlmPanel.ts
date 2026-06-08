@@ -323,10 +323,12 @@ export const createLlmPanel = ({
   evaluatorActionRow.className = 'event-draft-panel__actions llm-panel__actions'
   evaluatorAcceptButton.type = 'button'
   evaluatorAcceptButton.textContent = 'Acceptable'
-  evaluatorAcceptButton.className = 'event-draft-panel__button'
+  evaluatorAcceptButton.className =
+    'event-draft-panel__button event-draft-panel__button--accept'
   evaluatorRejectButton.type = 'button'
   evaluatorRejectButton.textContent = 'Not acceptable'
-  evaluatorRejectButton.className = 'event-draft-panel__button'
+  evaluatorRejectButton.className =
+    'event-draft-panel__button event-draft-panel__button--reject'
   evaluatorStats.className = 'event-draft-panel__status'
   evaluatorActionRow.append(evaluatorAcceptButton, evaluatorRejectButton)
 
