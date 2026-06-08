@@ -156,6 +156,7 @@ import { createPlayerHudOverlay } from './createPlayerHudOverlay'
 import { createPlayerInventoryOverlay } from './createPlayerInventoryOverlay'
 import { createPlayerStatOverlay } from './createPlayerStatOverlay'
 import { createPlayerSkillOverlay } from './createPlayerSkillOverlay'
+import { createScenarioEditorOverlay } from './createScenarioEditorOverlay'
 import type { MonsterAnimationTextures } from './monsterAnimationTextures'
 import { loadMonsterPigAnimationTextures } from './loadMonsterPigAnimationTextures'
 import { loadMonsterSlimeAnimationTextures } from './loadMonsterSlimeAnimationTextures'
@@ -1232,6 +1233,13 @@ export const createPixiTiledMapView = async ({
     destroy: () => {}
   }
   let questTrackerOverlay: {
+    syncFrame: () => void
+    destroy: () => void
+  } = {
+    syncFrame: () => {},
+    destroy: () => {}
+  }
+  let scenarioEditorOverlay: {
     syncFrame: () => void
     destroy: () => void
   } = {
@@ -2446,6 +2454,9 @@ export const createPixiTiledMapView = async ({
     getQuestLog: () => currentQuestLog,
     onQuestLogChange: setQuestLog
   })
+  scenarioEditorOverlay = createScenarioEditorOverlay({
+    mountElement
+  })
 
   const syncRuntimeWarningBanner = () => {
     const warnings = controllerRuntime.getRuntimeWarnings()
@@ -2492,6 +2503,18 @@ export const createPixiTiledMapView = async ({
     })
 
     runtimeWarningBannerElement.replaceChildren(...warningBlocks)
+  }
+
+  const isInteractiveUiEventTarget = (target: EventTarget | null): boolean => {
+    if (!(target instanceof HTMLElement)) {
+      return false
+    }
+
+    return (
+      target.closest(
+        'button, input, textarea, select, [contenteditable="true"]'
+      ) !== null
+    )
   }
 
   controllerRuntime.syncCharacters(characterStates)
@@ -5596,6 +5619,10 @@ export const createPixiTiledMapView = async ({
       return
     }
 
+    if (isInteractiveUiEventTarget(event.target)) {
+      return
+    }
+
     if (isPauseKey) {
       event.preventDefault()
 
@@ -5930,6 +5957,11 @@ export const createPixiTiledMapView = async ({
   app.ticker.add(playerShopOverlay.syncFrame, undefined, UPDATE_PRIORITY.UTILITY)
   app.ticker.add(pauseMenuOverlay.syncFrame, undefined, UPDATE_PRIORITY.UTILITY)
   app.ticker.add(questTrackerOverlay.syncFrame, undefined, UPDATE_PRIORITY.UTILITY)
+  app.ticker.add(
+    scenarioEditorOverlay.syncFrame,
+    undefined,
+    UPDATE_PRIORITY.UTILITY
+  )
   syncAllCharacterSprites()
   syncQuestNpcBadges()
   syncViewportDisplayScale()
@@ -5945,6 +5977,7 @@ export const createPixiTiledMapView = async ({
   playerShopOverlay.syncFrame()
   pauseMenuOverlay.syncFrame()
   questTrackerOverlay.syncFrame()
+  scenarioEditorOverlay.syncFrame()
   handleVisibilityChange()
 
   const destroy = () => {
@@ -5970,6 +6003,7 @@ export const createPixiTiledMapView = async ({
     app.ticker.remove(playerShopOverlay.syncFrame)
     app.ticker.remove(pauseMenuOverlay.syncFrame)
     app.ticker.remove(questTrackerOverlay.syncFrame)
+    app.ticker.remove(scenarioEditorOverlay.syncFrame)
     gameEventQueue.clear()
     monsterPatrolStates.clear()
     monsterSpawnStates.clear()
@@ -6010,6 +6044,7 @@ export const createPixiTiledMapView = async ({
     potionShopOverlay.destroy()
     pauseMenuOverlay.destroy()
     questTrackerOverlay.destroy()
+    scenarioEditorOverlay.destroy()
     gameSoundEffects.destroy()
     controllerRuntime.destroy()
     app.destroy({ removeView: true }, { children: true })
