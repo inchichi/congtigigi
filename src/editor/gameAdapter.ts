@@ -104,6 +104,37 @@ const LEGEND_KIND_BY_GROUP: Record<string, string> = {
   Loot: 'loot'
 }
 
+// 전용 콘텐츠 모델이 없는 게임(legend-of-lua, 미지의 게임)의 공용 생성: 엔티티용 대사/설명.
+// 적용은 게임 런타임 연결이 필요해 아직 null(미리보기까지).
+const generateEntityLines = async (
+  gameName: string,
+  { apiKey, userPrompt, entity }: GenerationRequest
+): Promise<GenerationResult> => {
+  const target = entity ? `${entity.kind} "${entity.name}"` : '게임 요소'
+  const generated = await generateJsonWithOpenAi<{ entity: string; lines: string[] }>({
+    apiKey,
+    instructions: `${gameName}의 게임 요소에 어울리는 짧은 한국어 대사 또는 설명을 1~4줄 생성한다. 응답에는 JSON만 포함한다.`,
+    input: `${userPrompt}\n\n대상: ${target}`,
+    schemaName: 'entity_lines',
+    schema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        entity: { type: 'string' },
+        lines: { type: 'array', items: { type: 'string' } }
+      },
+      required: ['entity', 'lines']
+    }
+  })
+
+  return {
+    label: generated.entity || (entity?.name ?? '생성 결과'),
+    preview: JSON.stringify(generated, null, 2),
+    issues: [],
+    apply: null
+  }
+}
+
 export const legendOfLuaAdapter: GameAdapter = {
   id: 'legend-of-lua',
   name: 'Legend of Lua (Love2D)',
@@ -123,36 +154,26 @@ export const legendOfLuaAdapter: GameAdapter = {
       })),
   // Love2D 런타임에 라이브 적용은 아직 미구현(Stage 3). 지금은 엔티티 브라우징·생성까지.
   supportsApply: false,
-  generate: async ({ apiKey, userPrompt, entity }) => {
-    const target = entity ? `${entity.kind} "${entity.name}"` : '게임 요소'
-    const generated = await generateJsonWithOpenAi<{ entity: string; lines: string[] }>({
-      apiKey,
-      instructions:
-        'legend-of-lua(2D 액션 RPG, Love2D)의 게임 요소에 어울리는 짧은 한국어 대사 또는 설명을 1~4줄 생성한다. 응답에는 JSON만 포함한다.',
-      input: `${userPrompt}\n\n대상: ${target}`,
-      schemaName: 'legend_entity_lines',
-      schema: {
-        type: 'object',
-        additionalProperties: false,
-        properties: {
-          entity: { type: 'string' },
-          lines: { type: 'array', items: { type: 'string' } }
-        },
-        required: ['entity', 'lines']
-      }
-    })
-
-    return {
-      label: generated.entity || (entity?.name ?? '생성 결과'),
-      preview: JSON.stringify(generated, null, 2),
-      issues: [],
-      // Love2D 런타임 라이브 적용은 Stage 3.
-      apply: null
-    }
-  }
+  generate: (request) =>
+    generateEntityLines('legend-of-lua (Love2D 2D 액션 RPG)', request)
 }
 
-export const GAME_ADAPTERS: GameAdapter[] = [legendOfLuaAdapter, rpgAdapter]
+// 알려진 어댑터에 안 걸리는 게임의 최후 fallback. 엔티티는 LLM 분석으로 채우고(extractEntities는
+// 비어 있음), 생성은 공용 대사 생성을 쓴다.
+export const genericAdapter: GameAdapter = {
+  id: 'generic',
+  name: 'Unknown game (LLM-analyzed)',
+  detect: () => true,
+  extractEntities: () => [],
+  supportsApply: false,
+  generate: (request) => generateEntityLines('이 게임', request)
+}
+
+export const GAME_ADAPTERS: GameAdapter[] = [
+  legendOfLuaAdapter,
+  rpgAdapter,
+  genericAdapter
+]
 
 export const detectAdapter = (fileNames: string[]): GameAdapter =>
-  GAME_ADAPTERS.find((adapter) => adapter.detect(fileNames)) ?? rpgAdapter
+  GAME_ADAPTERS.find((adapter) => adapter.detect(fileNames)) ?? genericAdapter

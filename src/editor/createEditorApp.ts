@@ -1,7 +1,39 @@
 import { openProjectDirectory } from './openProjectDirectory'
-import { loadGame, type GameFile, type LoadedGame } from './loadGame'
+import { loadGame, type GameFile, type LoadedGame, type LoadedGameMap } from './loadGame'
 import { analyzeGame, type GameAnalysis } from './analyzeGame'
+import { extractTmxObjects } from './tmxObjects'
 import type { GameEntity, GenerationResult } from './gameAdapter'
+
+// 하드코딩 어댑터가 엔티티를 못 찾은 미지의 게임을, LLM 분석이 찾은 editable 그룹으로 채운다.
+const buildEntitiesFromAnalysis = (
+  files: GameFile[],
+  analysis: GameAnalysis
+): LoadedGameMap[] => {
+  const editableKindByGroup = new Map<string, string>()
+  for (const entityGroup of analysis.entity_groups) {
+    if (entityGroup.editable) {
+      editableKindByGroup.set(entityGroup.group, entityGroup.kind)
+    }
+  }
+
+  return files
+    .filter((file) => file.name.endsWith('.tmx'))
+    .map((file) => {
+      const id = file.name.replace(/\.tmx$/u, '')
+      const entities = extractTmxObjects(file.text)
+        .filter(
+          (object) =>
+            editableKindByGroup.has(object.group) && object.name.length > 0
+        )
+        .map((object) => ({
+          id: `${object.group}-${object.id}`,
+          name: object.name,
+          kind: editableKindByGroup.get(object.group) ?? 'entity',
+          mapId: id
+        }))
+      return { id, name: id, file: file.path, entities }
+    })
+}
 
 type CreateEditorAppInput = {
   mountElement: HTMLElement
@@ -199,7 +231,15 @@ export const createEditorApp = ({
 
     try {
       currentAnalysis = await analyzeGame({ apiKey: apiKey.trim(), files: currentFiles })
+      // 하드코딩 어댑터가 엔티티를 못 찾았으면(미지의 게임), 분석 결과로 트리를 채운다.
+      const totalEntities = game.maps.reduce((sum, map) => sum + map.entities.length, 0)
+      if (totalEntities === 0) {
+        game = { ...game, maps: buildEntitiesFromAnalysis(currentFiles, currentAnalysis) }
+        selectedEntity = undefined
+        renderTree()
+      }
       renderAnalysis()
+      render()
       setStatus(`분석 완료: ${currentAnalysis.game_name} (${currentAnalysis.engine})`)
     } catch (error) {
       setStatus(`분석 실패: ${error instanceof Error ? error.message : String(error)}`)
