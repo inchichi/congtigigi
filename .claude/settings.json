@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git lfs *)",
+      "Bash(command -v apt-get)",
+      "Bash(command -v git-lfs)"
+    ]
+  }
+}

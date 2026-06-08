@@ -7,6 +7,14 @@ import {
   type ScenarioEditorQuestDraft,
   type ScenarioEditorResult
 } from './scenarioEditorProtocol'
+import {
+  TOWN_STYLE_TRANSFER_ENDPOINT,
+  TOWN_STYLE_TRANSFER_MODEL,
+  TOWN_STYLE_TRANSFER_SIZE,
+  TOWN_TILESET_SOURCE_URL,
+  buildTownStyleTransferPrompt,
+  extractTownStyleTransferResult
+} from './townStyleTransferProtocol'
 
 type CreateScenarioEditorOverlayInput = {
   mountElement: HTMLElement
@@ -100,6 +108,18 @@ export const createScenarioEditorOverlay = ({
   const rawDetails = document.createElement('details')
   const rawSummary = document.createElement('summary')
   const rawPre = document.createElement('pre')
+  const styleSection = document.createElement('section')
+  const styleHeader = document.createElement('div')
+  const styleTitle = document.createElement('div')
+  const styleStatus = document.createElement('div')
+  const styleBody = document.createElement('div')
+  const stylePreviewFrame = document.createElement('div')
+  const styleOriginalImage = document.createElement('img')
+  const styleResultImage = document.createElement('img')
+  const stylePlaceholder = document.createElement('div')
+  const styleError = document.createElement('div')
+  const styleActionRow = document.createElement('div')
+  const styleDownloadButton = document.createElement('a')
   const footer = document.createElement('div')
   const footerHint = document.createElement('div')
   const footerState = document.createElement('div')
@@ -114,6 +134,9 @@ export const createScenarioEditorOverlay = ({
   let isGenerating = false
   let activeRequest: AbortController | undefined
   let isDestroyed = false
+  let styledTilesetDataUrl = ''
+  let styleErrorMessage = ''
+  let isStyling = false
 
   overlayRoot.className = 'scenario-editor-overlay'
 
@@ -229,6 +252,40 @@ export const createScenarioEditorOverlay = ({
   rawPre.className = 'scenario-editor-overlay__raw-pre'
   rawDetails.append(rawSummary, rawPre)
 
+  styleSection.className = 'scenario-editor-overlay__style-section'
+  styleHeader.className = 'scenario-editor-overlay__column-header'
+  styleTitle.className = 'scenario-editor-overlay__column-title'
+  styleTitle.textContent = '타운 타일셋 스타일'
+  styleStatus.className = 'scenario-editor-overlay__column-count'
+  styleHeader.append(styleTitle, styleStatus)
+  styleBody.className = 'scenario-editor-overlay__style-body'
+  stylePreviewFrame.className = 'scenario-editor-overlay__style-preview'
+  styleOriginalImage.className = 'scenario-editor-overlay__style-image'
+  styleOriginalImage.alt = '원본 town-32 타일셋'
+  styleOriginalImage.src = TOWN_TILESET_SOURCE_URL
+  styleResultImage.className =
+    'scenario-editor-overlay__style-image scenario-editor-overlay__style-image--result'
+  styleResultImage.alt = '시나리오 스타일로 변환된 타일셋'
+  styleResultImage.hidden = true
+  stylePlaceholder.className = 'scenario-editor-overlay__style-placeholder'
+  stylePlaceholder.textContent = '생성을 실행하면 시나리오에 맞춘 타일셋이 여기에 나타납니다.'
+  stylePreviewFrame.append(
+    styleOriginalImage,
+    styleResultImage,
+    stylePlaceholder
+  )
+  styleError.className = 'scenario-editor-overlay__error'
+  styleError.hidden = true
+  styleActionRow.className = 'scenario-editor-overlay__action-row'
+  styleDownloadButton.className =
+    'scenario-editor-overlay__button scenario-editor-overlay__button--primary'
+  styleDownloadButton.textContent = '변환된 타일셋 다운로드'
+  styleDownloadButton.download = 'town-32-styled.png'
+  styleDownloadButton.hidden = true
+  styleActionRow.append(styleDownloadButton)
+  styleBody.append(stylePreviewFrame, styleError, styleActionRow)
+  styleSection.append(styleHeader, styleBody)
+
   resultHeader.append(resultHeaderTitle, resultHeaderMeta)
   footer.className = 'scenario-editor-overlay__footer'
   footerHint.className = 'scenario-editor-overlay__footer-hint'
@@ -241,6 +298,7 @@ export const createScenarioEditorOverlay = ({
     errorBanner,
     resultSummaryCard,
     resultGrid,
+    styleSection,
     rawDetails,
     footer
   )
@@ -335,6 +393,48 @@ export const createScenarioEditorOverlay = ({
       rawDetails.open = false
       rawPre.textContent = '원문 JSON이 아직 없습니다.'
     }
+
+    syncStyleView()
+  }
+
+  const syncStyleView = () => {
+    const hasStyledTileset = styledTilesetDataUrl.length > 0
+    const hasStyleError = styleErrorMessage.length > 0
+
+    styleStatus.textContent = isStyling
+      ? '변환 중'
+      : hasStyleError
+        ? '오류'
+        : hasStyledTileset
+          ? '완료'
+          : '대기 중'
+
+    stylePreviewFrame.dataset.state = isStyling
+      ? 'styling'
+      : hasStyledTileset
+        ? 'ready'
+        : 'idle'
+
+    styleResultImage.hidden = !hasStyledTileset
+    if (hasStyledTileset) {
+      styleResultImage.src = styledTilesetDataUrl
+    } else {
+      styleResultImage.removeAttribute('src')
+    }
+    stylePlaceholder.hidden = hasStyledTileset
+    stylePlaceholder.textContent = isStyling
+      ? '시나리오에 맞춰 타일셋을 다시 칠하는 중입니다…'
+      : '생성을 실행하면 시나리오에 맞춘 타일셋이 여기에 나타납니다.'
+
+    styleError.hidden = !hasStyleError
+    styleError.textContent = styleErrorMessage
+
+    styleDownloadButton.hidden = !hasStyledTileset
+    if (hasStyledTileset) {
+      styleDownloadButton.href = styledTilesetDataUrl
+    } else {
+      styleDownloadButton.removeAttribute('href')
+    }
   }
 
   const persistState = () => {
@@ -358,6 +458,8 @@ export const createScenarioEditorOverlay = ({
     rawResponse = ''
     parsedResult = undefined
     errorMessage = ''
+    styledTilesetDataUrl = ''
+    styleErrorMessage = ''
     persistState()
     syncView()
   }
@@ -387,6 +489,8 @@ export const createScenarioEditorOverlay = ({
     rawResponse = ''
     parsedResult = undefined
     errorMessage = ''
+    styledTilesetDataUrl = ''
+    styleErrorMessage = ''
     persistState()
     syncView()
   }
@@ -458,9 +562,32 @@ export const createScenarioEditorOverlay = ({
 
     activeRequest = request
     isGenerating = true
+    isStyling = true
     errorMessage = ''
+    styleErrorMessage = ''
+    styledTilesetDataUrl = ''
     syncView()
 
+    // Quest/NPC text generation and town tileset style transfer share the
+    // same scenario and abort signal, so they run side by side.
+    await Promise.allSettled([
+      requestScenarioText(request),
+      requestStyledTileset(request)
+    ])
+
+    if (activeRequest === request) {
+      activeRequest = undefined
+    }
+
+    isGenerating = false
+    isStyling = false
+    persistState()
+    syncView()
+  }
+
+  const requestScenarioText = async (
+    request: AbortController
+  ): Promise<void> => {
     try {
       const response = await fetch(DEFAULT_LLM_ENDPOINT, {
         method: 'POST',
@@ -521,13 +648,68 @@ export const createScenarioEditorOverlay = ({
           error instanceof Error ? error.message : '시나리오 생성에 실패했습니다.'
       }
       syncView()
-    } finally {
-      if (activeRequest === request) {
-        activeRequest = undefined
+    }
+  }
+
+  const requestStyledTileset = async (
+    request: AbortController
+  ): Promise<void> => {
+    try {
+      const sourceResponse = await fetch(TOWN_TILESET_SOURCE_URL, {
+        signal: request.signal
+      })
+
+      if (!sourceResponse.ok) {
+        throw new Error('원본 town-32.png 타일셋을 불러오지 못했습니다.')
       }
 
-      isGenerating = false
-      persistState()
+      const sourceBlob = await sourceResponse.blob()
+      const form = new FormData()
+
+      form.append('model', TOWN_STYLE_TRANSFER_MODEL)
+      form.append('image', sourceBlob, 'town-32.png')
+      form.append('prompt', buildTownStyleTransferPrompt(scenario))
+      form.append('size', TOWN_STYLE_TRANSFER_SIZE)
+      form.append('n', '1')
+
+      const response = await fetch(TOWN_STYLE_TRANSFER_ENDPOINT, {
+        method: 'POST',
+        headers: {
+          // Do not set Content-Type here; the browser adds the multipart
+          // boundary for the FormData body automatically.
+          Authorization: `Bearer ${apiKey.trim()}`
+        },
+        body: form,
+        signal: request.signal
+      })
+
+      if (!response.ok) {
+        const errorText = (await response.text()).trim()
+
+        throw new Error(
+          errorText.length > 0
+            ? errorText
+            : `타일셋 변환 실패: ${response.status} ${response.statusText}`
+        )
+      }
+
+      const responseBody = (await response.json()) as unknown
+      const styleResult = extractTownStyleTransferResult(responseBody)
+
+      if (!styleResult) {
+        throw new Error('변환된 타일셋 이미지를 응답에서 찾지 못했습니다.')
+      }
+
+      styledTilesetDataUrl = styleResult.imageDataUrl
+      styleErrorMessage = ''
+      syncView()
+    } catch (error) {
+      if (!request.signal.aborted) {
+        styleErrorMessage =
+          error instanceof Error
+            ? error.message
+            : '타일셋 스타일 변환에 실패했습니다.'
+      }
       syncView()
     }
   }
