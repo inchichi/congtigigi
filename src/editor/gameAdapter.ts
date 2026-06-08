@@ -19,6 +19,8 @@ export type GenerationRequest = {
   userPrompt: string
   entity?: GameEntity
   profile?: GameStructureProfile
+  // LLM 게임 분석에서 얻은 게임 설명(이름·엔진·콘텐츠 모델). 있으면 생성을 그 게임답게 유도한다.
+  gameContext?: string
 }
 
 export type GenerationResult = {
@@ -108,13 +110,14 @@ const LEGEND_KIND_BY_GROUP: Record<string, string> = {
 // 적용은 게임 런타임 연결이 필요해 아직 null(미리보기까지).
 const generateEntityLines = async (
   gameName: string,
-  { apiKey, userPrompt, entity }: GenerationRequest
+  { apiKey, userPrompt, entity, gameContext }: GenerationRequest
 ): Promise<GenerationResult> => {
   const target = entity ? `${entity.kind} "${entity.name}"` : '게임 요소'
+  const contextLine = gameContext ? `\n\n게임 정보: ${gameContext}` : ''
   const generated = await generateJsonWithClaude<{ entity: string; lines: string[] }>({
     apiKey,
-    instructions: `${gameName}의 게임 요소에 어울리는 짧은 한국어 대사 또는 설명을 1~4줄 생성한다. 응답에는 JSON만 포함한다.`,
-    input: `${userPrompt}\n\n대상: ${target}`,
+    instructions: `${gameName}의 게임 요소에 어울리는 짧은 한국어 대사 또는 설명을 1~4줄 생성한다. 주어진 게임 정보가 있으면 그 게임의 분위기에 맞춘다.`,
+    input: `${userPrompt}\n\n대상: ${target}${contextLine}`,
     schemaName: 'entity_lines',
     schema: {
       type: 'object',

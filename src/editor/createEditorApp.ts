@@ -339,7 +339,10 @@ export const createEditorApp = ({
         apiKey: apiKey.trim(),
         userPrompt: promptInput.value,
         entity: selectedEntity,
-        profile: game.profile
+        profile: game.profile,
+        gameContext: currentAnalysis
+          ? `${currentAnalysis.game_name} (${currentAnalysis.engine}). 콘텐츠 모델: ${currentAnalysis.content_model}`
+          : undefined
       })
       setStatus(`생성 완료: ${currentResult.label}`)
     } catch (error) {
