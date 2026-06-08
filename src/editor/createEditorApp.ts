@@ -1,10 +1,6 @@
-import { generateEventJsonDraftWithOpenAi } from './openaiEventJsonGenerator'
-import { createHolidayDialogueEventSpecFromGeneratedEventJson } from './eventCodeGenerator'
-import { savePendingEvent } from './pendingEvents'
 import { openProjectDirectory } from './openProjectDirectory'
 import { loadGame, type GameFile, type LoadedGame } from './loadGame'
-import type { GeneratedEventJson } from './eventJsonSchema'
-import type { GameEntity } from './gameAdapter'
+import type { GameEntity, GenerationResult } from './gameAdapter'
 
 type CreateEditorAppInput = {
   mountElement: HTMLElement
@@ -51,7 +47,7 @@ export const createEditorApp = ({
   let game: LoadedGame = loadGame(initialFiles)
   let apiKey = window.localStorage.getItem(API_KEY_STORAGE_KEY) ?? ''
   let selectedEntity: GameEntity | undefined
-  let currentDraft: GeneratedEventJson | undefined
+  let currentResult: GenerationResult | undefined
   let isGenerating = false
   let entityButtons: Array<{ entity: GameEntity; node: HTMLButtonElement }> = []
 
@@ -117,7 +113,7 @@ export const createEditorApp = ({
   const status = el('div', 'text-sm text-zinc-400 min-h-[1.25rem]')
 
   const resultWrap = el('div', 'flex flex-col gap-1.5')
-  resultWrap.append(el('span', 'text-[0.7rem] uppercase tracking-wider text-zinc-500 font-medium', '생성 결과 (JSON)'))
+  resultWrap.append(el('span', 'text-[0.7rem] uppercase tracking-wider text-zinc-500 font-medium', '생성 결과'))
   const result = el('pre', 'm-0 max-h-[40vh] overflow-auto rounded-lg border border-white/10 bg-black/40 p-3 text-[0.72rem] leading-relaxed text-zinc-300 whitespace-pre-wrap break-words')
   resultWrap.append(result)
 
@@ -186,15 +182,13 @@ export const createEditorApp = ({
   }
 
   function render(): void {
-    const canGenerate = Boolean(game.profile)
-
     gameLabel.textContent = game.adapter.name
 
-    if (canGenerate) {
+    if (game.adapter.supportsApply) {
       supportNote.hidden = true
     } else {
       supportNote.hidden = false
-      supportNote.textContent = `${game.adapter.name}: 엔티티 보기 전용입니다. 생성·적용 어댑터는 다음 단계(Stage 2)에서 추가됩니다.`
+      supportNote.textContent = `${game.adapter.name}: 생성은 되지만 라이브 적용은 아직 지원되지 않습니다 (Stage 3). 결과는 미리보기로 확인하세요.`
     }
 
     targetLine.innerHTML = selectedEntity
@@ -206,17 +200,13 @@ export const createEditorApp = ({
     }
 
     generateButton.textContent = isGenerating ? '생성 중...' : '생성'
-    generateButton.disabled = isGenerating || apiKey.trim().length === 0 || !canGenerate
-    applyButton.disabled = !currentDraft || isGenerating || !game.adapter.supportsApply
-    result.textContent = currentDraft
-      ? JSON.stringify(currentDraft, null, 2)
-      : '생성 결과가 여기에 표시됩니다.'
+    generateButton.disabled = isGenerating || apiKey.trim().length === 0
+    applyButton.disabled = !currentResult?.apply || isGenerating
+    result.textContent = currentResult ? currentResult.preview : '생성 결과가 여기에 표시됩니다.'
   }
 
   const runGenerate = async (): Promise<void> => {
-    const profile = game.profile
-
-    if (isGenerating || !profile) {
+    if (isGenerating) {
       return
     }
 
@@ -226,19 +216,17 @@ export const createEditorApp = ({
     }
 
     isGenerating = true
-    setStatus('OpenAI로 생성 중...')
+    setStatus(`${game.adapter.name}로 생성 중...`)
     render()
 
     try {
-      const targetHint = selectedEntity
-        ? ` 이 이벤트의 대상은 반드시 NPC id="${selectedEntity.id}"(${selectedEntity.name}, map=${selectedEntity.mapId})로 한다.`
-        : ''
-      currentDraft = await generateEventJsonDraftWithOpenAi({
+      currentResult = await game.adapter.generate({
         apiKey: apiKey.trim(),
-        userPrompt: `${promptInput.value}${targetHint}`,
-        profile
+        userPrompt: promptInput.value,
+        entity: selectedEntity,
+        profile: game.profile
       })
-      setStatus(`생성 완료: ${currentDraft.event_name}`)
+      setStatus(`생성 완료: ${currentResult.label}`)
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       setStatus(`생성 실패: ${message}`)
@@ -249,19 +237,12 @@ export const createEditorApp = ({
   }
 
   const runApply = (): void => {
-    if (!currentDraft || !game.adapter.supportsApply) {
+    if (!currentResult?.apply) {
       return
     }
 
-    const spec = createHolidayDialogueEventSpecFromGeneratedEventJson(currentDraft)
-
-    if (!spec) {
-      setStatus('적용 실패: 대사 라인이 비어 있습니다.')
-      return
-    }
-
-    savePendingEvent(spec)
-    setStatus(`게임에 적용됨: ${spec.npc.display_name} — 오른쪽 프리뷰에 즉시 반영됩니다.`)
+    currentResult.apply()
+    setStatus('게임에 적용됨 — 오른쪽 라이브 프리뷰에 즉시 반영됩니다.')
   }
 
   const runOpenProject = async (): Promise<void> => {
@@ -276,7 +257,7 @@ export const createEditorApp = ({
 
       game = loaded
       selectedEntity = undefined
-      currentDraft = undefined
+      currentResult = undefined
       renderTree()
       render()
       const entityCount = game.maps.reduce((sum, map) => sum + map.entities.length, 0)
