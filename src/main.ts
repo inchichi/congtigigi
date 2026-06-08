@@ -54,7 +54,7 @@ import {
 } from './game/questLog'
 import { getSceneIntroMessage } from './game/sceneIntro'
 import { createPixiTiledMapView } from './rendering/createPixiTiledMapView'
-import { createLlmPanel } from './editor/createLlmPanel'
+import { loadPendingEvents } from './editor/pendingEvents'
 import type { AudioSettings } from './rendering/createPauseMenuOverlay'
 import type {
   SceneTransitionRequest
@@ -167,30 +167,6 @@ let pendingSceneTransition: SceneTransitionRequest | undefined
 let isSceneTransitionScheduled = false
 let audioSettings = readStoredAudioSettings()
 let refreshEventDraftPreview: (() => void) | undefined
-const llmPanelController = createLlmPanel({
-  mountElement: uiRootElement,
-  getSceneRenderer: () => activeSceneRenderer,
-  mapSources: [
-    {
-      id: 'town',
-      name: 'Town',
-      file: 'src/assets/maps/town.tmx',
-      map: parsedTownMap
-    },
-    {
-      id: 'hunting-ground',
-      name: 'Hunting Ground',
-      file: 'src/assets/maps/hunting-ground.tmx',
-      map: parsedHuntingGroundMap
-    },
-    {
-      id: 'cave',
-      name: 'Cave',
-      file: 'src/assets/maps/cave.tmx',
-      map: parsedCaveMap
-    }
-  ]
-})
 
 const bootstrapScene = async (
   sceneId: SceneId,
@@ -280,7 +256,11 @@ const bootstrapScene = async (
     onRequestSceneChange: scheduleSceneTransition
   })
 
-  llmPanelController.refresh()
+  for (const pendingEvent of loadPendingEvents()) {
+    activeSceneRenderer?.applyEventDraft(pendingEvent, {
+      targetCharacterId: pendingEvent.npc.id
+    })
+  }
 }
 
 const createSceneCharacters = ({
@@ -804,29 +784,6 @@ const renderFatalError = (error: unknown) => {
   `
 }
 
-const isEditableTarget = (target: EventTarget | null): boolean => {
-  if (!(target instanceof HTMLElement)) {
-    return false
-  }
-
-  return (
-    target.matches('input, textarea, select, button') ||
-    target.isContentEditable === true
-  )
-}
-
-window.addEventListener('keydown', (event) => {
-  if (event.code !== 'KeyL') {
-    return
-  }
-
-  if (isEditableTarget(event.target)) {
-    return
-  }
-
-  event.preventDefault()
-  llmPanelController.toggle()
-})
 
 if (import.meta.hot) {
   import.meta.hot.accept('./assets/lua/reply-with-message.lua?raw', (nextModule) => {
