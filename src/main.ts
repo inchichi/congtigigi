@@ -54,7 +54,10 @@ import {
 } from './game/questLog'
 import { getSceneIntroMessage } from './game/sceneIntro'
 import { createPixiTiledMapView } from './rendering/createPixiTiledMapView'
-import { loadPendingEvents } from './editor/pendingEvents'
+import {
+  loadPendingEvents,
+  PENDING_EVENTS_STORAGE_KEY
+} from './editor/pendingEvents'
 import type { AudioSettings } from './rendering/createPauseMenuOverlay'
 import type {
   SceneTransitionRequest
@@ -806,5 +809,19 @@ if (import.meta.hot) {
     })
   })
 }
+
+// 에디터(별도 page/iframe)가 이벤트를 저장하면 같은 origin의 다른 문서에서 storage 이벤트가
+// 발생한다. 게임 프리뷰가 열려 있으면 새로고침 없이 즉시 적용한다.
+window.addEventListener('storage', (event) => {
+  if (event.key !== PENDING_EVENTS_STORAGE_KEY) {
+    return
+  }
+
+  for (const pendingEvent of loadPendingEvents()) {
+    activeSceneRenderer?.applyEventDraft(pendingEvent, {
+      targetCharacterId: pendingEvent.npc.id
+    })
+  }
+})
 
 void bootstrapScene('town').catch(renderFatalError)
