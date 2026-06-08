@@ -48,9 +48,7 @@ export type GameAdapter = {
 export const rpgAdapter: GameAdapter = {
   id: 'my-sample-rpg',
   name: 'My Sample RPG (TS/Pixi)',
-  detect: (fileNames) =>
-    fileNames.includes('town.tmx') ||
-    fileNames.some((name) => name === 'createPixiTiledMapView.ts'),
+  detect: (fileNames) => fileNames.includes('town.tmx'),
   extractEntities: (mapId, objects) =>
     objects
       .filter(

@@ -222,7 +222,7 @@ export const createEditorApp = ({
     }
 
     if (apiKey.trim().length === 0) {
-      setStatus('분석하려면 먼저 OpenAI API 키를 입력하세요.')
+      setStatus('분석하려면 먼저 Claude(Anthropic) API 키를 입력하세요.')
       return
     }
 
@@ -231,18 +231,24 @@ export const createEditorApp = ({
     analyzeButton.textContent = '분석 중...'
     setStatus('LLM이 게임을 분석 중...')
 
+    const filesAtStart = currentFiles
     try {
-      currentAnalysis = await analyzeGame({ apiKey: apiKey.trim(), files: currentFiles })
+      const analysis = await analyzeGame({ apiKey: apiKey.trim(), files: filesAtStart })
+      // 분석 중 다른 프로젝트를 열었으면 이 결과는 버린다(레이스 방지).
+      if (currentFiles !== filesAtStart) {
+        return
+      }
+      currentAnalysis = analysis
       // 하드코딩 어댑터가 엔티티를 못 찾았으면(미지의 게임), 분석 결과로 트리를 채운다.
       const totalEntities = game.maps.reduce((sum, map) => sum + map.entities.length, 0)
       if (totalEntities === 0) {
-        game = { ...game, maps: buildEntitiesFromAnalysis(currentFiles, currentAnalysis) }
+        game = { ...game, maps: buildEntitiesFromAnalysis(filesAtStart, analysis) }
         selectedEntity = undefined
         renderTree()
       }
       renderAnalysis()
       render()
-      setStatus(`분석 완료: ${currentAnalysis.game_name} (${currentAnalysis.engine})`)
+      setStatus(`분석 완료: ${analysis.game_name} (${analysis.engine})`)
     } catch (error) {
       setStatus(`분석 실패: ${error instanceof Error ? error.message : String(error)}`)
     } finally {
@@ -269,6 +275,8 @@ export const createEditorApp = ({
         node.type = 'button'
         node.addEventListener('click', () => {
           selectedEntity = entity
+          // 대상을 바꾸면 이전 생성 결과는 무효 — 새로 생성하게 한다.
+          currentResult = undefined
           render()
         })
         entityButtons.push({ entity, node })
@@ -295,9 +303,19 @@ export const createEditorApp = ({
       supportNote.textContent = `${game.adapter.name}: 생성은 되지만 라이브 적용은 아직 지원되지 않습니다 (Stage 3). 결과는 미리보기로 확인하세요.`
     }
 
-    targetLine.innerHTML = selectedEntity
-      ? `대상: <span class="text-indigo-300 font-medium">${selectedEntity.name}</span> <span class="text-zinc-500">(${selectedEntity.kind} · ${selectedEntity.mapId})</span>`
-      : '<span class="text-zinc-500">왼쪽에서 엔티티를 선택하면 그 대상으로 생성합니다.</span>'
+    // 엔티티 이름/맵은 열린 TMX에서 온 임의 값이므로 textContent로만 넣는다(주입/깨짐 방지).
+    if (selectedEntity) {
+      targetLine.replaceChildren(
+        document.createTextNode('대상: '),
+        el('span', 'text-indigo-300 font-medium', selectedEntity.name),
+        document.createTextNode(' '),
+        el('span', 'text-zinc-500', `(${selectedEntity.kind} · ${selectedEntity.mapId})`)
+      )
+    } else {
+      targetLine.replaceChildren(
+        el('span', 'text-zinc-500', '왼쪽에서 엔티티를 선택하면 그 대상으로 생성합니다.')
+      )
+    }
 
     for (const { entity, node } of entityButtons) {
       node.className = entity.id === selectedEntity?.id ? ENTITY_ACTIVE : ENTITY_BASE
@@ -329,7 +347,7 @@ export const createEditorApp = ({
     }
 
     if (apiKey.trim().length === 0) {
-      setStatus('먼저 OpenAI API 키를 입력하세요.')
+      setStatus('먼저 Claude(Anthropic) API 키를 입력하세요.')
       return
     }
 

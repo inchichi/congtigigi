@@ -56,13 +56,26 @@ export const generateJsonWithClaude = async <T>({
     })
   })
 
-  const payload = (await response.json()) as AnthropicMessageResponse &
-    AnthropicErrorResponse
+  // ok 확인 전에 JSON 파싱하면 비-JSON 에러 바디에서 SyntaxError가 나 실제 에러를 삼킨다.
+  const rawText = await response.text()
+  let payload: AnthropicMessageResponse & AnthropicErrorResponse = {}
+  try {
+    payload = JSON.parse(rawText) as AnthropicMessageResponse & AnthropicErrorResponse
+  } catch {
+    payload = {}
+  }
 
   if (!response.ok) {
     throw new Error(
-      payload.error?.message ??
+      payload.error?.message ||
+        rawText ||
         `Anthropic API request failed with status ${response.status}`
+    )
+  }
+
+  if (payload.stop_reason === 'max_tokens') {
+    throw new Error(
+      'Claude 응답이 max_tokens 한도로 잘렸습니다. 더 짧게 요청하거나 max_tokens를 늘리세요.'
     )
   }
 

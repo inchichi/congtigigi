@@ -34,7 +34,12 @@ const collectFiles = async (
         const file = await (handle as FileSystemFileHandle).getFile()
         out.push({ name, path, text: await file.text() })
       }
-    } else if (handle.kind === 'directory' && !SKIP_DIRS.has(name)) {
+    } else if (
+      handle.kind === 'directory' &&
+      !SKIP_DIRS.has(name) &&
+      // legend-of-lua의 _old/_tilesets 같은 백업·픽스처 폴더는 건너뛴다.
+      !name.startsWith('_')
+    ) {
       await collectFiles(handle as FileSystemDirectoryHandle, path, out)
     }
   }
