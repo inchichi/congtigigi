@@ -1,5 +1,6 @@
 import { openProjectDirectory } from './openProjectDirectory'
 import { loadGame, type GameFile, type LoadedGame } from './loadGame'
+import { analyzeGame, type GameAnalysis } from './analyzeGame'
 import type { GameEntity, GenerationResult } from './gameAdapter'
 
 type CreateEditorAppInput = {
@@ -45,10 +46,13 @@ export const createEditorApp = ({
   gamePreviewUrl
 }: CreateEditorAppInput): void => {
   let game: LoadedGame = loadGame(initialFiles)
+  let currentFiles: GameFile[] = initialFiles
   let apiKey = window.localStorage.getItem(API_KEY_STORAGE_KEY) ?? ''
   let selectedEntity: GameEntity | undefined
   let currentResult: GenerationResult | undefined
+  let currentAnalysis: GameAnalysis | undefined
   let isGenerating = false
+  let isAnalyzing = false
   let entityButtons: Array<{ entity: GameEntity; node: HTMLButtonElement }> = []
 
   // ---------- shell ----------
@@ -76,9 +80,12 @@ export const createEditorApp = ({
   const treeHeader = el('div', 'p-3 border-b border-white/10 flex flex-col gap-2')
   const openButton = el('button', 'rounded-lg px-3 py-2 bg-white/5 text-sm text-zinc-200 text-left transition hover:bg-white/10', '📂 게임 폴더 열기') as HTMLButtonElement
   openButton.type = 'button'
+  const analyzeButton = el('button', 'rounded-lg px-3 py-2 bg-indigo-500/10 text-sm text-indigo-200 text-left transition hover:bg-indigo-500/20 disabled:opacity-50', '🔍 LLM 게임 분석') as HTMLButtonElement
+  analyzeButton.type = 'button'
   treeHeader.append(
     el('div', 'text-[0.7rem] uppercase tracking-wider text-zinc-500 font-medium', '프로젝트'),
-    openButton
+    openButton,
+    analyzeButton
   )
   const treeList = el('div', 'flex-1 overflow-auto p-3 flex flex-col gap-3')
   tree.append(treeHeader, treeList)
@@ -86,6 +93,8 @@ export const createEditorApp = ({
   // ---------- center: generation ----------
   const center = el('main', 'overflow-auto p-5 flex flex-col gap-4')
   const targetLine = el('div', 'text-sm text-zinc-400')
+  const analysisPanel = el('div', 'rounded-lg border border-indigo-500/20 bg-indigo-500/5 p-3 flex flex-col gap-1')
+  analysisPanel.hidden = true
   const supportNote = el('div', 'rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200')
 
   const apiKeyField = el('label', 'flex flex-col gap-1.5')
@@ -117,7 +126,7 @@ export const createEditorApp = ({
   const result = el('pre', 'm-0 max-h-[40vh] overflow-auto rounded-lg border border-white/10 bg-black/40 p-3 text-[0.72rem] leading-relaxed text-zinc-300 whitespace-pre-wrap break-words')
   resultWrap.append(result)
 
-  center.append(targetLine, supportNote, apiKeyField, promptField, actions, status, resultWrap)
+  center.append(targetLine, analysisPanel, supportNote, apiKeyField, promptField, actions, status, resultWrap)
 
   // ---------- right: live game preview ----------
   const preview = el('section', 'border-l border-white/10 flex flex-col min-w-0')
@@ -146,6 +155,57 @@ export const createEditorApp = ({
   // ---------- behavior ----------
   const setStatus = (message: string): void => {
     status.textContent = message
+  }
+
+  const renderAnalysis = (): void => {
+    if (!currentAnalysis) {
+      analysisPanel.hidden = true
+      return
+    }
+
+    analysisPanel.hidden = false
+    const analysis = currentAnalysis
+    analysisPanel.replaceChildren(
+      el('div', 'text-[0.7rem] uppercase tracking-wider text-indigo-300 font-medium', '🔍 LLM 게임 분석'),
+      el('div', 'text-sm text-zinc-100 font-medium', `${analysis.game_name} · ${analysis.engine}`),
+      el('div', 'text-xs text-zinc-400', `콘텐츠 모델: ${analysis.content_model}`),
+      el('div', 'text-xs text-zinc-400', `적용 전략: ${analysis.apply_strategy}`),
+      ...analysis.entity_groups.map((entityGroup) =>
+        el(
+          'div',
+          'text-xs text-zinc-500',
+          `• ${entityGroup.group} → ${entityGroup.kind}${entityGroup.editable ? ' (편집 가능)' : ''}`
+        )
+      )
+    )
+  }
+
+  const runAnalyze = async (): Promise<void> => {
+    if (isAnalyzing) {
+      return
+    }
+
+    if (apiKey.trim().length === 0) {
+      setStatus('분석하려면 먼저 OpenAI API 키를 입력하세요.')
+      return
+    }
+
+    isAnalyzing = true
+    analyzeButton.disabled = true
+    analyzeButton.textContent = '분석 중...'
+    setStatus('LLM이 게임을 분석 중...')
+
+    try {
+      currentAnalysis = await analyzeGame({ apiKey: apiKey.trim(), files: currentFiles })
+      renderAnalysis()
+      setStatus(`분석 완료: ${currentAnalysis.game_name} (${currentAnalysis.engine})`)
+    } catch (error) {
+      setStatus(`분석 실패: ${error instanceof Error ? error.message : String(error)}`)
+    } finally {
+      isAnalyzing = false
+      analyzeButton.disabled = false
+      analyzeButton.textContent = '🔍 LLM 게임 분석'
+    }
   }
 
   const renderTree = (): void => {
@@ -256,12 +316,19 @@ export const createEditorApp = ({
       }
 
       game = loaded
+      currentFiles = files
       selectedEntity = undefined
       currentResult = undefined
+      currentAnalysis = undefined
       renderTree()
+      renderAnalysis()
       render()
       const entityCount = game.maps.reduce((sum, map) => sum + map.entities.length, 0)
       setStatus(`프로젝트 로드: ${game.adapter.name} · 맵 ${game.maps.length}개 · 엔티티 ${entityCount}개`)
+      // 토큰이 있으면 LLM이 이 게임을 자동 분석한다(네 아이디어: 열면 LLM이 이해).
+      if (apiKey.trim().length > 0) {
+        void runAnalyze()
+      }
     } catch (error) {
       if (error instanceof DOMException && error.name === 'AbortError') {
         return
@@ -282,6 +349,9 @@ export const createEditorApp = ({
   openButton.addEventListener('click', () => {
     void runOpenProject()
   })
+  analyzeButton.addEventListener('click', () => {
+    void runAnalyze()
+  })
   popoutButton.addEventListener('click', () => {
     window.open(gamePreviewUrl, 'game-window', 'width=1280,height=720')
   })
@@ -290,5 +360,6 @@ export const createEditorApp = ({
   })
 
   renderTree()
+  renderAnalysis()
   render()
 }
