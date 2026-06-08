@@ -1,5 +1,5 @@
 import { extractTmxObjects } from './tmxObjects'
-import { generateJsonWithOpenAi } from './openaiGenerate'
+import { generateJsonWithClaude } from './anthropicGenerate'
 import type { GameFile } from './loadGame'
 
 // LLM이 임의의 게임 폴더를 이해하게 하는 분석기. 손으로 짠 어댑터 대신, 결정적으로 뽑은
@@ -90,7 +90,7 @@ export const analyzeGame = async ({
   apiKey: string
   files: GameFile[]
 }): Promise<GameAnalysis> =>
-  generateJsonWithOpenAi<GameAnalysis>({
+  generateJsonWithClaude<GameAnalysis>({
     apiKey,
     instructions: [
       '너는 게임 프로젝트 분석기다.',

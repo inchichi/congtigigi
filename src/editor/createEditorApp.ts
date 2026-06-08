@@ -41,7 +41,7 @@ type CreateEditorAppInput = {
   gamePreviewUrl: string
 }
 
-const API_KEY_STORAGE_KEY = 'my-sample-rpg:openai-api-key'
+const API_KEY_STORAGE_KEY = 'my-sample-rpg:anthropic-api-key'
 
 const KIND_ICON: Record<string, string> = {
   npc: '👤',
@@ -130,10 +130,10 @@ export const createEditorApp = ({
   const supportNote = el('div', 'rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200')
 
   const apiKeyField = el('label', 'flex flex-col gap-1.5')
-  apiKeyField.append(el('span', 'text-[0.7rem] uppercase tracking-wider text-zinc-500 font-medium', 'OpenAI API 키'))
+  apiKeyField.append(el('span', 'text-[0.7rem] uppercase tracking-wider text-zinc-500 font-medium', 'Anthropic (Claude) API 키'))
   const apiKeyInput = el('input', 'w-full rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-sm text-zinc-100 outline-none transition focus:border-indigo-500/50 focus:ring-2 focus:ring-indigo-500/30') as HTMLInputElement
   apiKeyInput.type = 'password'
-  apiKeyInput.placeholder = 'sk-...'
+  apiKeyInput.placeholder = 'sk-ant-...'
   apiKeyInput.autocomplete = 'off'
   apiKeyInput.value = apiKey
   apiKeyField.append(apiKeyInput)

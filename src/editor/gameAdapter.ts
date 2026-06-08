@@ -1,10 +1,10 @@
 import type { TmxObject } from './tmxObjects'
 import type { GameStructureProfile } from './gameStructureProfile'
-import { generateEventJsonDraftWithOpenAi } from './openaiEventJsonGenerator'
+import { generateEventJsonDraftWithClaude } from './claudeEventJsonGenerator'
 import { createGeneratedEventJsonValidationIssues } from './eventJsonSchema'
 import { createHolidayDialogueEventSpecFromGeneratedEventJson } from './eventCodeGenerator'
 import { savePendingEvent } from './pendingEvents'
-import { generateJsonWithOpenAi } from './openaiGenerate'
+import { generateJsonWithClaude } from './anthropicGenerate'
 
 // 게임마다 맵/엔티티 규칙·생성·적용이 달라서, 그걸 어댑터로 분리한다. 새 게임 지원 = 새 어댑터 추가.
 export type GameEntity = {
@@ -72,7 +72,7 @@ export const rpgAdapter: GameAdapter = {
     const targetHint = entity
       ? ` 이 이벤트의 대상은 반드시 NPC id="${entity.id}"(${entity.name}, map=${entity.mapId})로 한다.`
       : ''
-    const eventJson = await generateEventJsonDraftWithOpenAi({
+    const eventJson = await generateEventJsonDraftWithClaude({
       apiKey,
       userPrompt: `${userPrompt}${targetHint}`,
       profile
@@ -111,7 +111,7 @@ const generateEntityLines = async (
   { apiKey, userPrompt, entity }: GenerationRequest
 ): Promise<GenerationResult> => {
   const target = entity ? `${entity.kind} "${entity.name}"` : '게임 요소'
-  const generated = await generateJsonWithOpenAi<{ entity: string; lines: string[] }>({
+  const generated = await generateJsonWithClaude<{ entity: string; lines: string[] }>({
     apiKey,
     instructions: `${gameName}의 게임 요소에 어울리는 짧은 한국어 대사 또는 설명을 1~4줄 생성한다. 응답에는 JSON만 포함한다.`,
     input: `${userPrompt}\n\n대상: ${target}`,

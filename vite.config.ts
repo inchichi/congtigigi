@@ -19,6 +19,13 @@ export default defineConfig({
         changeOrigin: true,
         secure: true,
         rewrite: (path) => path.replace(/^\/api\/openai/, '')
+      },
+      // 에디터의 Claude 호출을 서버사이드로 포워딩 → 브라우저 CORS 회피.
+      '/api/anthropic': {
+        target: 'https://api.anthropic.com',
+        changeOrigin: true,
+        secure: true,
+        rewrite: (path) => path.replace(/^\/api\/anthropic/, '')
       }
     }
   },
