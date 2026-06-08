@@ -149,7 +149,9 @@ export const createEditorApp = ({
   generateButton.type = 'button'
   const applyButton = el('button', GHOST_BUTTON, '게임에 적용') as HTMLButtonElement
   applyButton.type = 'button'
-  actions.append(generateButton, applyButton)
+  const exportButton = el('button', GHOST_BUTTON, '↓ 내보내기') as HTMLButtonElement
+  exportButton.type = 'button'
+  actions.append(generateButton, applyButton, exportButton)
 
   const status = el('div', 'text-sm text-zinc-400 min-h-[1.25rem]')
   const validationLine = el('div', 'text-xs')
@@ -317,6 +319,7 @@ export const createEditorApp = ({
     generateButton.disabled = isGenerating || apiKey.trim().length === 0
     applyButton.disabled =
       isGenerating || !currentResult?.apply || (currentResult?.issues.length ?? 0) > 0
+    exportButton.disabled = !currentResult || isGenerating
     result.textContent = currentResult ? currentResult.preview : '생성 결과가 여기에 표시됩니다.'
   }
 
@@ -363,6 +366,22 @@ export const createEditorApp = ({
     setStatus('게임에 적용됨 — 오른쪽 라이브 프리뷰에 즉시 반영됩니다.')
   }
 
+  const runExport = (): void => {
+    if (!currentResult) {
+      return
+    }
+
+    const fileName = `${currentResult.label || 'generated'}.json`
+    const blob = new Blob([currentResult.preview], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = fileName
+    link.click()
+    URL.revokeObjectURL(url)
+    setStatus(`내보냄: ${fileName}`)
+  }
+
   const runOpenProject = async (): Promise<void> => {
     try {
       const files = await openProjectDirectory()
@@ -404,6 +423,7 @@ export const createEditorApp = ({
     void runGenerate()
   })
   applyButton.addEventListener('click', runApply)
+  exportButton.addEventListener('click', runExport)
   openButton.addEventListener('click', () => {
     void runOpenProject()
   })
