@@ -54,7 +54,7 @@ import {
 } from './game/questLog'
 import { getSceneIntroMessage } from './game/sceneIntro'
 import { createPixiTiledMapView } from './rendering/createPixiTiledMapView'
-import { createLlmPanel } from './ui/createLlmPanel'
+import { createLlmPanel } from './editor/createLlmPanel'
 import type { AudioSettings } from './rendering/createPauseMenuOverlay'
 import type {
   SceneTransitionRequest
@@ -169,7 +169,27 @@ let audioSettings = readStoredAudioSettings()
 let refreshEventDraftPreview: (() => void) | undefined
 const llmPanelController = createLlmPanel({
   mountElement: uiRootElement,
-  getSceneRenderer: () => activeSceneRenderer
+  getSceneRenderer: () => activeSceneRenderer,
+  mapSources: [
+    {
+      id: 'town',
+      name: 'Town',
+      file: 'src/assets/maps/town.tmx',
+      map: parsedTownMap
+    },
+    {
+      id: 'hunting-ground',
+      name: 'Hunting Ground',
+      file: 'src/assets/maps/hunting-ground.tmx',
+      map: parsedHuntingGroundMap
+    },
+    {
+      id: 'cave',
+      name: 'Cave',
+      file: 'src/assets/maps/cave.tmx',
+      map: parsedCaveMap
+    }
+  ]
 })
 
 const bootstrapScene = async (

@@ -1,23 +1,31 @@
 import {
   analyzeCurrentGameStructure,
   type GameStructureAnalysisProgress
-} from '../llm/gameStructureAnalyzer'
-import { CURRENT_GAME_PROJECT_PROFILE } from '../llm/currentGameProjectSnapshot'
+} from './gameStructureAnalyzer'
+import { CURRENT_GAME_PROJECT_PROFILE } from './currentGameProjectSnapshot'
+import {
+  buildGameStructureProfile,
+  type EditorMapSource
+} from './buildGameStructureProfile'
 import { registerDynamicEventDefinition } from '../events/DynamicEventManager'
 import {
   createGeneratedEventJsonValidationIssues,
   type GeneratedEventJson
-} from '../llm/eventJsonSchema'
+} from './eventJsonSchema'
 import {
   createHolidayDialogueEventSpecFromGeneratedEventJson,
   generateEventCodePreview
-} from '../llm/eventCodeGenerator'
+} from './eventCodeGenerator'
+import { generateEventJsonDraftWithOpenAi } from './openaiEventJsonGenerator'
 import {
-  generateMockEventJsonDraft,
-} from '../llm/eventJsonGenerator'
+  appendEventEvaluation,
+  createEvaluationAcceptanceStats,
+  loadEventEvaluations,
+  type EventEvaluationVerdict
+} from './eventEvaluator'
 import type {
   GameStructureAnalysisResult
-} from '../llm/gameStructureProfile'
+} from './gameStructureProfile'
 import type { HolidayDialogueEventSpec } from '../game/eventGeneration'
 import type { ApplyEventDraftResult } from '../rendering/createPixiTiledMapView'
 
@@ -31,6 +39,8 @@ type SceneRenderer = {
 export type CreateLlmPanelInput = {
   mountElement: HTMLElement
   getSceneRenderer: () => SceneRenderer | undefined
+  // 게임이 이미 파싱한 맵들. 주어지면 Validator/프롬프트의 ground-truth를 실제 .tmx에서 만든다.
+  mapSources?: EditorMapSource[]
 }
 
 export type LlmPanelController = {
@@ -73,8 +83,13 @@ type PanelBounds = {
 
 export const createLlmPanel = ({
   mountElement,
-  getSceneRenderer
+  getSceneRenderer,
+  mapSources
 }: CreateLlmPanelInput): LlmPanelController => {
+  const baseProfile =
+    mapSources && mapSources.length > 0
+      ? buildGameStructureProfile(mapSources, CURRENT_GAME_PROJECT_PROFILE)
+      : CURRENT_GAME_PROJECT_PROFILE
   const overlayRoot = document.createElement('section')
   const panel = document.createElement('div')
   const titleBar = document.createElement('div')
@@ -145,9 +160,17 @@ export const createLlmPanel = ({
   const rightResizeHandle = document.createElement('div')
   const topResizeHandle = document.createElement('div')
   const bottomResizeHandle = document.createElement('div')
+  const evaluatorTitle = document.createElement('p')
+  const evaluatorHint = document.createElement('p')
+  const evaluatorReasonInput = document.createElement('input')
+  const evaluatorActionRow = document.createElement('div')
+  const evaluatorAcceptButton = document.createElement('button')
+  const evaluatorRejectButton = document.createElement('button')
+  const evaluatorStats = document.createElement('p')
 
   let isOpen = false
   let isAnalyzing = false
+  let isGenerating = false
   let isMinimized = false
   let isMaximized = false
   let apiKeyConfirmed = false
@@ -161,6 +184,7 @@ export const createLlmPanel = ({
   let generatedCode = ''
   let analysisProgress: GameStructureAnalysisProgress | undefined
   let fieldRows: FieldRowController[] = []
+  let evaluations = loadEventEvaluations()
 
   overlayRoot.className = 'event-draft-panel llm-panel'
   panel.className = 'event-draft-panel__window llm-panel__window'
@@ -287,6 +311,24 @@ export const createLlmPanel = ({
   codeTitle.textContent = '코드 미리보기'
   codePreviewTitle.textContent = '코드 미리보기'
   generatedEventTitle.textContent = '생성 기록'
+  evaluatorTitle.className = 'event-draft-panel__section-title'
+  evaluatorTitle.textContent = '품질 평가 (Evaluator · 사람 이진 판정)'
+  evaluatorHint.className = 'event-draft-panel__hint'
+  evaluatorHint.textContent =
+    '생성 결과가 쓸 만한지 사람이 acceptable / not으로 판정한다. 자동 검증(Validator)과 분리된 단계다.'
+  evaluatorReasonInput.type = 'text'
+  evaluatorReasonInput.className = 'event-draft-panel__api-key-input'
+  evaluatorReasonInput.placeholder = '사유 (선택)'
+  evaluatorReasonInput.spellcheck = false
+  evaluatorActionRow.className = 'event-draft-panel__actions llm-panel__actions'
+  evaluatorAcceptButton.type = 'button'
+  evaluatorAcceptButton.textContent = 'Acceptable'
+  evaluatorAcceptButton.className = 'event-draft-panel__button'
+  evaluatorRejectButton.type = 'button'
+  evaluatorRejectButton.textContent = 'Not acceptable'
+  evaluatorRejectButton.className = 'event-draft-panel__button'
+  evaluatorStats.className = 'event-draft-panel__status'
+  evaluatorActionRow.append(evaluatorAcceptButton, evaluatorRejectButton)
 
   progressWrap.append(progressBar, progressBarFill)
   gusCard.append(gusTitle, gusScore, gusMeta, gusThreshold, gusDetailList)
@@ -315,7 +357,12 @@ export const createLlmPanel = ({
     editTitle,
     fieldEditorTitle,
     fieldHint,
-    fieldEditorList
+    fieldEditorList,
+    evaluatorTitle,
+    evaluatorHint,
+    evaluatorReasonInput,
+    evaluatorActionRow,
+    evaluatorStats
   )
   codePageBody.append(
     codeTitle,
@@ -358,6 +405,7 @@ export const createLlmPanel = ({
     renderGenerationGate()
     renderDraftUi()
     renderCodeUi()
+    renderEvaluatorUi()
   }
 
   const syncPageUi = () => {
@@ -415,7 +463,7 @@ export const createLlmPanel = ({
       gusMeta.textContent = '상태: 분석 전'
       gusDetailList.replaceChildren()
       analysisNotesList.replaceChildren()
-      profilePreview.textContent = JSON.stringify(CURRENT_GAME_PROJECT_PROFILE, null, 2)
+      profilePreview.textContent = JSON.stringify(baseProfile, null, 2)
     }
   }
 
@@ -423,7 +471,8 @@ export const createLlmPanel = ({
     const analysisReady = analysisResult?.gus.status === 'passed'
 
     lockingNotice.hidden = false
-    generateButton.disabled = !analysisReady || isAnalyzing
+    generateButton.disabled = !analysisReady || isAnalyzing || isGenerating
+    generateButton.textContent = isGenerating ? '생성 중...' : 'JSON 생성'
     confirmButton.disabled = !analysisReady || !currentDraft || hasDraftValidationErrors()
     codeButton.disabled = !analysisReady || !confirmedDraft || hasDraftValidationErrors()
     applyButton.disabled = !analysisReady || !confirmedDraft || hasDraftValidationErrors()
@@ -465,22 +514,58 @@ export const createLlmPanel = ({
     codePreview.textContent = generatedCode || '코드 생성 버튼을 누르면 미리보기가 표시된다.'
   }
 
+  const renderEvaluatorUi = () => {
+    const canEvaluate = Boolean(currentDraft) && !isGenerating
+
+    evaluatorAcceptButton.disabled = !canEvaluate
+    evaluatorRejectButton.disabled = !canEvaluate
+    evaluatorReasonInput.disabled = !canEvaluate
+
+    const stats = createEvaluationAcceptanceStats(evaluations)
+
+    evaluatorStats.textContent =
+      stats.total === 0
+        ? '아직 평가 기록 없음 (acceptance rate = accepted / total)'
+        : `acceptance rate: ${stats.accepted}/${stats.total} = ${Math.round(stats.acceptance_rate * 100)}% (목표 60~70%+)`
+  }
+
+  const runEvaluation = (verdict: EventEvaluationVerdict) => {
+    if (!currentDraft) {
+      return
+    }
+
+    evaluations = appendEventEvaluation({
+      event_id: currentDraft.event_id,
+      event_name: currentDraft.event_name,
+      verdict,
+      reason: evaluatorReasonInput.value.trim(),
+      evaluated_at: Date.now()
+    })
+    evaluatorReasonInput.value = ''
+    generatedEventHistory.prepend(
+      createEventHistoryItem(
+        `평가 기록: ${verdict === 'acceptable' ? 'Acceptable' : 'Not acceptable'} (${currentDraft.event_name})`
+      )
+    )
+    refresh()
+  }
+
   const hasDraftValidationErrors = (): boolean =>
     currentDraft
-      ? createGeneratedEventJsonValidationIssues(currentDraft, analysisResult?.profile ?? CURRENT_GAME_PROJECT_PROFILE).length > 0
+      ? createGeneratedEventJsonValidationIssues(currentDraft, analysisResult?.profile ?? baseProfile).length > 0
       : true
 
   const getValidationSummary = (draft: GeneratedEventJson): string => {
     const issues = createGeneratedEventJsonValidationIssues(
       draft,
-      analysisResult?.profile ?? CURRENT_GAME_PROJECT_PROFILE
+      analysisResult?.profile ?? baseProfile
     )
 
     if (issues.length === 0) {
-      return 'JSON 검증 통과'
+      return 'Validator (자동 검증): 통과'
     }
 
-    return `검증 실패: ${issues.map((issue) => `${issue.path} - ${issue.message}`).join(' / ')}`
+    return `Validator (자동 검증) 실패: ${issues.map((issue) => `${issue.path} - ${issue.message}`).join(' / ')}`
   }
 
   const rebuildFieldEditors = (json: GeneratedEventJson) => {
@@ -877,6 +962,7 @@ export const createLlmPanel = ({
 
     try {
       analysisResult = await analyzeCurrentGameStructure({
+        profile: baseProfile,
         onProgress: (progress) => {
           analysisProgress = progress
           refresh()
@@ -890,22 +976,44 @@ export const createLlmPanel = ({
     }
   }
 
-  const runMockGeneration = () => {
-    if (!analysisResult) {
+  const runGeneration = async () => {
+    if (!analysisResult || isGenerating) {
       return
     }
 
-    const generateResult = generateMockEventJsonDraft(
-      promptInput.value,
-      analysisResult.profile
-    )
-    currentDraft = generateResult.eventJson
-    confirmedDraft = undefined
-    generatedCode = ''
-    rebuildFieldEditors(currentDraft)
-    generatedEventHistory.prepend(createEventHistoryItem('JSON 초안 생성 완료'))
-    currentPage = 'draft'
+    const apiKey = openAiApiKey.trim()
+
+    if (apiKey.length === 0) {
+      generatedEventHistory.prepend(
+        createEventHistoryItem('생성 실패: OpenAI API 키가 필요하다.')
+      )
+      refresh()
+      return
+    }
+
+    isGenerating = true
+    generatedEventHistory.prepend(createEventHistoryItem('OpenAI로 JSON 초안 생성 중...'))
     refresh()
+
+    try {
+      const eventJson = await generateEventJsonDraftWithOpenAi({
+        apiKey,
+        userPrompt: promptInput.value,
+        profile: analysisResult.profile
+      })
+      currentDraft = eventJson
+      confirmedDraft = undefined
+      generatedCode = ''
+      rebuildFieldEditors(currentDraft)
+      generatedEventHistory.prepend(createEventHistoryItem('JSON 초안 생성 완료 (LLM)'))
+      currentPage = 'draft'
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      generatedEventHistory.prepend(createEventHistoryItem(`LLM 생성 실패: ${message}`))
+    } finally {
+      isGenerating = false
+      refresh()
+    }
   }
 
   const runConfirm = () => {
@@ -1030,7 +1138,9 @@ export const createLlmPanel = ({
     currentPage = 'code'
     syncPageUi()
   })
-  generateButton.addEventListener('click', runMockGeneration)
+  generateButton.addEventListener('click', () => {
+    void runGeneration()
+  })
   confirmButton.addEventListener('click', runConfirm)
   codeButton.addEventListener('click', runCodeGeneration)
   applyButton.addEventListener('click', runApply)
@@ -1059,6 +1169,10 @@ export const createLlmPanel = ({
   })
   promptInput.addEventListener('keydown', stopPropagationWhenEditing)
   promptInput.addEventListener('keyup', stopPropagationWhenEditing)
+  evaluatorAcceptButton.addEventListener('click', () => runEvaluation('acceptable'))
+  evaluatorRejectButton.addEventListener('click', () => runEvaluation('not_acceptable'))
+  evaluatorReasonInput.addEventListener('keydown', stopPropagationWhenEditing)
+  evaluatorReasonInput.addEventListener('keyup', stopPropagationWhenEditing)
 
   header.append(hint)
   refresh()

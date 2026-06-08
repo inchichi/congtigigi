@@ -34,6 +34,11 @@ This document is a short guide for module boundaries and code placement.
 - `src/game/tiled/`: TMX/TSX parsing, tile metadata, and event-layer data extraction.
 - `src/game/tiled/createNpcCharactersFromEventLayers.ts`: translate `character` object-layer events plus `controller.*`, `monster.level`, and optional `displayText` TMX properties into shared NPC character state.
 - `src/game/tiled/createMapPortalsFromEventLayers.ts`: translate `portal` object-layer events into scene transition data for map exits and entrances.
+- `src/editor/`: the LLM game-content editor, kept separate from the game runtime. It reads a game-structure profile, generates an event draft, validates it, and hands a `HolidayDialogueEventSpec` to the game through the scene renderer's `applyEventDraft` sink. It depends on the game only through that contract (`HolidayDialogueEventSpec`, `ApplyEventDraftResult`), not game internals.
+- `src/editor/createLlmPanel.ts`: in-game DOM overlay opened with `L` that drives the editor flow — API-key gate, game-structure analysis and GUS readiness gate, natural-language to event JSON generation, field editing and validation, code preview, and apply-to-scene.
+- `src/editor/openaiEventJsonGenerator.ts`: real OpenAI Responses API call that returns a validated `GeneratedEventJson`, injecting the current game-structure profile (existing map/npc/item ids) into the prompt so generated events reference real assets.
+- `src/editor/gameStructureProfile.ts`, `src/editor/currentGameProjectSnapshot.ts`, `src/editor/gameStructureAnalyzer.ts`, `src/editor/gusCalculator.ts`: the game-structure model, the current (static) project snapshot, the analysis step, and the GUS readiness score used as a generation gate.
+- `src/editor/eventJsonSchema.ts`, `src/editor/eventJsonGenerator.ts`, `src/editor/eventCodeGenerator.ts`: the generated-event JSON shape plus its deterministic validator, the rule-based mock generator (kept for tests and offline fallback), and the code/spec preview helpers.
 - `src/rendering/`: PixiJS rendering code and asset-to-view adaptation.
 - `src/rendering/`: map tile rendering, depth sorting, event character presentation, and fixed-screen HUD overlays.
 - `src/rendering/loadMonsterSheetTextures.ts`: shared sheet slicing and background-keying helper for monster sprite sheets.

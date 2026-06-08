@@ -113,12 +113,22 @@ export const createGeneratedEventJsonValidationIssues = (
     })
   }
 
-  if (!profile.npcs.some((npc) => npc.id === eventJson.npc.id)) {
+  const matchedNpc = profile.npcs.find((npc) => npc.id === eventJson.npc.id)
+
+  if (!matchedNpc) {
     pushOrRequireNewAssetIssue({
       issues,
       requiresNewAsset: eventJson.requires_new_asset === true,
       path: 'npc.id',
       message: `존재하는 NPC ID가 아니다: ${eventJson.npc.id}`
+    })
+  } else if (
+    profile.maps.some((map) => map.id === eventJson.location.map_id) &&
+    matchedNpc.map !== eventJson.location.map_id
+  ) {
+    issues.push({
+      path: 'npc.id',
+      message: `NPC '${eventJson.npc.id}'는 '${matchedNpc.map}' 맵 소속인데 location.map_id가 '${eventJson.location.map_id}'이다.`
     })
   }
 

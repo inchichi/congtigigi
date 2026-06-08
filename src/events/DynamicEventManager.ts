@@ -1,4 +1,4 @@
-import type { GeneratedEventJson } from '../llm/eventJsonSchema'
+import type { GeneratedEventJson } from '../editor/eventJsonSchema'
 
 export type DynamicEventDefinition = {
   event_json: GeneratedEventJson
