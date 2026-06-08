@@ -87,6 +87,10 @@ export const createEditorApp = ({
   let isGenerating = false
   let isAnalyzing = false
   let entityButtons: Array<{ entity: GameEntity; node: HTMLButtonElement }> = []
+  // 세션 내 생성 결과 누적(최신 우선, 최대 10개). 데모에서 여러 생성을 비교·재선택하려는 용도.
+  const HISTORY_LIMIT = 10
+  let history: Array<{ n: number; result: GenerationResult }> = []
+  let historyCounter = 0
 
   // ---------- shell ----------
   const root = el('div', 'h-screen w-screen flex flex-col bg-zinc-950 text-zinc-100 overflow-hidden')
@@ -166,7 +170,13 @@ export const createEditorApp = ({
   const result = el('pre', 'm-0 max-h-[40vh] overflow-auto rounded-lg border border-white/10 bg-black/40 p-3 text-[0.72rem] leading-relaxed text-zinc-300 whitespace-pre-wrap break-words')
   resultWrap.append(result)
 
-  center.append(targetLine, analysisPanel, supportNote, apiKeyField, promptField, actions, status, validationLine, resultWrap)
+  const historyWrap = el('div', 'flex flex-col gap-1.5')
+  historyWrap.hidden = true
+  historyWrap.append(el('span', 'text-[0.7rem] uppercase tracking-wider text-zinc-500 font-medium', '생성 히스토리'))
+  const historyList = el('div', 'flex flex-col gap-1')
+  historyWrap.append(historyList)
+
+  center.append(targetLine, analysisPanel, supportNote, apiKeyField, promptField, actions, status, validationLine, resultWrap, historyWrap)
 
   // ---------- right: live game preview ----------
   const preview = el('section', 'border-l border-white/10 flex flex-col min-w-0')
@@ -299,6 +309,35 @@ export const createEditorApp = ({
     treeList.replaceChildren(...groups)
   }
 
+  const renderHistory = (): void => {
+    if (history.length === 0) {
+      historyWrap.hidden = true
+      return
+    }
+
+    historyWrap.hidden = false
+    historyList.replaceChildren(
+      ...history.map((entry) => {
+        const active = entry.result === currentResult
+        const node = el(
+          'button',
+          active
+            ? 'text-left rounded-md px-2.5 py-1.5 text-xs bg-indigo-500/15 text-indigo-200 transition'
+            : 'text-left rounded-md px-2.5 py-1.5 text-xs text-zinc-400 transition hover:bg-white/5 hover:text-zinc-100'
+        ) as HTMLButtonElement
+        node.type = 'button'
+        const mark = entry.result.issues.length === 0 ? '✅' : '⚠️'
+        // 라벨은 LLM/열린 파일에서 온 임의 값이라 textContent로만 넣는다(주입/깨짐 방지).
+        node.textContent = `#${entry.n} ${mark} ${entry.result.label}`
+        node.addEventListener('click', () => {
+          currentResult = entry.result
+          render()
+        })
+        return node
+      })
+    )
+  }
+
   function render(): void {
     gameLabel.textContent = game.adapter.name
 
@@ -345,6 +384,7 @@ export const createEditorApp = ({
       isGenerating || !currentResult?.apply || (currentResult?.issues.length ?? 0) > 0
     exportButton.disabled = !currentResult || isGenerating
     result.textContent = currentResult ? currentResult.preview : '생성 결과가 여기에 표시됩니다.'
+    renderHistory()
   }
 
   const runGenerate = async (): Promise<void> => {
@@ -376,6 +416,8 @@ export const createEditorApp = ({
           ? `${currentAnalysis.game_name} (${currentAnalysis.engine}). 콘텐츠 모델: ${currentAnalysis.content_model}`
           : undefined
       })
+      historyCounter += 1
+      history = [{ n: historyCounter, result: currentResult }, ...history].slice(0, HISTORY_LIMIT)
       setStatus(`생성 완료: ${currentResult.label}`)
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
@@ -431,6 +473,8 @@ export const createEditorApp = ({
       selectedEntity = undefined
       currentResult = undefined
       currentAnalysis = undefined
+      history = []
+      historyCounter = 0
       renderTree()
       renderAnalysis()
       render()
@@ -454,6 +498,8 @@ export const createEditorApp = ({
     selectedEntity = undefined
     currentResult = undefined
     currentAnalysis = undefined
+    history = []
+    historyCounter = 0
     renderTree()
     renderAnalysis()
     render()
