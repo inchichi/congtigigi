@@ -120,13 +120,15 @@ export const createEditorApp = ({
   actions.append(generateButton, applyButton)
 
   const status = el('div', 'text-sm text-zinc-400 min-h-[1.25rem]')
+  const validationLine = el('div', 'text-xs')
+  validationLine.hidden = true
 
   const resultWrap = el('div', 'flex flex-col gap-1.5')
   resultWrap.append(el('span', 'text-[0.7rem] uppercase tracking-wider text-zinc-500 font-medium', '생성 결과'))
   const result = el('pre', 'm-0 max-h-[40vh] overflow-auto rounded-lg border border-white/10 bg-black/40 p-3 text-[0.72rem] leading-relaxed text-zinc-300 whitespace-pre-wrap break-words')
   resultWrap.append(result)
 
-  center.append(targetLine, analysisPanel, supportNote, apiKeyField, promptField, actions, status, resultWrap)
+  center.append(targetLine, analysisPanel, supportNote, apiKeyField, promptField, actions, status, validationLine, resultWrap)
 
   // ---------- right: live game preview ----------
   const preview = el('section', 'border-l border-white/10 flex flex-col min-w-0')
@@ -259,9 +261,22 @@ export const createEditorApp = ({
       node.className = entity.id === selectedEntity?.id ? ENTITY_ACTIVE : ENTITY_BASE
     }
 
+    if (!currentResult) {
+      validationLine.hidden = true
+    } else if (currentResult.issues.length === 0) {
+      validationLine.hidden = false
+      validationLine.className = 'text-xs text-emerald-300'
+      validationLine.textContent = '✅ Validator (생성과 분리된 자동 검증): 통과'
+    } else {
+      validationLine.hidden = false
+      validationLine.className = 'text-xs text-amber-300'
+      validationLine.textContent = `⚠️ Validator: ${currentResult.issues.join(' / ')}`
+    }
+
     generateButton.textContent = isGenerating ? '생성 중...' : '생성'
     generateButton.disabled = isGenerating || apiKey.trim().length === 0
-    applyButton.disabled = !currentResult?.apply || isGenerating
+    applyButton.disabled =
+      isGenerating || !currentResult?.apply || (currentResult?.issues.length ?? 0) > 0
     result.textContent = currentResult ? currentResult.preview : '생성 결과가 여기에 표시됩니다.'
   }
 

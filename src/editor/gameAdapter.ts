@@ -1,6 +1,7 @@
 import type { TmxObject } from './tmxObjects'
 import type { GameStructureProfile } from './gameStructureProfile'
 import { generateEventJsonDraftWithOpenAi } from './openaiEventJsonGenerator'
+import { createGeneratedEventJsonValidationIssues } from './eventJsonSchema'
 import { createHolidayDialogueEventSpecFromGeneratedEventJson } from './eventCodeGenerator'
 import { savePendingEvent } from './pendingEvents'
 import { generateJsonWithOpenAi } from './openaiGenerate'
@@ -23,6 +24,8 @@ export type GenerationRequest = {
 export type GenerationResult = {
   label: string
   preview: string
+  // 생성과 분리된 결정적 검증(Validator) 결과. 빈 배열이면 통과(이사님 #1: 생성/검증 분리).
+  issues: string[]
   // 게임에 적용하는 방법. null이면 이 게임은 아직 적용 미지원(생성 미리보기까지).
   apply: (() => void) | null
 }
@@ -75,9 +78,15 @@ export const rpgAdapter: GameAdapter = {
       profile
     })
 
+    // 생성과 분리된 검증 단계: 필드 + map/npc/item ID 실존성 + 맵-NPC 일치.
+    const issues = createGeneratedEventJsonValidationIssues(eventJson, profile).map(
+      (issue) => `${issue.path} - ${issue.message}`
+    )
+
     return {
       label: eventJson.event_name,
       preview: JSON.stringify(eventJson, null, 2),
+      issues,
       apply: () => {
         const spec = createHolidayDialogueEventSpecFromGeneratedEventJson(eventJson)
         if (spec) {
@@ -136,6 +145,7 @@ export const legendOfLuaAdapter: GameAdapter = {
     return {
       label: generated.entity || (entity?.name ?? '생성 결과'),
       preview: JSON.stringify(generated, null, 2),
+      issues: [],
       // Love2D 런타임 라이브 적용은 Stage 3.
       apply: null
     }
