@@ -114,10 +114,13 @@ export const createEditorApp = ({
   openButton.type = 'button'
   const analyzeButton = el('button', 'rounded-lg px-3 py-2 bg-indigo-500/10 text-sm text-indigo-200 text-left transition hover:bg-indigo-500/20 disabled:opacity-50', '🔍 LLM 게임 분석') as HTMLButtonElement
   analyzeButton.type = 'button'
+  const resetButton = el('button', 'rounded-lg px-3 py-1.5 bg-white/5 text-xs text-zinc-400 text-left transition hover:bg-white/10 hover:text-zinc-200', '🏠 내 게임으로 복귀') as HTMLButtonElement
+  resetButton.type = 'button'
   treeHeader.append(
     el('div', 'text-[0.7rem] uppercase tracking-wider text-zinc-500 font-medium', '프로젝트'),
     openButton,
-    analyzeButton
+    analyzeButton,
+    resetButton
   )
   const treeList = el('div', 'flex-1 overflow-auto p-3 flex flex-col gap-3')
   tree.append(treeHeader, treeList)
@@ -432,11 +435,24 @@ export const createEditorApp = ({
     }
   }
 
+  const runReset = (): void => {
+    game = loadGame(initialFiles)
+    currentFiles = initialFiles
+    selectedEntity = undefined
+    currentResult = undefined
+    currentAnalysis = undefined
+    renderTree()
+    renderAnalysis()
+    render()
+    setStatus('내 게임으로 복귀했습니다.')
+  }
+
   apiKeyInput.addEventListener('input', () => {
     apiKey = apiKeyInput.value
     window.localStorage.setItem(API_KEY_STORAGE_KEY, apiKey)
     render()
   })
+  resetButton.addEventListener('click', runReset)
   generateButton.addEventListener('click', () => {
     void runGenerate()
   })
