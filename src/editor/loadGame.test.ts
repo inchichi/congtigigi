@@ -35,6 +35,19 @@ describe('loadGame', () => {
     expect(game.profile?.npcs.map((npc) => npc.id)).toEqual(['blacksmith'])
   })
 
+  it('does not throw when a map fails to parse — loads it empty and records the path', () => {
+    const game = loadGame([
+      file('town.tmx', rpgTmx),
+      file('broken.tmx', 'not valid xml at all')
+    ])
+
+    expect(game.parseErrors).toEqual(['broken.tmx'])
+    // 멀쩡한 맵은 그대로, 깨진 맵은 엔티티 0개로 들어온다(에디터가 통째로 죽지 않음).
+    expect(game.maps.map((map) => map.id)).toEqual(['town', 'broken'])
+    expect(game.maps[1].entities).toEqual([])
+    expect(game.profile?.npcs.map((npc) => npc.id)).toEqual(['blacksmith'])
+  })
+
   it('loads legend-of-lua entities but no generation profile (apply unsupported yet)', () => {
     const game = loadGame([file('conf.lua', ''), file('test.tmx', legendTmx)])
 

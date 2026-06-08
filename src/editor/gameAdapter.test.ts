@@ -50,9 +50,17 @@ describe('extractTmxObjects', () => {
 
   it('throws on a fatally unparseable TMX so callers can distinguish it from an empty map', () => {
     expect(() => extractTmxObjects('')).toThrow(/TMX 파싱 실패/u)
-    expect(() => extractTmxObjects('<map><objectgroup name="x"><object ')).toThrow(
-      /TMX 파싱 실패/u
+    expect(() => extractTmxObjects('   ')).toThrow(/TMX 파싱 실패/u)
+    expect(() => extractTmxObjects('not xml at all')).toThrow(/TMX 파싱 실패/u)
+  })
+
+  it('still parses a usable map whose attribute has a recoverable stray entity ref', () => {
+    // &foo;는 xmldom의 error 레벨을 내지만 문서는 멀쩡히 나온다 — 버리지 말고 파싱해야 한다.
+    const objects = extractTmxObjects(
+      '<map><objectgroup name="c"><object id="1" name="Tom &foo; J" type="character"/></objectgroup></map>'
     )
+    expect(objects).toHaveLength(1)
+    expect(objects[0].id).toBe('1')
   })
 })
 

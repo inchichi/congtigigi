@@ -207,6 +207,13 @@ export const createEditorApp = ({
     status.textContent = message
   }
 
+  // 파싱 실패한 맵이 있으면 상태 메시지 끝에 붙일 경고(없으면 빈 문자열). loadGame이 throw 대신
+  // game.parseErrors로 모아주므로, 에디터가 통째로 안 뜨는 일 없이 실패를 사용자에게 알린다.
+  const parseErrorNote = (): string =>
+    game.parseErrors.length > 0
+      ? ` · ⚠️ 파싱 실패 맵 ${game.parseErrors.length}개: ${game.parseErrors.join(', ')}`
+      : ''
+
   const renderAnalysis = (): void => {
     if (!currentAnalysis) {
       analysisPanel.hidden = true
@@ -257,9 +264,11 @@ export const createEditorApp = ({
       const totalEntities = game.maps.reduce((sum, map) => sum + map.entities.length, 0)
       if (totalEntities === 0) {
         game = { ...game, maps: buildEntitiesFromAnalysis(filesAtStart, analysis) }
-        // 트리를 새 엔티티로 갈아끼우므로, 이전 대상의 생성 결과는 무효 처리한다.
+        // 트리를 새 엔티티로 갈아끼우므로, 이전 대상의 생성 결과·히스토리는 모두 무효 처리한다.
         selectedEntity = undefined
         currentResult = undefined
+        history = []
+        historyCounter = 0
         renderTree()
       }
       renderAnalysis()
@@ -479,7 +488,9 @@ export const createEditorApp = ({
       renderAnalysis()
       render()
       const entityCount = game.maps.reduce((sum, map) => sum + map.entities.length, 0)
-      setStatus(`프로젝트 로드: ${game.adapter.name} · 맵 ${game.maps.length}개 · 엔티티 ${entityCount}개`)
+      setStatus(
+        `프로젝트 로드: ${game.adapter.name} · 맵 ${game.maps.length}개 · 엔티티 ${entityCount}개${parseErrorNote()}`
+      )
       // 토큰이 있으면 LLM이 이 게임을 자동 분석한다(네 아이디어: 열면 LLM이 이해).
       if (apiKey.trim().length > 0) {
         void runAnalyze()
@@ -503,7 +514,7 @@ export const createEditorApp = ({
     renderTree()
     renderAnalysis()
     render()
-    setStatus('내 게임으로 복귀했습니다.')
+    setStatus(`내 게임으로 복귀했습니다.${parseErrorNote()}`)
   }
 
   apiKeyInput.addEventListener('input', () => {
@@ -537,4 +548,7 @@ export const createEditorApp = ({
   renderTree()
   renderAnalysis()
   render()
+  if (game.parseErrors.length > 0) {
+    setStatus(`기본 맵 일부를 읽지 못했습니다${parseErrorNote()}`)
+  }
 }
