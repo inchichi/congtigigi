@@ -11,7 +11,23 @@ export type TmxObject = {
 }
 
 export const extractTmxObjects = (tmxText: string): TmxObject[] => {
-  const doc = new DOMParser().parseFromString(tmxText, 'text/xml')
+  // @xmldom/xmldom는 깨진 XML에도 throw하지 않고 콘솔 경고만 남긴 채 빈/부분 문서를 돌려준다.
+  // 그러면 "파싱 실패"와 "엔티티가 원래 없는 맵"이 구분되지 않으므로(둘 다 0개), 치명적
+  // 에러를 모아 throw해서 호출부(runOpenProject/runAnalyze)가 status로 알릴 수 있게 한다.
+  let fatalParseError = ''
+  const recordFatal = (message: string): void => {
+    if (!fatalParseError) {
+      fatalParseError = message
+    }
+  }
+  const doc = new DOMParser({
+    errorHandler: { error: recordFatal, fatalError: recordFatal }
+  }).parseFromString(tmxText, 'text/xml')
+
+  if (fatalParseError) {
+    throw new Error(`TMX 파싱 실패: ${fatalParseError}`)
+  }
+
   const objects: TmxObject[] = []
   const groups = doc.getElementsByTagName('objectgroup')
 

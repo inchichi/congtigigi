@@ -49,14 +49,17 @@ export const rpgAdapter: GameAdapter = {
   id: 'my-sample-rpg',
   name: 'My Sample RPG (TS/Pixi)',
   detect: (fileNames) => fileNames.includes('town.tmx'),
+  // 대화 이벤트 대상이 될 수 있는 건 캐릭터 NPC뿐이다. 같은 type="character" object여도 외형이
+  // sign_*(표지판)·monster_*(몬스터)인 것은 대화 NPC가 아니므로, character_* 외형만 NPC로 본다.
   extractEntities: (mapId, objects) =>
     objects
-      .filter(
-        (object) =>
-          object.type === 'character' &&
-          (object.properties.type !== undefined ||
-            object.properties.appearanceType !== undefined)
-      )
+      .filter((object) => {
+        if (object.type !== 'character') {
+          return false
+        }
+        const appearance = object.properties.type ?? object.properties.appearanceType ?? ''
+        return appearance.startsWith('character_')
+      })
       .map((object) => ({
         id: object.name || `character-${object.id}`,
         name: object.properties.displayText || object.name || `character-${object.id}`,

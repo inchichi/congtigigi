@@ -13,6 +13,18 @@ const rpgTmx = `<?xml version="1.0" encoding="UTF-8"?>
       </properties>
     </object>
     <object id="2" name="east_gate" type="portal"/>
+    <object id="3" name="hunting_path_sign" type="character">
+      <properties>
+        <property name="type" value="sign_inn"/>
+        <property name="displayText" value="사냥터로 가는 길"/>
+      </properties>
+    </object>
+    <object id="4" name="꿀꿀이" type="character">
+      <properties>
+        <property name="type" value="monster_pig"/>
+        <property name="monster.level" type="int" value="3"/>
+      </properties>
+    </object>
   </objectgroup>
 </map>`
 
@@ -35,12 +47,20 @@ describe('extractTmxObjects', () => {
     expect(objects.map((object) => object.name)).toEqual(['slime', 'wall_1'])
     expect(objects[0].group).toBe('Enemies')
   })
+
+  it('throws on a fatally unparseable TMX so callers can distinguish it from an empty map', () => {
+    expect(() => extractTmxObjects('')).toThrow(/TMX 파싱 실패/u)
+    expect(() => extractTmxObjects('<map><objectgroup name="x"><object ')).toThrow(
+      /TMX 파싱 실패/u
+    )
+  })
 })
 
 describe('rpgAdapter', () => {
-  it('extracts character objects as npc entities, ignoring portals', () => {
+  it('extracts character NPCs only, ignoring portals, signs, and monsters', () => {
     const entities = rpgAdapter.extractEntities('town', extractTmxObjects(rpgTmx))
 
+    // sign_inn(표지판)과 monster_pig(몬스터)는 대화 NPC가 아니므로 제외된다.
     expect(entities).toEqual([
       { id: 'blacksmith', name: '대장장이', kind: 'npc', mapId: 'town' }
     ])

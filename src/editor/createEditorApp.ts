@@ -2,6 +2,7 @@ import { openProjectDirectory } from './openProjectDirectory'
 import { loadGame, type GameFile, type LoadedGame, type LoadedGameMap } from './loadGame'
 import { analyzeGame, type GameAnalysis } from './analyzeGame'
 import { extractTmxObjects } from './tmxObjects'
+import { readLocalStorage, writeLocalStorage } from './safeStorage'
 import type { GameEntity, GenerationResult } from './gameAdapter'
 
 // 하드코딩 어댑터가 엔티티를 못 찾은 미지의 게임을, LLM 분석이 찾은 editable 그룹으로 채운다.
@@ -79,7 +80,7 @@ export const createEditorApp = ({
 }: CreateEditorAppInput): void => {
   let game: LoadedGame = loadGame(initialFiles)
   let currentFiles: GameFile[] = initialFiles
-  let apiKey = window.localStorage.getItem(API_KEY_STORAGE_KEY) ?? ''
+  let apiKey = readLocalStorage(API_KEY_STORAGE_KEY) ?? ''
   let selectedEntity: GameEntity | undefined
   let currentResult: GenerationResult | undefined
   let currentAnalysis: GameAnalysis | undefined
@@ -246,7 +247,9 @@ export const createEditorApp = ({
       const totalEntities = game.maps.reduce((sum, map) => sum + map.entities.length, 0)
       if (totalEntities === 0) {
         game = { ...game, maps: buildEntitiesFromAnalysis(filesAtStart, analysis) }
+        // 트리를 새 엔티티로 갈아끼우므로, 이전 대상의 생성 결과는 무효 처리한다.
         selectedEntity = undefined
+        currentResult = undefined
         renderTree()
       }
       renderAnalysis()
@@ -354,6 +357,11 @@ export const createEditorApp = ({
       return
     }
 
+    if (promptInput.value.trim().length === 0) {
+      setStatus('생성할 내용을 자연어 프롬프트에 입력하세요.')
+      return
+    }
+
     isGenerating = true
     setStatus(`${game.adapter.name}로 생성 중...`)
     render()
@@ -383,8 +391,13 @@ export const createEditorApp = ({
       return
     }
 
-    currentResult.apply()
-    setStatus('게임에 적용됨 — 오른쪽 라이브 프리뷰에 즉시 반영됩니다.')
+    // apply()는 localStorage 저장을 동반해 실패할 수 있다. 조용히 죽지 않고 상태로 알린다.
+    try {
+      currentResult.apply()
+      setStatus('게임에 적용됨 — 오른쪽 라이브 프리뷰에 즉시 반영됩니다.')
+    } catch (error) {
+      setStatus(`적용 실패: ${error instanceof Error ? error.message : String(error)}`)
+    }
   }
 
   const runExport = (): void => {
@@ -449,8 +462,12 @@ export const createEditorApp = ({
 
   apiKeyInput.addEventListener('input', () => {
     apiKey = apiKeyInput.value
-    window.localStorage.setItem(API_KEY_STORAGE_KEY, apiKey)
+    // 저장이 막혀도(프라이빗 모드 등) 입력·생성 흐름은 끊기지 않게 한다. 키는 메모리에 유지된다.
+    const persisted = writeLocalStorage(API_KEY_STORAGE_KEY, apiKey)
     render()
+    if (!persisted && apiKey.length > 0) {
+      setStatus('API 키를 저장하지 못했습니다(브라우저 저장소 차단). 이번 세션에만 사용됩니다.')
+    }
   })
   resetButton.addEventListener('click', runReset)
   generateButton.addEventListener('click', () => {

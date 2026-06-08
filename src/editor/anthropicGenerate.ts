@@ -85,5 +85,24 @@ export const generateJsonWithClaude = async <T>({
     throw new Error('Claude 응답에 구조화된 tool_use 결과가 없습니다.')
   }
 
-  return toolUse.input as T
+  // tool_use.input은 모델 출력이라 스키마를 어길 수 있다. 무검증 `as T`로 흘리면 하류에서
+  // `Cannot read properties of undefined` 같은 난해한 에러가 난다. 최소한 객체인지 + 스키마의
+  // top-level required 필드가 모두 있는지 검사해, 읽을 수 있는 에러로 바꾼다.
+  const result = toolUse.input
+  if (result === null || typeof result !== 'object') {
+    throw new Error('Claude 응답이 객체 형식이 아닙니다.')
+  }
+
+  const required = (schema as { required?: unknown }).required
+  if (Array.isArray(required)) {
+    const present = result as Record<string, unknown>
+    const missing = required.filter(
+      (key) => typeof key === 'string' && !(key in present)
+    )
+    if (missing.length > 0) {
+      throw new Error(`Claude 응답에 필수 필드가 없습니다: ${missing.join(', ')}`)
+    }
+  }
+
+  return result as T
 }
