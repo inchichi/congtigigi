@@ -320,11 +320,13 @@ export const createEditorApp = ({
       const totalEntities = game.maps.reduce((sum, map) => sum + map.entities.length, 0)
       if (totalEntities === 0) {
         game = { ...game, maps: buildEntitiesFromAnalysis(filesAtStart, analysis) }
-        // 트리를 새 엔티티로 갈아끼우므로, 이전 대상의 생성 결과·히스토리는 모두 무효 처리한다.
+        // 트리를 새 엔티티로 갈아끼우므로, 이전 대상의 생성 결과·히스토리·세션 집계는 모두 무효 처리한다
+        // (open/reset과 동일한 초기화 묶음 — 지표가 폐기된 생성을 계속 세지 않도록).
         selectedEntity = undefined
         currentResult = undefined
         history = []
         historyCounter = 0
+        sessionTally = { generations: 0, validatorPasses: 0 }
         renderTree()
       }
       renderAnalysis()
@@ -410,15 +412,17 @@ export const createEditorApp = ({
     }
 
     evaluationWrap.hidden = false
-    // 자동 Validator 통과율 + 사람 수용률을 한 줄로(회의의 두 평가 개념).
+    // 자동 Validator 통과율(이번 세션) + 사람 수용률(누적)을 한 줄로(회의의 두 평가 개념).
+    // 둘은 시간 범위가 다르다: validatorPass는 sessionTally(프로젝트 전환 시 초기화), 수용률은
+    // localStorage에 영속되는 평가 전체(누적 acceptance_rate 목표용)라 라벨로 범위를 구분한다.
     const metrics = buildSessionMetrics(sessionTally, evaluations)
     const validatorPercent = Math.round(metrics.validatorPassRate * 100)
     const acceptancePercent = Math.round(metrics.acceptanceRate * 100)
     acceptanceStat.textContent =
       `세션 생성 ${metrics.generations} · Validator 통과 ${validatorPercent}%` +
       (metrics.acceptanceTotal === 0
-        ? ' · 수용 평가 없음'
-        : ` · 수용률 ${acceptancePercent}%${metrics.meetsAcceptanceGoal ? ' ✅' : ''}`)
+        ? ' · 누적 수용 평가 없음'
+        : ` · 누적 수용률 ${acceptancePercent}%${metrics.meetsAcceptanceGoal ? ' ✅' : ''}`)
 
     // 현재 결과가 이미 평가됐으면(객체 단위로 기억) 그 판정을 보여주고 버튼을 잠근다(중복 집계 방지).
     const verdict = verdictByResult.get(currentResult)
@@ -539,11 +543,15 @@ export const createEditorApp = ({
     }
 
     isGenerating = true
+    // 생성은 비동기다. 도중에 다른 프로젝트를 열거나(runOpenProject) 복귀(runReset)하면, 늦게 도착한
+    // 이 결과를 새 게임에 섞으면 안 된다(히스토리/집계 오염 + 옛 게임에 묶인 apply() 클로저). 시작 시점의
+    // 프로젝트 정체성을 캡처해 커밋 전에 검사한다(runAnalyze의 filesAtStart 가드와 동일).
+    const filesAtStart = currentFiles
     setStatus(`${game.adapter.name}로 생성 중...`)
     render()
 
     try {
-      currentResult = await game.adapter.generate({
+      const result = await game.adapter.generate({
         apiKey: apiKey.trim(),
         userPrompt: promptInput.value,
         entity: selectedEntity,
@@ -552,18 +560,29 @@ export const createEditorApp = ({
           ? `${currentAnalysis.game_name} (${currentAnalysis.engine}). 콘텐츠 모델: ${currentAnalysis.content_model}`
           : undefined
       })
+      // 생성 중 프로젝트가 바뀌었으면 이 결과는 버린다.
+      if (currentFiles !== filesAtStart) {
+        return
+      }
+      currentResult = result
       historyCounter += 1
-      history = [{ n: historyCounter, result: currentResult }, ...history].slice(0, HISTORY_LIMIT)
+      history = [{ n: historyCounter, result }, ...history].slice(0, HISTORY_LIMIT)
       // 세션 지표 집계: 생성 1건 + (Validator 통과면) 통과 1건.
       sessionTally = {
         generations: sessionTally.generations + 1,
-        validatorPasses: sessionTally.validatorPasses + (currentResult.issues.length === 0 ? 1 : 0)
+        validatorPasses: sessionTally.validatorPasses + (result.issues.length === 0 ? 1 : 0)
       }
-      setStatus(`생성 완료: ${currentResult.label}`)
+      setStatus(`생성 완료: ${result.label}`)
     } catch (error) {
+      // 프로젝트가 바뀐 뒤 도착한 실패는 새 게임의 상태를 건드리지 않는다.
+      if (currentFiles !== filesAtStart) {
+        return
+      }
       const message = error instanceof Error ? error.message : String(error)
       setStatus(`생성 실패: ${message}`)
     } finally {
+      // isGenerating은 이 호출이 소유하므로 항상 해제하고 다시 그린다. 프로젝트가 바뀌었어도 render()는
+      // 현재(=새) 게임 상태를 그대로 반영하므로 안전하다(생성 버튼 disabled 갱신 등).
       isGenerating = false
       render()
     }
