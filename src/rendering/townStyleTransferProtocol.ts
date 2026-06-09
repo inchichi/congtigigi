@@ -1,9 +1,11 @@
-export const TOWN_STYLE_TRANSFER_ENDPOINT =
-  'https://api.openai.com/v1/images/edits'
-export const TOWN_STYLE_TRANSFER_MODEL = 'gpt-image-1'
+export const TOWN_STYLE_TRANSFER_RESPONSE_ENDPOINT =
+  'https://api.openai.com/v1/responses'
+export const TOWN_STYLE_TRANSFER_ENDPOINT = TOWN_STYLE_TRANSFER_RESPONSE_ENDPOINT
+export const TOWN_STYLE_TRANSFER_HOST_MODEL = 'gpt-5'
+export const TOWN_STYLE_TRANSFER_MODEL = TOWN_STYLE_TRANSFER_HOST_MODEL
 
-// town-32.png is a tall portrait tile sheet (256x2240), so the closest
-// supported gpt-image-1 output ratio is the 1024x1536 portrait size.
+// town-32.png is a tall portrait tile sheet (256x2240), so 1024x1536 is the
+// closest supported portrait edit size.
 export const TOWN_STYLE_TRANSFER_SIZE = '1024x1536'
 
 export const TOWN_TILESET_SOURCE_URL = new URL(
@@ -20,11 +22,11 @@ export const buildTownStyleTransferPrompt = (scenario: string): string => {
   const trimmedScenario = scenario.trim()
 
   const prompt = [
-    'This image is a 32x32 grid tile sheet for a 2D top-down web RPG town.',
-    'Repaint the tile art so its color palette, mood, and theme match the scenario below.',
-    'Keep the exact same tile layout, grid alignment, silhouettes, and pixel-art style.',
-    'Only restyle surfaces, lighting, and color — do not move, add, or remove tiles.',
-    'Keep transparent areas fully transparent.',
+    'You are editing an existing 2D top-down RPG town tileset.',
+    'Treat the scenario below as a natural-language art direction prompt.',
+    'Infer the dominant theme, mood, weather, palette, and architecture from the scenario, then repaint the uploaded tile sheet to match it.',
+    'Preserve the exact tile layout, pixel-art scale, grid alignment, silhouettes, and transparent areas.',
+    'Do not add, remove, or move tiles. Only change surface styling, lighting, and color treatment.',
     '',
     'Scenario:',
     trimmedScenario
@@ -40,8 +42,52 @@ export const extractTownStyleTransferResult = (
     return undefined
   }
 
-  const data = response.data
+  const responsesApiImage = extractResponsesApiImage(response.output)
 
+  if (responsesApiImage) {
+    return { imageDataUrl: responsesApiImage }
+  }
+
+  const imageApiData = extractLegacyImageApiData(response.data)
+
+  if (imageApiData) {
+    return { imageDataUrl: imageApiData }
+  }
+
+  return undefined
+}
+
+const extractResponsesApiImage = (output: unknown): string | undefined => {
+  if (!Array.isArray(output)) {
+    return undefined
+  }
+
+  for (const item of output) {
+    if (!isRecord(item) || item.type !== 'image_generation_call') {
+      continue
+    }
+
+    const result = item.result
+    const base64 =
+      typeof result === 'string' && result.trim().length > 0
+        ? result.trim()
+        : typeof item.b64_json === 'string' && item.b64_json.trim().length > 0
+          ? item.b64_json.trim()
+          : typeof item.url === 'string' && item.url.trim().length > 0
+            ? item.url.trim()
+            : undefined
+
+    if (!base64) {
+      continue
+    }
+
+    return normalizeImageDataUrl(base64)
+  }
+
+  return undefined
+}
+
+const extractLegacyImageApiData = (data: unknown): string | undefined => {
   if (!Array.isArray(data)) {
     return undefined
   }
@@ -54,17 +100,25 @@ export const extractTownStyleTransferResult = (
     const base64 = item.b64_json
 
     if (typeof base64 === 'string' && base64.trim().length > 0) {
-      return { imageDataUrl: `data:image/png;base64,${base64.trim()}` }
+      return normalizeImageDataUrl(base64.trim())
     }
 
     const url = item.url
 
     if (typeof url === 'string' && url.trim().length > 0) {
-      return { imageDataUrl: url.trim() }
+      return url.trim()
     }
   }
 
   return undefined
+}
+
+const normalizeImageDataUrl = (value: string): string => {
+  if (value.startsWith('data:')) {
+    return value
+  }
+
+  return `data:image/png;base64,${value}`
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> => {

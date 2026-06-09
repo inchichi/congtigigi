@@ -12,11 +12,25 @@ describe('town style transfer protocol', () => {
     )
 
     expect(prompt).toContain('눈 덮인 겨울 마을, 모든 것이 얼어붙었다.')
-    expect(prompt).toContain('tile sheet')
-    expect(prompt).toContain('same tile layout')
-    expect(prompt).toContain('transparent')
+    expect(prompt).toContain('natural-language art direction prompt')
+    expect(prompt).toContain('uploaded tile sheet')
+    expect(prompt).toContain('Preserve the exact tile layout')
+    expect(prompt).toContain('Do not add, remove, or move tiles.')
     // Scenario is trimmed before being embedded in the prompt.
     expect(prompt).not.toContain('  눈 덮인')
+  })
+
+  it('extracts an image generation call from a responses-api output payload', () => {
+    expect(
+      extractTownStyleTransferResult({
+        output: [
+          {
+            type: 'image_generation_call',
+            result: 'AAAA'
+          }
+        ]
+      })
+    ).toEqual({ imageDataUrl: 'data:image/png;base64,AAAA' })
   })
 
   it('extracts a base64 image into a data URL', () => {

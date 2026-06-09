@@ -8,8 +8,8 @@ import {
   type ScenarioEditorResult
 } from './scenarioEditorProtocol'
 import {
-  TOWN_STYLE_TRANSFER_ENDPOINT,
-  TOWN_STYLE_TRANSFER_MODEL,
+  TOWN_STYLE_TRANSFER_HOST_MODEL,
+  TOWN_STYLE_TRANSFER_RESPONSE_ENDPOINT,
   TOWN_STYLE_TRANSFER_SIZE,
   TOWN_TILESET_SOURCE_URL,
   buildTownStyleTransferPrompt,
@@ -30,6 +30,8 @@ type StoredScenarioEditorState = {
   apiKey: string
   scenario: string
   rawResponse: string
+  appliedQuestIndexes: number[]
+  appliedDialogueIndexes: number[]
 }
 
 type ScenarioEditorFieldElements = {
@@ -112,6 +114,7 @@ export const createScenarioEditorOverlay = ({
   const styleHeader = document.createElement('div')
   const styleTitle = document.createElement('div')
   const styleStatus = document.createElement('div')
+  const styleHint = document.createElement('div')
   const styleBody = document.createElement('div')
   const stylePreviewFrame = document.createElement('div')
   const styleOriginalImage = document.createElement('img')
@@ -133,10 +136,89 @@ export const createScenarioEditorOverlay = ({
   let errorMessage = ''
   let isGenerating = false
   let activeRequest: AbortController | undefined
+  let requestVersion = 0
   let isDestroyed = false
   let styledTilesetDataUrl = ''
   let styleErrorMessage = ''
   let isStyling = false
+  let appliedQuestIndexes = new Set(storedState?.appliedQuestIndexes ?? [])
+  let appliedDialogueIndexes = new Set(
+    storedState?.appliedDialogueIndexes ?? []
+  )
+
+  const abortActiveRequest = () => {
+    if (!activeRequest) {
+      return false
+    }
+
+    requestVersion += 1
+    activeRequest.abort()
+    activeRequest = undefined
+    isGenerating = false
+    isStyling = false
+
+    return true
+  }
+
+  const clearAppliedGeneratedItems = () => {
+    if (appliedQuestIndexes.size === 0 && appliedDialogueIndexes.size === 0) {
+      return
+    }
+
+    appliedQuestIndexes = new Set()
+    appliedDialogueIndexes = new Set()
+  }
+
+  const applyQuestDraft = (questIndex: number) => {
+    if (appliedQuestIndexes.has(questIndex)) {
+      return
+    }
+
+    if (!window.confirm('적용하겠습니까?')) {
+      return
+    }
+
+    appliedQuestIndexes = new Set([...appliedQuestIndexes, questIndex])
+    persistState()
+    syncView()
+  }
+
+  const applyDialogueDraft = (dialogueIndex: number) => {
+    if (appliedDialogueIndexes.has(dialogueIndex)) {
+      return
+    }
+
+    if (!window.confirm('적용하겠습니까?')) {
+      return
+    }
+
+    appliedDialogueIndexes = new Set([...appliedDialogueIndexes, dialogueIndex])
+    persistState()
+    syncView()
+  }
+
+  const createRequest = (): {
+    request: AbortController
+    version: number
+  } => {
+    requestVersion += 1
+
+    const request = new AbortController()
+
+    activeRequest = request
+
+    return {
+      request,
+      version: requestVersion
+    }
+  }
+
+  const isCurrentRequest = (
+    version: number,
+    request: AbortController
+  ): boolean => {
+    return version === requestVersion && !request.signal.aborted
+  }
 
   overlayRoot.className = 'scenario-editor-overlay'
 
@@ -200,15 +282,18 @@ export const createScenarioEditorOverlay = ({
   generateButton.type = 'button'
   generateButton.className = 'scenario-editor-overlay__button scenario-editor-overlay__button--primary'
   generateButton.textContent = '생성'
+  generateButton.title = '현재 시나리오로 결과를 생성합니다.'
   stopButton.type = 'button'
   stopButton.className = 'scenario-editor-overlay__button'
   stopButton.textContent = '중단'
   sampleButton.type = 'button'
   sampleButton.className = 'scenario-editor-overlay__button'
   sampleButton.textContent = '샘플'
+  sampleButton.title = '예시 시나리오를 불러오고 바로 생성합니다.'
   clearButton.type = 'button'
   clearButton.className = 'scenario-editor-overlay__button'
   clearButton.textContent = '비우기'
+  clearButton.title = '시나리오와 결과를 비웁니다.'
   actionRow.append(generateButton, stopButton, sampleButton, clearButton)
 
   resultSection.className = 'scenario-editor-overlay__result-section'
@@ -255,9 +340,12 @@ export const createScenarioEditorOverlay = ({
   styleSection.className = 'scenario-editor-overlay__style-section'
   styleHeader.className = 'scenario-editor-overlay__column-header'
   styleTitle.className = 'scenario-editor-overlay__column-title'
-  styleTitle.textContent = '타운 타일셋 스타일'
+  styleTitle.textContent = '타운 타일셋 미리보기'
   styleStatus.className = 'scenario-editor-overlay__column-count'
   styleHeader.append(styleTitle, styleStatus)
+  styleHint.className = 'scenario-editor-overlay__style-hint'
+  styleHint.textContent =
+    '아래에서 원본 town-32.png와 시나리오에 맞춘 변환 결과를 나란히 비교합니다.'
   styleBody.className = 'scenario-editor-overlay__style-body'
   stylePreviewFrame.className = 'scenario-editor-overlay__style-preview'
   styleOriginalImage.className = 'scenario-editor-overlay__style-image'
@@ -284,12 +372,13 @@ export const createScenarioEditorOverlay = ({
   styleDownloadButton.hidden = true
   styleActionRow.append(styleDownloadButton)
   styleBody.append(stylePreviewFrame, styleError, styleActionRow)
-  styleSection.append(styleHeader, styleBody)
+  styleSection.append(styleHeader, styleHint, styleBody)
 
   resultHeader.append(resultHeaderTitle, resultHeaderMeta)
   footer.className = 'scenario-editor-overlay__footer'
   footerHint.className = 'scenario-editor-overlay__footer-hint'
-  footerHint.textContent = '시나리오를 바꾸면 이전 결과는 지워집니다.'
+  footerHint.textContent =
+    '아래로 스크롤하면 결과와 스타일 미리보기를 확인할 수 있습니다. 시나리오를 바꾸면 초기화됩니다.'
   footerState.className = 'scenario-editor-overlay__footer-state'
   footer.append(footerHint, footerState)
 
@@ -298,9 +387,7 @@ export const createScenarioEditorOverlay = ({
     errorBanner,
     resultSummaryCard,
     resultGrid,
-    styleSection,
-    rawDetails,
-    footer
+    rawDetails
   )
 
   panelBody.append(
@@ -308,7 +395,9 @@ export const createScenarioEditorOverlay = ({
     configGrid,
     scenarioSection,
     actionRow,
-    resultSection
+    resultSection,
+    footer,
+    styleSection
   )
   panel.append(panelBody)
   overlayRoot.append(launcherButton, panel)
@@ -318,6 +407,18 @@ export const createScenarioEditorOverlay = ({
   const syncView = () => {
     const resultQuests = parsedResult?.quests ?? []
     const resultDialogues = parsedResult?.npcDialogues ?? []
+    const visibleQuestEntries = resultQuests
+      .map((quest, index) => ({
+        quest,
+        index
+      }))
+      .filter(({ index }) => !appliedQuestIndexes.has(index))
+    const visibleDialogueEntries = resultDialogues
+      .map((dialogue, index) => ({
+        dialogue,
+        index
+      }))
+      .filter(({ index }) => !appliedDialogueIndexes.has(index))
     const isReady = parsedResult !== undefined
     const isIdle = !isGenerating && !isReady && errorMessage.length === 0
     const isErrored = errorMessage.length > 0
@@ -342,46 +443,71 @@ export const createScenarioEditorOverlay = ({
           : '대기 중'
 
     resultHeaderMeta.textContent = isReady
-      ? `${resultQuests.length} 퀘스트 · ${resultDialogues.length} NPC 대사`
+      ? visibleQuestEntries.length === 0 && visibleDialogueEntries.length === 0
+        ? '적용 완료'
+        : `${visibleQuestEntries.length} 퀘스트 · ${visibleDialogueEntries.length} NPC 대사`
       : '결과 없음'
 
     errorBanner.hidden = !isErrored
     errorBanner.textContent = errorMessage
+    resultSummaryLabel.textContent = isGenerating
+      ? '생성 중'
+      : '시나리오 요약'
     resultSummaryText.textContent = isReady
-      ? parsedResult?.summary || '요약이 비어 있습니다.'
-      : '시나리오를 입력하고 생성 버튼을 누르면 결과가 여기에 표시됩니다.'
+      ? visibleQuestEntries.length === 0 && visibleDialogueEntries.length === 0
+        ? '모든 생성 결과를 적용했습니다.'
+        : parsedResult?.summary || '요약이 비어 있습니다.'
+      : isGenerating
+        ? '생성중.. 퀘스트와 타일셋 스타일을 동시에 만들고 있습니다.'
+        : '시나리오를 입력하고 생성 버튼을 누르면 결과가 여기에 표시됩니다.'
     resultSummaryCard.classList.toggle(
       'scenario-editor-overlay__summary-card--empty',
-      !isReady
+      !isReady && !isGenerating
     )
-    questColumnCount.textContent = `${resultQuests.length}개`
-    dialogueColumnCount.textContent = `${resultDialogues.length}개`
+    resultSummaryCard.classList.toggle(
+      'scenario-editor-overlay__summary-card--loading',
+      isGenerating
+    )
+    questColumnCount.textContent = `${visibleQuestEntries.length}개`
+    dialogueColumnCount.textContent = `${visibleDialogueEntries.length}개`
     footerState.textContent = isGenerating
-      ? '모델 응답을 기다리는 중입니다.'
+      ? '생성중..'
       : isReady
         ? '최근 결과가 저장되었습니다.'
         : isIdle
           ? '아직 생성되지 않았습니다.'
           : '오류를 확인해 주세요.'
 
-    generateButton.disabled = isGenerating || !canGenerate()
+    generateButton.disabled = isGenerating || scenario.trim().length === 0
     stopButton.disabled = !isGenerating
     sampleButton.disabled = isGenerating
     clearButton.disabled = isGenerating
 
     questList.replaceChildren(
-      ...(resultQuests.length > 0
-        ? resultQuests.map((quest, index) =>
-            createQuestCard(quest, index)
+      ...(visibleQuestEntries.length > 0
+        ? visibleQuestEntries.map(({ quest, index }) =>
+            createQuestCard(quest, index, () => applyQuestDraft(index))
           )
-        : [createEmptyState('생성된 퀘스트가 없습니다.')])
+        : [
+            createEmptyState(
+              resultQuests.length > 0
+                ? '모든 생성 퀘스트가 적용되었습니다.'
+                : '생성된 퀘스트가 없습니다.'
+            )
+          ])
     )
     dialogueList.replaceChildren(
-      ...(resultDialogues.length > 0
-        ? resultDialogues.map((dialogue, index) =>
-            createDialogueCard(dialogue, index)
+      ...(visibleDialogueEntries.length > 0
+        ? visibleDialogueEntries.map(({ dialogue, index }) =>
+            createDialogueCard(dialogue, index, () => applyDialogueDraft(index))
           )
-        : [createEmptyState('생성된 NPC 대사가 없습니다.')])
+        : [
+            createEmptyState(
+              resultDialogues.length > 0
+                ? '모든 NPC 대사가 적용되었습니다.'
+                : '생성된 NPC 대사가 없습니다.'
+            )
+          ])
     )
 
     if (rawResponse.length > 0) {
@@ -424,7 +550,7 @@ export const createScenarioEditorOverlay = ({
     stylePlaceholder.hidden = hasStyledTileset
     stylePlaceholder.textContent = isStyling
       ? '시나리오에 맞춰 타일셋을 다시 칠하는 중입니다…'
-      : '생성을 실행하면 시나리오에 맞춘 타일셋이 여기에 나타납니다.'
+      : '생성 버튼을 누르면 이 영역에 변환된 타운 타일셋이 나타납니다.'
 
     styleError.hidden = !hasStyleError
     styleError.textContent = styleErrorMessage
@@ -442,7 +568,11 @@ export const createScenarioEditorOverlay = ({
       isOpen,
       apiKey,
       scenario,
-      rawResponse
+      rawResponse,
+      appliedQuestIndexes: [...appliedQuestIndexes].sort((left, right) => left - right),
+      appliedDialogueIndexes: [...appliedDialogueIndexes].sort(
+        (left, right) => left - right
+      )
     }
 
     try {
@@ -452,14 +582,23 @@ export const createScenarioEditorOverlay = ({
     }
   }
 
-  const setScenario = (nextScenario: string) => {
+  const setScenario = (
+    nextScenario: string,
+    options: {
+      preserveCurrentPreview?: boolean
+    } = {}
+  ) => {
     scenario = nextScenario
     scenarioTextarea.value = nextScenario
-    rawResponse = ''
-    parsedResult = undefined
+    abortActiveRequest()
+    clearAppliedGeneratedItems()
     errorMessage = ''
-    styledTilesetDataUrl = ''
     styleErrorMessage = ''
+    if (!options.preserveCurrentPreview) {
+      rawResponse = ''
+      parsedResult = undefined
+      styledTilesetDataUrl = ''
+    }
     persistState()
     syncView()
   }
@@ -486,6 +625,8 @@ export const createScenarioEditorOverlay = ({
     }
 
     scenario = nextTarget.value
+    abortActiveRequest()
+    clearAppliedGeneratedItems()
     rawResponse = ''
     parsedResult = undefined
     errorMessage = ''
@@ -503,6 +644,7 @@ export const createScenarioEditorOverlay = ({
     }
 
     apiKey = nextTarget.value
+    abortActiveRequest()
     persistState()
     syncView()
   }
@@ -514,12 +656,18 @@ export const createScenarioEditorOverlay = ({
 
   const handleStopClick = (event: MouseEvent) => {
     event.preventDefault()
-    activeRequest?.abort()
+    abortActiveRequest()
+    syncView()
   }
 
   const handleSampleClick = (event: MouseEvent) => {
     event.preventDefault()
-    setScenario(DEFAULT_SCENARIO_TEXT)
+    setScenario(DEFAULT_SCENARIO_TEXT, {
+      preserveCurrentPreview: true
+    })
+    void generateScenarioDraft({
+      preserveCurrentPreview: true
+    })
   }
 
   const handleClearClick = (event: MouseEvent) => {
@@ -536,49 +684,67 @@ export const createScenarioEditorOverlay = ({
     void generateScenarioDraft()
   }
 
-  const canGenerate = (): boolean => {
-    return (
-      apiKey.trim().length > 0 &&
-      scenario.trim().length > 0
-    )
-  }
-
-  const generateScenarioDraft = async (): Promise<void> => {
+  const generateScenarioDraft = async (
+    options: {
+      preserveCurrentPreview?: boolean
+    } = {}
+  ): Promise<void> => {
     if (isGenerating) {
       return
     }
 
-    if (!canGenerate()) {
-      errorMessage = 'API 키와 시나리오를 모두 채워주세요.'
+    const scenarioSnapshot = scenario.trim()
+    const apiKeySnapshot = apiKey.trim()
+
+    if (scenarioSnapshot.length === 0 || apiKeySnapshot.length === 0) {
+      errorMessage =
+        scenarioSnapshot.length === 0 && apiKeySnapshot.length === 0
+          ? 'API 키와 시나리오를 모두 채워주세요.'
+          : scenarioSnapshot.length === 0
+            ? '시나리오를 입력해 주세요.'
+            : 'API 키를 입력해 주세요.'
       syncView()
       return
     }
 
-    const request = new AbortController()
+    abortActiveRequest()
 
-    if (activeRequest) {
-      activeRequest.abort()
-    }
+    const { request, version: requestToken } = createRequest()
 
-    activeRequest = request
     isGenerating = true
     isStyling = true
     errorMessage = ''
     styleErrorMessage = ''
-    styledTilesetDataUrl = ''
+    if (!options.preserveCurrentPreview) {
+      rawResponse = ''
+      parsedResult = undefined
+      styledTilesetDataUrl = ''
+    }
     syncView()
 
     // Quest/NPC text generation and town tileset style transfer share the
-    // same scenario and abort signal, so they run side by side.
+    // same scenario snapshot and request token, so stale replies can be
+    // ignored together.
     await Promise.allSettled([
-      requestScenarioText(request),
-      requestStyledTileset(request)
+      requestScenarioText(
+        requestToken,
+        request,
+        scenarioSnapshot,
+        apiKeySnapshot
+      ),
+      requestStyledTileset(
+        requestToken,
+        request,
+        scenarioSnapshot,
+        apiKeySnapshot
+      )
     ])
 
-    if (activeRequest === request) {
-      activeRequest = undefined
+    if (!isCurrentRequest(requestToken, request)) {
+      return
     }
 
+    activeRequest = undefined
     isGenerating = false
     isStyling = false
     persistState()
@@ -586,14 +752,17 @@ export const createScenarioEditorOverlay = ({
   }
 
   const requestScenarioText = async (
-    request: AbortController
+    requestToken: number,
+    request: AbortController,
+    scenarioText: string,
+    apiKeyValue: string
   ): Promise<void> => {
     try {
       const response = await fetch(DEFAULT_LLM_ENDPOINT, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${apiKey.trim()}`
+          Authorization: `Bearer ${apiKeyValue}`
         },
         body: JSON.stringify({
           model: DEFAULT_LLM_MODEL,
@@ -605,7 +774,10 @@ export const createScenarioEditorOverlay = ({
             },
             {
               role: 'user',
-              content: buildScenarioEditorUserPrompt(scenario, AVAILABLE_NPC_NAMES)
+              content: buildScenarioEditorUserPrompt(
+                scenarioText,
+                AVAILABLE_NPC_NAMES
+              )
             }
           ]
         }),
@@ -613,12 +785,11 @@ export const createScenarioEditorOverlay = ({
       })
 
       if (!response.ok) {
-        const errorText = (await response.text()).trim()
-
         throw new Error(
-          errorText.length > 0
-            ? errorText
-            : `요청 실패: ${response.status} ${response.statusText}`
+          await readOpenAIErrorMessage(
+            response,
+            `요청 실패: ${response.status} ${response.statusText}`
+          )
         )
       }
 
@@ -629,30 +800,43 @@ export const createScenarioEditorOverlay = ({
         throw new Error('응답 본문에서 텍스트를 찾지 못했습니다.')
       }
 
+      if (!isCurrentRequest(requestToken, request)) {
+        return
+      }
+
       const nextResult = parseScenarioEditorResult(responseText)
 
       if (!nextResult) {
+        clearAppliedGeneratedItems()
         rawResponse = responseText.trim()
         parsedResult = undefined
+        persistState()
         throw new Error('응답을 퀘스트와 NPC 대사 JSON으로 해석하지 못했습니다.')
       }
 
+      clearAppliedGeneratedItems()
       rawResponse = responseText.trim()
       parsedResult = nextResult
       errorMessage = ''
       persistState()
       syncView()
     } catch (error) {
-      if (!request.signal.aborted) {
-        errorMessage =
-          error instanceof Error ? error.message : '시나리오 생성에 실패했습니다.'
+      if (!isCurrentRequest(requestToken, request)) {
+        return
       }
+
+      errorMessage =
+        error instanceof Error ? error.message : '시나리오 생성에 실패했습니다.'
+
       syncView()
     }
   }
 
   const requestStyledTileset = async (
-    request: AbortController
+    requestToken: number,
+    request: AbortController,
+    scenarioText: string,
+    apiKeyValue: string
   ): Promise<void> => {
     try {
       const sourceResponse = await fetch(TOWN_TILESET_SOURCE_URL, {
@@ -660,36 +844,69 @@ export const createScenarioEditorOverlay = ({
       })
 
       if (!sourceResponse.ok) {
-        throw new Error('원본 town-32.png 타일셋을 불러오지 못했습니다.')
+        throw new Error(
+          await readOpenAIErrorMessage(
+            sourceResponse,
+            '원본 town-32.png 타일셋을 불러오지 못했습니다.'
+          )
+        )
       }
 
       const sourceBlob = await sourceResponse.blob()
-      const form = new FormData()
 
-      form.append('model', TOWN_STYLE_TRANSFER_MODEL)
-      form.append('image', sourceBlob, 'town-32.png')
-      form.append('prompt', buildTownStyleTransferPrompt(scenario))
-      form.append('size', TOWN_STYLE_TRANSFER_SIZE)
-      form.append('n', '1')
+      if (!isCurrentRequest(requestToken, request)) {
+        return
+      }
 
-      const response = await fetch(TOWN_STYLE_TRANSFER_ENDPOINT, {
+      const sourceDataUrl = await blobToDataUrl(sourceBlob)
+      const prompt = buildTownStyleTransferPrompt(scenarioText)
+
+      const response = await fetch(TOWN_STYLE_TRANSFER_RESPONSE_ENDPOINT, {
         method: 'POST',
         headers: {
-          // Do not set Content-Type here; the browser adds the multipart
-          // boundary for the FormData body automatically.
-          Authorization: `Bearer ${apiKey.trim()}`
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${apiKeyValue}`
         },
-        body: form,
+        body: JSON.stringify({
+          model: TOWN_STYLE_TRANSFER_HOST_MODEL,
+          input: [
+            {
+              role: 'user',
+              content: [
+                {
+                  type: 'input_text',
+                  text: prompt
+                },
+                {
+                  type: 'input_image',
+                  image_url: sourceDataUrl
+                }
+              ]
+            }
+          ],
+          tool_choice: {
+            type: 'image_generation'
+          },
+          tools: [
+            {
+              type: 'image_generation',
+              action: 'edit',
+              input_fidelity: 'high',
+              size: TOWN_STYLE_TRANSFER_SIZE,
+              quality: 'high',
+              background: 'transparent'
+            }
+          ]
+        }),
         signal: request.signal
       })
 
       if (!response.ok) {
-        const errorText = (await response.text()).trim()
-
         throw new Error(
-          errorText.length > 0
-            ? errorText
-            : `타일셋 변환 실패: ${response.status} ${response.statusText}`
+          await readOpenAIErrorMessage(
+            response,
+            `타일셋 변환 실패: ${response.status} ${response.statusText}`
+          )
         )
       }
 
@@ -700,16 +917,23 @@ export const createScenarioEditorOverlay = ({
         throw new Error('변환된 타일셋 이미지를 응답에서 찾지 못했습니다.')
       }
 
+      if (!isCurrentRequest(requestToken, request)) {
+        return
+      }
+
       styledTilesetDataUrl = styleResult.imageDataUrl
       styleErrorMessage = ''
       syncView()
     } catch (error) {
-      if (!request.signal.aborted) {
-        styleErrorMessage =
-          error instanceof Error
-            ? error.message
-            : '타일셋 스타일 변환에 실패했습니다.'
+      if (!isCurrentRequest(requestToken, request)) {
+        return
       }
+
+      styleErrorMessage =
+        error instanceof Error
+          ? error.message
+          : '타일셋 스타일 변환에 실패했습니다.'
+
       syncView()
     }
   }
@@ -736,6 +960,7 @@ export const createScenarioEditorOverlay = ({
     panel.style.right = `${OVERLAY_MARGIN}px`
     panel.style.top = `${OVERLAY_MARGIN}px`
     panel.style.bottom = `${OVERLAY_MARGIN}px`
+    panel.style.height = 'auto'
     panel.style.width = `${Math.min(PANEL_WIDTH, availableWidth)}px`
   }
 
@@ -745,7 +970,7 @@ export const createScenarioEditorOverlay = ({
     }
 
     isDestroyed = true
-    activeRequest?.abort()
+    abortActiveRequest()
     launcherButton.removeEventListener('click', handleLauncherClick)
     closeButton.removeEventListener('click', handleCloseClick)
     apiKeyField.input.removeEventListener('input', handleApiKeyInput)
@@ -765,6 +990,60 @@ export const createScenarioEditorOverlay = ({
     syncFrame,
     destroy
   }
+}
+
+const readOpenAIErrorMessage = async (
+  response: Response,
+  fallbackMessage: string
+): Promise<string> => {
+  const responseText = (await response.text()).trim()
+
+  if (responseText.length === 0) {
+    return fallbackMessage
+  }
+
+  try {
+    const parsed = JSON.parse(responseText) as unknown
+
+    if (isRecord(parsed)) {
+      const error = parsed.error
+
+      if (
+        isRecord(error) &&
+        typeof error.message === 'string' &&
+        error.message.trim().length > 0
+      ) {
+        return error.message.trim()
+      }
+
+      if (typeof parsed.message === 'string' && parsed.message.trim().length > 0) {
+        return parsed.message.trim()
+      }
+    }
+  } catch {
+    // Keep the raw response text when it is not JSON.
+  }
+
+  return responseText
+}
+
+const blobToDataUrl = (blob: Blob): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+
+    reader.addEventListener('load', () => {
+      if (typeof reader.result === 'string') {
+        resolve(reader.result)
+        return
+      }
+
+      reject(new Error('원본 타일셋을 데이터 URL로 변환하지 못했습니다.'))
+    })
+    reader.addEventListener('error', () => {
+      reject(reader.error ?? new Error('원본 타일셋을 읽지 못했습니다.'))
+    })
+    reader.readAsDataURL(blob)
+  })
 }
 
 const createField = ({
@@ -801,9 +1080,10 @@ const createField = ({
 
 const createQuestCard = (
   quest: ScenarioEditorQuestDraft,
-  index: number
+  index: number,
+  onActivate: () => void
 ): HTMLElement => {
-  const card = document.createElement('article')
+  const card = document.createElement('button')
   const header = document.createElement('div')
   const indexLabel = document.createElement('div')
   const title = document.createElement('div')
@@ -812,7 +1092,9 @@ const createQuestCard = (
   const objectiveList = document.createElement('div')
   const reward = document.createElement('div')
 
+  card.type = 'button'
   card.className = 'scenario-editor-overlay__card scenario-editor-overlay__card--quest'
+  card.addEventListener('click', onActivate)
   header.className = 'scenario-editor-overlay__card-header'
   indexLabel.className = 'scenario-editor-overlay__card-index'
   indexLabel.textContent = `Q${index + 1}`
@@ -847,16 +1129,19 @@ const createQuestCard = (
 
 const createDialogueCard = (
   dialogue: ScenarioEditorNpcDialogueDraft,
-  index: number
+  index: number,
+  onActivate: () => void
 ): HTMLElement => {
-  const card = document.createElement('article')
+  const card = document.createElement('button')
   const header = document.createElement('div')
   const indexLabel = document.createElement('div')
   const title = document.createElement('div')
   const context = document.createElement('div')
   const lineList = document.createElement('div')
 
+  card.type = 'button'
   card.className = 'scenario-editor-overlay__card scenario-editor-overlay__card--dialogue'
+  card.addEventListener('click', onActivate)
   header.className = 'scenario-editor-overlay__card-header'
   indexLabel.className = 'scenario-editor-overlay__card-index'
   indexLabel.textContent = `N${index + 1}`
@@ -910,7 +1195,9 @@ const readStoredState = (): StoredScenarioEditorState | undefined => {
       isOpen: toBoolean(parsedState.isOpen, true),
       apiKey: toText(parsedState.apiKey),
       scenario: toText(parsedState.scenario),
-      rawResponse: toText(parsedState.rawResponse)
+      rawResponse: toText(parsedState.rawResponse),
+      appliedQuestIndexes: toNumberArray(parsedState.appliedQuestIndexes),
+      appliedDialogueIndexes: toNumberArray(parsedState.appliedDialogueIndexes)
     }
   } catch {
     return undefined
@@ -935,6 +1222,14 @@ const toText = (value: unknown): string => {
   }
 
   return ''
+}
+
+const toNumberArray = (value: unknown): number[] => {
+  if (!Array.isArray(value)) {
+    return []
+  }
+
+  return value.filter((item): item is number => typeof item === 'number')
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> => {
