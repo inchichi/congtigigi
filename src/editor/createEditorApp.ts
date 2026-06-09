@@ -4,6 +4,13 @@ import { analyzeGame, type GameAnalysis } from './analyzeGame'
 import { extractTmxObjects, type TmxObject } from './tmxObjects'
 import { readLocalStorage, writeLocalStorage } from './safeStorage'
 import { ANTHROPIC_MODEL } from './anthropicGenerate'
+import {
+  appendEventEvaluation,
+  createEvaluationAcceptanceStats,
+  loadEventEvaluations,
+  type EventEvaluation,
+  type EventEvaluationVerdict
+} from './eventEvaluator'
 import type { GameEntity, GenerationResult } from './gameAdapter'
 
 // 하드코딩 어댑터가 엔티티를 못 찾은 미지의 게임을, LLM 분석이 찾은 editable 그룹으로 채운다.
@@ -99,6 +106,10 @@ export const createEditorApp = ({
   const HISTORY_LIMIT = 10
   let history: Array<{ n: number; result: GenerationResult }> = []
   let historyCounter = 0
+  // Evaluator(사람 이진 평가, 회의 #3/#7): 생성/검증과 분리된 품질 판정. 단일 지표 acceptance_rate.
+  let evaluations: EventEvaluation[] = loadEventEvaluations()
+  let evaluatedResult: GenerationResult | undefined
+  let currentVerdict: EventEvaluationVerdict | undefined
 
   // ---------- shell ----------
   const root = el('div', 'h-screen w-screen flex flex-col bg-zinc-950 text-zinc-100 overflow-hidden')
@@ -188,6 +199,24 @@ export const createEditorApp = ({
   const result = el('pre', 'm-0 max-h-[40vh] overflow-auto rounded-lg border border-white/10 bg-black/40 p-3 text-[0.72rem] leading-relaxed text-zinc-300 whitespace-pre-wrap break-words')
   resultWrap.append(result)
 
+  // ---------- Evaluator (사람 이진 평가) ----------
+  const evaluationWrap = el('div', 'flex flex-col gap-1.5 rounded-lg border border-white/10 bg-white/5 p-3')
+  evaluationWrap.hidden = true
+  const evaluationTop = el('div', 'flex items-center justify-between gap-2')
+  evaluationTop.append(
+    el('span', 'text-[0.7rem] uppercase tracking-wider text-zinc-500 font-medium', 'Evaluator · 사람 이진 평가')
+  )
+  const acceptanceStat = el('span', 'text-xs text-zinc-400')
+  evaluationTop.append(acceptanceStat)
+  const evaluationButtons = el('div', 'flex items-center gap-2')
+  const acceptButton = el('button', GHOST_BUTTON, '👍 수용') as HTMLButtonElement
+  acceptButton.type = 'button'
+  const rejectButton = el('button', GHOST_BUTTON, '👎 거부') as HTMLButtonElement
+  rejectButton.type = 'button'
+  const evaluationVerdict = el('span', 'text-xs')
+  evaluationButtons.append(acceptButton, rejectButton, evaluationVerdict)
+  evaluationWrap.append(evaluationTop, evaluationButtons)
+
   const historyWrap = el('div', 'flex flex-col gap-1.5')
   historyWrap.hidden = true
   const historyHeader = el('div', 'flex items-center justify-between')
@@ -200,7 +229,7 @@ export const createEditorApp = ({
   const historyList = el('div', 'flex flex-col gap-1')
   historyWrap.append(historyHeader, historyList)
 
-  center.append(targetLine, analysisPanel, supportNote, apiKeyField, promptField, actions, status, validationLine, resultWrap, historyWrap)
+  center.append(targetLine, analysisPanel, supportNote, apiKeyField, promptField, actions, status, validationLine, resultWrap, evaluationWrap, historyWrap)
 
   // ---------- right: live game preview ----------
   const preview = el('section', 'border-l border-white/10 flex flex-col min-w-0')
@@ -371,6 +400,63 @@ export const createEditorApp = ({
     )
   }
 
+  const renderEvaluation = (): void => {
+    if (!currentResult) {
+      evaluationWrap.hidden = true
+      return
+    }
+
+    evaluationWrap.hidden = false
+    const stats = createEvaluationAcceptanceStats(evaluations)
+    const ratePercent = Math.round(stats.acceptance_rate * 100)
+    acceptanceStat.textContent =
+      stats.total === 0 ? '아직 평가 없음' : `수용률 ${ratePercent}% (${stats.accepted}/${stats.total})`
+
+    // 현재 결과가 이미 평가됐으면 그 판정을 보여주고 버튼을 잠근다(중복 집계 방지).
+    const evaluated = currentResult === evaluatedResult && currentVerdict !== undefined
+    acceptButton.disabled = evaluated
+    rejectButton.disabled = evaluated
+    acceptButton.className =
+      evaluated && currentVerdict === 'acceptable'
+        ? 'rounded-lg px-3 py-1.5 bg-emerald-500/15 text-emerald-200 text-sm'
+        : GHOST_BUTTON
+    rejectButton.className =
+      evaluated && currentVerdict === 'not_acceptable'
+        ? 'rounded-lg px-3 py-1.5 bg-rose-500/15 text-rose-200 text-sm'
+        : GHOST_BUTTON
+    if (evaluated) {
+      evaluationVerdict.className =
+        currentVerdict === 'acceptable' ? 'text-xs text-emerald-300' : 'text-xs text-rose-300'
+      evaluationVerdict.textContent =
+        currentVerdict === 'acceptable' ? '· 이 결과를 수용함' : '· 이 결과를 거부함'
+    } else {
+      evaluationVerdict.textContent = ''
+    }
+  }
+
+  const runEvaluate = (verdict: EventEvaluationVerdict): void => {
+    if (!currentResult || (currentResult === evaluatedResult && currentVerdict !== undefined)) {
+      return
+    }
+
+    evaluations = appendEventEvaluation({
+      event_id: `${currentResult.label || 'generation'}-${evaluations.length + 1}`,
+      event_name: currentResult.label,
+      verdict,
+      reason: '',
+      evaluated_at: Date.now()
+    })
+    evaluatedResult = currentResult
+    currentVerdict = verdict
+    renderEvaluation()
+    const stats = createEvaluationAcceptanceStats(evaluations)
+    setStatus(
+      `평가 기록됨(${verdict === 'acceptable' ? '수용' : '거부'}) · 누적 수용률 ${Math.round(
+        stats.acceptance_rate * 100
+      )}%`
+    )
+  }
+
   function render(): void {
     gameLabel.textContent = game.adapter.name
 
@@ -425,6 +511,7 @@ export const createEditorApp = ({
     copyButton.disabled = !currentResult || isGenerating
     exportButton.disabled = !currentResult || isGenerating
     result.textContent = currentResult ? currentResult.preview : '생성 결과가 여기에 표시됩니다.'
+    renderEvaluation()
     renderHistory()
   }
 
@@ -604,6 +691,12 @@ export const createEditorApp = ({
     void runCopy()
   })
   clearHistoryButton.addEventListener('click', runClearHistory)
+  acceptButton.addEventListener('click', () => {
+    runEvaluate('acceptable')
+  })
+  rejectButton.addEventListener('click', () => {
+    runEvaluate('not_acceptable')
+  })
   exportButton.addEventListener('click', runExport)
   openButton.addEventListener('click', () => {
     void runOpenProject()

@@ -18,6 +18,8 @@ export type EvaluationAcceptanceStats = {
   acceptance_rate: number
 }
 
+import { readLocalStorage, writeLocalStorage } from './safeStorage'
+
 const STORAGE_KEY = 'my-sample-rpg:event-evaluations'
 
 export const createEvaluationAcceptanceStats = (
@@ -36,7 +38,7 @@ export const createEvaluationAcceptanceStats = (
 }
 
 export const loadEventEvaluations = (): EventEvaluation[] => {
-  const raw = window.localStorage.getItem(STORAGE_KEY)
+  const raw = readLocalStorage(STORAGE_KEY)
 
   if (!raw) {
     return []
@@ -50,10 +52,11 @@ export const loadEventEvaluations = (): EventEvaluation[] => {
   }
 }
 
+// 평가 기록은 비핵심 텔레메트리이므로 저장 실패(저장소 차단 등)에도 throw하지 않고 best-effort로 둔다.
 export const appendEventEvaluation = (
   evaluation: EventEvaluation
 ): EventEvaluation[] => {
   const next = [...loadEventEvaluations(), evaluation]
-  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(next))
+  writeLocalStorage(STORAGE_KEY, JSON.stringify(next))
   return next
 }
