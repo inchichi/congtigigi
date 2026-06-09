@@ -404,11 +404,17 @@ export const createEditorApp = ({
     } else if (currentResult.issues.length === 0) {
       validationLine.hidden = false
       validationLine.className = 'text-xs text-emerald-300'
-      validationLine.textContent = '✅ Validator (생성과 분리된 자동 검증): 통과'
+      validationLine.replaceChildren(
+        document.createTextNode('✅ Validator (생성과 분리된 자동 검증): 통과')
+      )
     } else {
       validationLine.hidden = false
-      validationLine.className = 'text-xs text-amber-300'
-      validationLine.textContent = `⚠️ Validator: ${currentResult.issues.join(' / ')}`
+      validationLine.className = 'text-xs text-amber-300 flex flex-col gap-0.5'
+      // 이슈 문자열은 Validator가 만든 값이지만 안전하게 textContent(el)로만 넣는다.
+      validationLine.replaceChildren(
+        el('div', 'font-medium', `⚠️ Validator (생성과 분리된 자동 검증): ${currentResult.issues.length}건`),
+        ...currentResult.issues.map((issue) => el('div', 'pl-3 text-amber-300/80', `• ${issue}`))
+      )
     }
 
     generateButton.textContent = isGenerating ? '생성 중...' : '생성'
@@ -614,4 +620,6 @@ export const createEditorApp = ({
   if (game.parseErrors.length > 0) {
     setStatus(`기본 맵 일부를 읽지 못했습니다${parseErrorNote()}`)
   }
+  // 데모 흐름: 키가 없으면 키 입력에, 있으면 바로 프롬프트에 포커스.
+  ;(apiKey.trim().length > 0 ? promptInput : apiKeyInput).focus()
 }
