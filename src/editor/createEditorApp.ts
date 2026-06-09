@@ -590,6 +590,10 @@ export const createEditorApp = ({
   })
   // ⌘/Ctrl+Enter로 빠르게 생성(데모 흐름용). runGenerate가 자체 가드(키·프롬프트·생성중)를 가진다.
   promptInput.addEventListener('keydown', (event) => {
+    // 한글 IME 조합 중의 Enter(후보 확정)는 가로채지 않는다 — 에디터 전체가 한국어 입력이다.
+    if (event.isComposing) {
+      return
+    }
     if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
       event.preventDefault()
       void runGenerate()
