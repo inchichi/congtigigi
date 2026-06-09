@@ -5,6 +5,7 @@ import { createGeneratedEventJsonValidationIssues } from './eventJsonSchema'
 import { createHolidayDialogueEventSpecFromGeneratedEventJson } from './eventCodeGenerator'
 import { savePendingEvent } from './pendingEvents'
 import { generateJsonWithClaude } from './anthropicGenerate'
+import { createEntityLinesValidationIssues } from './entityLinesValidator'
 
 // 게임마다 맵/엔티티 규칙·생성·적용이 달라서, 그걸 어댑터로 분리한다. 새 게임 지원 = 새 어댑터 추가.
 export type GameEntity = {
@@ -131,10 +132,15 @@ const generateEntityLines = async (
     }
   })
 
+  // 생성과 분리된 결정적 검증을 rpg 외 게임에도 적용한다(이사님 #1). 빈 배열이면 통과.
+  const issues = createEntityLinesValidationIssues(generated, {
+    targetEntityName: entity?.name
+  })
+
   return {
     label: generated.entity || (entity?.name ?? '생성 결과'),
     preview: JSON.stringify(generated, null, 2),
-    issues: [],
+    issues,
     apply: null
   }
 }
