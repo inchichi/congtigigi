@@ -6,6 +6,7 @@ import { readLocalStorage, writeLocalStorage } from './safeStorage'
 import { ANTHROPIC_MODEL } from './anthropicGenerate'
 import {
   appendEventEvaluation,
+  clearEventEvaluations,
   loadEventEvaluations,
   type EventEvaluation,
   type EventEvaluationVerdict
@@ -110,7 +111,7 @@ export const createEditorApp = ({
   // 평가 판정은 결과 객체 동일성으로 기억한다(단일 슬롯이면 히스토리에서 옛 결과를 다시 골라 재평가 →
   // 중복 집계되어 acceptance_rate가 오염됨). WeakMap이라 참조가 사라진 결과는 알아서 GC된다.
   let evaluations: EventEvaluation[] = loadEventEvaluations()
-  const verdictByResult = new WeakMap<GenerationResult, EventEvaluationVerdict>()
+  let verdictByResult = new WeakMap<GenerationResult, EventEvaluationVerdict>()
   // 이번 세션 집계: 생성 수 + Validator 통과 수. 프로젝트를 바꾸면 초기화한다.
   let sessionTally: SessionGenerationTally = { generations: 0, validatorPasses: 0 }
 
@@ -216,8 +217,10 @@ export const createEditorApp = ({
   acceptButton.type = 'button'
   const rejectButton = el('button', GHOST_BUTTON, '👎 거부') as HTMLButtonElement
   rejectButton.type = 'button'
-  const evaluationVerdict = el('span', 'text-xs')
-  evaluationButtons.append(acceptButton, rejectButton, evaluationVerdict)
+  const evaluationVerdict = el('span', 'text-xs flex-1')
+  const resetEvaluationsButton = el('button', 'text-[0.7rem] text-zinc-500 transition hover:text-zinc-300', '누적 기록 초기화') as HTMLButtonElement
+  resetEvaluationsButton.type = 'button'
+  evaluationButtons.append(acceptButton, rejectButton, evaluationVerdict, resetEvaluationsButton)
   evaluationWrap.append(evaluationTop, evaluationButtons)
 
   const historyWrap = el('div', 'flex flex-col gap-1.5')
@@ -445,6 +448,15 @@ export const createEditorApp = ({
     } else {
       evaluationVerdict.textContent = ''
     }
+  }
+
+  const runResetEvaluations = (): void => {
+    clearEventEvaluations()
+    evaluations = []
+    // 영속 기록을 비웠으니 현재 결과의 잠금(verdict)도 함께 풀어 정합성을 맞춘다.
+    verdictByResult = new WeakMap<GenerationResult, EventEvaluationVerdict>()
+    renderEvaluation()
+    setStatus('누적 평가 기록을 초기화했습니다.')
   }
 
   const runEvaluate = (verdict: EventEvaluationVerdict): void => {
@@ -731,6 +743,7 @@ export const createEditorApp = ({
   rejectButton.addEventListener('click', () => {
     runEvaluate('not_acceptable')
   })
+  resetEvaluationsButton.addEventListener('click', runResetEvaluations)
   exportButton.addEventListener('click', runExport)
   openButton.addEventListener('click', () => {
     void runOpenProject()

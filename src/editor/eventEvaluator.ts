@@ -60,3 +60,8 @@ export const appendEventEvaluation = (
   writeLocalStorage(STORAGE_KEY, JSON.stringify(next))
   return next
 }
+
+// 누적 평가 기록을 비운다(데모를 깨끗한 상태로 시작할 때). best-effort.
+export const clearEventEvaluations = (): void => {
+  writeLocalStorage(STORAGE_KEY, JSON.stringify([]))
+}
