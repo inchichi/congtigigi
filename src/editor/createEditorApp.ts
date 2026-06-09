@@ -6,11 +6,11 @@ import { readLocalStorage, writeLocalStorage } from './safeStorage'
 import { ANTHROPIC_MODEL } from './anthropicGenerate'
 import {
   appendEventEvaluation,
-  createEvaluationAcceptanceStats,
   loadEventEvaluations,
   type EventEvaluation,
   type EventEvaluationVerdict
 } from './eventEvaluator'
+import { buildSessionMetrics, type SessionGenerationTally } from './sessionMetrics'
 import type { GameEntity, GenerationResult } from './gameAdapter'
 
 // 하드코딩 어댑터가 엔티티를 못 찾은 미지의 게임을, LLM 분석이 찾은 editable 그룹으로 채운다.
@@ -111,6 +111,8 @@ export const createEditorApp = ({
   // 중복 집계되어 acceptance_rate가 오염됨). WeakMap이라 참조가 사라진 결과는 알아서 GC된다.
   let evaluations: EventEvaluation[] = loadEventEvaluations()
   const verdictByResult = new WeakMap<GenerationResult, EventEvaluationVerdict>()
+  // 이번 세션 집계: 생성 수 + Validator 통과 수. 프로젝트를 바꾸면 초기화한다.
+  let sessionTally: SessionGenerationTally = { generations: 0, validatorPasses: 0 }
 
   // ---------- shell ----------
   const root = el('div', 'h-screen w-screen flex flex-col bg-zinc-950 text-zinc-100 overflow-hidden')
@@ -408,10 +410,15 @@ export const createEditorApp = ({
     }
 
     evaluationWrap.hidden = false
-    const stats = createEvaluationAcceptanceStats(evaluations)
-    const ratePercent = Math.round(stats.acceptance_rate * 100)
+    // 자동 Validator 통과율 + 사람 수용률을 한 줄로(회의의 두 평가 개념).
+    const metrics = buildSessionMetrics(sessionTally, evaluations)
+    const validatorPercent = Math.round(metrics.validatorPassRate * 100)
+    const acceptancePercent = Math.round(metrics.acceptanceRate * 100)
     acceptanceStat.textContent =
-      stats.total === 0 ? '아직 평가 없음' : `수용률 ${ratePercent}% (${stats.accepted}/${stats.total})`
+      `세션 생성 ${metrics.generations} · Validator 통과 ${validatorPercent}%` +
+      (metrics.acceptanceTotal === 0
+        ? ' · 수용 평가 없음'
+        : ` · 수용률 ${acceptancePercent}%${metrics.meetsAcceptanceGoal ? ' ✅' : ''}`)
 
     // 현재 결과가 이미 평가됐으면(객체 단위로 기억) 그 판정을 보여주고 버튼을 잠근다(중복 집계 방지).
     const verdict = verdictByResult.get(currentResult)
@@ -450,10 +457,10 @@ export const createEditorApp = ({
     })
     verdictByResult.set(currentResult, verdict)
     renderEvaluation()
-    const stats = createEvaluationAcceptanceStats(evaluations)
+    const metrics = buildSessionMetrics(sessionTally, evaluations)
     setStatus(
       `평가 기록됨(${verdict === 'acceptable' ? '수용' : '거부'}) · 누적 수용률 ${Math.round(
-        stats.acceptance_rate * 100
+        metrics.acceptanceRate * 100
       )}%`
     )
   }
@@ -547,6 +554,11 @@ export const createEditorApp = ({
       })
       historyCounter += 1
       history = [{ n: historyCounter, result: currentResult }, ...history].slice(0, HISTORY_LIMIT)
+      // 세션 지표 집계: 생성 1건 + (Validator 통과면) 통과 1건.
+      sessionTally = {
+        generations: sessionTally.generations + 1,
+        validatorPasses: sessionTally.validatorPasses + (currentResult.issues.length === 0 ? 1 : 0)
+      }
       setStatus(`생성 완료: ${currentResult.label}`)
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
@@ -625,6 +637,7 @@ export const createEditorApp = ({
       currentAnalysis = undefined
       history = []
       historyCounter = 0
+      sessionTally = { generations: 0, validatorPasses: 0 }
       renderTree()
       renderAnalysis()
       render()
@@ -652,6 +665,7 @@ export const createEditorApp = ({
     currentAnalysis = undefined
     history = []
     historyCounter = 0
+    sessionTally = { generations: 0, validatorPasses: 0 }
     renderTree()
     renderAnalysis()
     render()
