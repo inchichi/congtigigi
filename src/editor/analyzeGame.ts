@@ -32,7 +32,14 @@ export const buildAnalysisEvidence = (files: GameFile[]): string => {
   const tmxFiles = files.filter((file) => file.name.endsWith('.tmx')).slice(0, MAX_MAPS)
 
   for (const file of tmxFiles) {
-    const objects = extractTmxObjects(file.text)
+    // 한 맵이 깨졌다고 전체 분석을 죽이지 않는다(loadGame과 동일한 맵 단위 격리). 건너뛰되 표시한다.
+    let objects
+    try {
+      objects = extractTmxObjects(file.text)
+    } catch {
+      lines.push(`맵 ${file.name}: (파싱 실패 — 건너뜀)`)
+      continue
+    }
     const byGroup = new Map<string, { types: Set<string>; names: string[] }>()
 
     for (const object of objects) {

@@ -30,4 +30,18 @@ describe('buildAnalysisEvidence', () => {
     expect(evidence).toContain('object group "Chests"')
     expect(evidence).toContain('chest_1')
   })
+
+  it('skips a malformed map instead of aborting analysis of the good ones', () => {
+    const files: GameFile[] = [
+      { name: 'good.tmx', path: 'maps/good.tmx', text: legendTmx },
+      { name: 'broken.tmx', path: 'maps/broken.tmx', text: 'not valid xml at all' }
+    ]
+
+    const evidence = buildAnalysisEvidence(files)
+
+    // 깨진 맵은 표시만 하고 건너뛰며, 멀쩡한 맵 분석은 그대로 유지된다.
+    expect(evidence).toContain('맵 broken.tmx: (파싱 실패 — 건너뜀)')
+    expect(evidence).toContain('object group "Enemies"')
+    expect(evidence).toContain('slime')
+  })
 })

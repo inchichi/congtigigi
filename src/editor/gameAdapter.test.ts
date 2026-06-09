@@ -52,6 +52,12 @@ describe('extractTmxObjects', () => {
     expect(() => extractTmxObjects('')).toThrow(/TMX 파싱 실패/u)
     expect(() => extractTmxObjects('   ')).toThrow(/TMX 파싱 실패/u)
     expect(() => extractTmxObjects('not xml at all')).toThrow(/TMX 파싱 실패/u)
+    // 잘린(truncated) 맵: 루트 <map>은 생기지만 구조 에러가 나고 콘텐츠가 날아간다 — 실패로 봐야 한다.
+    expect(() =>
+      extractTmxObjects('<map><objectgroup name="c"><object id="1" name="a" type="character"/><object ')
+    ).toThrow(/TMX 파싱 실패/u)
+    // TMX 루트(<map>)가 아닌 문서도 실패로 본다.
+    expect(() => extractTmxObjects('<html><body/></html>')).toThrow(/TMX 파싱 실패/u)
   })
 
   it('still parses a usable map whose attribute has a recoverable stray entity ref', () => {

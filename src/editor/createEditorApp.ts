@@ -1,7 +1,7 @@
 import { openProjectDirectory } from './openProjectDirectory'
 import { loadGame, type GameFile, type LoadedGame, type LoadedGameMap } from './loadGame'
 import { analyzeGame, type GameAnalysis } from './analyzeGame'
-import { extractTmxObjects } from './tmxObjects'
+import { extractTmxObjects, type TmxObject } from './tmxObjects'
 import { readLocalStorage, writeLocalStorage } from './safeStorage'
 import type { GameEntity, GenerationResult } from './gameAdapter'
 
@@ -21,7 +21,14 @@ const buildEntitiesFromAnalysis = (
     .filter((file) => file.name.endsWith('.tmx'))
     .map((file) => {
       const id = file.name.replace(/\.tmx$/u, '')
-      const entities = extractTmxObjects(file.text)
+      // 한 맵이 깨졌다고 분석 기반 트리 재구성을 통째로 죽이지 않는다(loadGame과 동일한 격리).
+      let objects: TmxObject[] = []
+      try {
+        objects = extractTmxObjects(file.text)
+      } catch {
+        // 파싱 실패 맵 → 엔티티 0개
+      }
+      const entities = objects
         .filter(
           (object) =>
             editableKindByGroup.has(object.group) && object.name.length > 0
