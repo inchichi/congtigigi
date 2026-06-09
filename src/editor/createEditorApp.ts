@@ -3,6 +3,7 @@ import { loadGame, type GameFile, type LoadedGame, type LoadedGameMap } from './
 import { analyzeGame, type GameAnalysis } from './analyzeGame'
 import { extractTmxObjects, type TmxObject } from './tmxObjects'
 import { readLocalStorage, writeLocalStorage } from './safeStorage'
+import { ANTHROPIC_MODEL } from './anthropicGenerate'
 import type { GameEntity, GenerationResult } from './gameAdapter'
 
 // 하드코딩 어댑터가 엔티티를 못 찾은 미지의 게임을, LLM 분석이 찾은 editable 그룹으로 채운다.
@@ -111,6 +112,14 @@ export const createEditorApp = ({
   )
   const gameLabel = el('span', 'text-xs text-zinc-400', game.adapter.name)
   brand.append(gameLabel)
+  // 데모에서 어떤 LLM을 쓰는지 한눈에 보이게 모델 배지를 둔다.
+  brand.append(
+    el(
+      'span',
+      'text-[0.65rem] rounded-full px-2 py-0.5 bg-indigo-500/10 text-indigo-300 border border-indigo-500/20',
+      `Claude · ${ANTHROPIC_MODEL}`
+    )
+  )
   const connection = el('div', 'flex items-center gap-2 text-xs text-zinc-400')
   const connectionDot = el('span', 'w-2 h-2 rounded-full bg-zinc-600')
   const connectionLabel = el('span', '', '게임 로딩...')
@@ -154,7 +163,7 @@ export const createEditorApp = ({
   apiKeyField.append(apiKeyInput)
 
   const promptField = el('label', 'flex flex-col gap-1.5')
-  promptField.append(el('span', 'text-[0.7rem] uppercase tracking-wider text-zinc-500 font-medium', '자연어 프롬프트'))
+  promptField.append(el('span', 'text-[0.7rem] uppercase tracking-wider text-zinc-500 font-medium', '자연어 프롬프트  ·  ⌘/Ctrl+Enter로 생성'))
   const promptInput = el('textarea', 'w-full min-h-[96px] rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-sm text-zinc-100 outline-none transition resize-y focus:border-indigo-500/50 focus:ring-2 focus:ring-indigo-500/30') as HTMLTextAreaElement
   promptInput.placeholder = '예: 대장장이가 새로 만든 검을 자랑하는 대화'
   promptField.append(promptInput)
@@ -164,9 +173,11 @@ export const createEditorApp = ({
   generateButton.type = 'button'
   const applyButton = el('button', GHOST_BUTTON, '게임에 적용') as HTMLButtonElement
   applyButton.type = 'button'
+  const copyButton = el('button', GHOST_BUTTON, '⧉ 복사') as HTMLButtonElement
+  copyButton.type = 'button'
   const exportButton = el('button', GHOST_BUTTON, '↓ 내보내기') as HTMLButtonElement
   exportButton.type = 'button'
-  actions.append(generateButton, applyButton, exportButton)
+  actions.append(generateButton, applyButton, copyButton, exportButton)
 
   const status = el('div', 'text-sm text-zinc-400 min-h-[1.25rem]')
   const validationLine = el('div', 'text-xs')
@@ -179,9 +190,15 @@ export const createEditorApp = ({
 
   const historyWrap = el('div', 'flex flex-col gap-1.5')
   historyWrap.hidden = true
-  historyWrap.append(el('span', 'text-[0.7rem] uppercase tracking-wider text-zinc-500 font-medium', '생성 히스토리'))
+  const historyHeader = el('div', 'flex items-center justify-between')
+  historyHeader.append(
+    el('span', 'text-[0.7rem] uppercase tracking-wider text-zinc-500 font-medium', '생성 히스토리')
+  )
+  const clearHistoryButton = el('button', 'text-[0.7rem] text-zinc-500 transition hover:text-zinc-300', '비우기') as HTMLButtonElement
+  clearHistoryButton.type = 'button'
+  historyHeader.append(clearHistoryButton)
   const historyList = el('div', 'flex flex-col gap-1')
-  historyWrap.append(historyList)
+  historyWrap.append(historyHeader, historyList)
 
   center.append(targetLine, analysisPanel, supportNote, apiKeyField, promptField, actions, status, validationLine, resultWrap, historyWrap)
 
@@ -395,9 +412,11 @@ export const createEditorApp = ({
     }
 
     generateButton.textContent = isGenerating ? '생성 중...' : '생성'
-    generateButton.disabled = isGenerating || apiKey.trim().length === 0
+    generateButton.disabled =
+      isGenerating || apiKey.trim().length === 0 || promptInput.value.trim().length === 0
     applyButton.disabled =
       isGenerating || !currentResult?.apply || (currentResult?.issues.length ?? 0) > 0
+    copyButton.disabled = !currentResult || isGenerating
     exportButton.disabled = !currentResult || isGenerating
     result.textContent = currentResult ? currentResult.preview : '생성 결과가 여기에 표시됩니다.'
     renderHistory()
@@ -456,6 +475,27 @@ export const createEditorApp = ({
     } catch (error) {
       setStatus(`적용 실패: ${error instanceof Error ? error.message : String(error)}`)
     }
+  }
+
+  const runCopy = async (): Promise<void> => {
+    if (!currentResult) {
+      return
+    }
+
+    // clipboard API는 비보안 컨텍스트·권한 거부에서 없거나 reject될 수 있어 방어한다.
+    try {
+      await navigator.clipboard.writeText(currentResult.preview)
+      setStatus('생성 결과를 클립보드에 복사했습니다.')
+    } catch {
+      setStatus('클립보드 복사에 실패했습니다(브라우저 권한/보안 컨텍스트 확인).')
+    }
+  }
+
+  const runClearHistory = (): void => {
+    history = []
+    historyCounter = 0
+    renderHistory()
+    setStatus('생성 히스토리를 비웠습니다.')
   }
 
   const runExport = (): void => {
@@ -537,7 +577,23 @@ export const createEditorApp = ({
   generateButton.addEventListener('click', () => {
     void runGenerate()
   })
+  // 프롬프트가 비면 생성 버튼도 비활성(눌러보고 실패하는 대신). 전체 re-render 없이 버튼만 갱신.
+  promptInput.addEventListener('input', () => {
+    generateButton.disabled =
+      isGenerating || apiKey.trim().length === 0 || promptInput.value.trim().length === 0
+  })
+  // ⌘/Ctrl+Enter로 빠르게 생성(데모 흐름용). runGenerate가 자체 가드(키·프롬프트·생성중)를 가진다.
+  promptInput.addEventListener('keydown', (event) => {
+    if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+      event.preventDefault()
+      void runGenerate()
+    }
+  })
   applyButton.addEventListener('click', runApply)
+  copyButton.addEventListener('click', () => {
+    void runCopy()
+  })
+  clearHistoryButton.addEventListener('click', runClearHistory)
   exportButton.addEventListener('click', runExport)
   openButton.addEventListener('click', () => {
     void runOpenProject()
