@@ -107,9 +107,10 @@ export const createEditorApp = ({
   let history: Array<{ n: number; result: GenerationResult }> = []
   let historyCounter = 0
   // Evaluator(사람 이진 평가, 회의 #3/#7): 생성/검증과 분리된 품질 판정. 단일 지표 acceptance_rate.
+  // 평가 판정은 결과 객체 동일성으로 기억한다(단일 슬롯이면 히스토리에서 옛 결과를 다시 골라 재평가 →
+  // 중복 집계되어 acceptance_rate가 오염됨). WeakMap이라 참조가 사라진 결과는 알아서 GC된다.
   let evaluations: EventEvaluation[] = loadEventEvaluations()
-  let evaluatedResult: GenerationResult | undefined
-  let currentVerdict: EventEvaluationVerdict | undefined
+  const verdictByResult = new WeakMap<GenerationResult, EventEvaluationVerdict>()
 
   // ---------- shell ----------
   const root = el('div', 'h-screen w-screen flex flex-col bg-zinc-950 text-zinc-100 overflow-hidden')
@@ -412,30 +413,31 @@ export const createEditorApp = ({
     acceptanceStat.textContent =
       stats.total === 0 ? '아직 평가 없음' : `수용률 ${ratePercent}% (${stats.accepted}/${stats.total})`
 
-    // 현재 결과가 이미 평가됐으면 그 판정을 보여주고 버튼을 잠근다(중복 집계 방지).
-    const evaluated = currentResult === evaluatedResult && currentVerdict !== undefined
+    // 현재 결과가 이미 평가됐으면(객체 단위로 기억) 그 판정을 보여주고 버튼을 잠근다(중복 집계 방지).
+    const verdict = verdictByResult.get(currentResult)
+    const evaluated = verdict !== undefined
     acceptButton.disabled = evaluated
     rejectButton.disabled = evaluated
     acceptButton.className =
-      evaluated && currentVerdict === 'acceptable'
+      verdict === 'acceptable'
         ? 'rounded-lg px-3 py-1.5 bg-emerald-500/15 text-emerald-200 text-sm'
         : GHOST_BUTTON
     rejectButton.className =
-      evaluated && currentVerdict === 'not_acceptable'
+      verdict === 'not_acceptable'
         ? 'rounded-lg px-3 py-1.5 bg-rose-500/15 text-rose-200 text-sm'
         : GHOST_BUTTON
     if (evaluated) {
       evaluationVerdict.className =
-        currentVerdict === 'acceptable' ? 'text-xs text-emerald-300' : 'text-xs text-rose-300'
+        verdict === 'acceptable' ? 'text-xs text-emerald-300' : 'text-xs text-rose-300'
       evaluationVerdict.textContent =
-        currentVerdict === 'acceptable' ? '· 이 결과를 수용함' : '· 이 결과를 거부함'
+        verdict === 'acceptable' ? '· 이 결과를 수용함' : '· 이 결과를 거부함'
     } else {
       evaluationVerdict.textContent = ''
     }
   }
 
   const runEvaluate = (verdict: EventEvaluationVerdict): void => {
-    if (!currentResult || (currentResult === evaluatedResult && currentVerdict !== undefined)) {
+    if (!currentResult || verdictByResult.has(currentResult)) {
       return
     }
 
@@ -446,8 +448,7 @@ export const createEditorApp = ({
       reason: '',
       evaluated_at: Date.now()
     })
-    evaluatedResult = currentResult
-    currentVerdict = verdict
+    verdictByResult.set(currentResult, verdict)
     renderEvaluation()
     const stats = createEvaluationAcceptanceStats(evaluations)
     setStatus(
