@@ -1,4 +1,4 @@
-import type { ParsedTiledMap } from '../game/tiled/parseTiledMap'
+import type { ParsedTiledMap } from '../games/my-sample-rpg/tiled/parseTiledMap'
 import type {
   GameStructureNpcInfo,
   GameStructureProfile

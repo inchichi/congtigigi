@@ -7,7 +7,7 @@ import {
   buildGameStructureProfile,
   type EditorMapSource
 } from './buildGameStructureProfile'
-import { registerDynamicEventDefinition } from '../events/DynamicEventManager'
+import { registerDynamicEventDefinition } from './DynamicEventManager'
 import {
   createGeneratedEventJsonValidationIssues,
   type GeneratedEventJson
@@ -26,8 +26,8 @@ import {
 import type {
   GameStructureAnalysisResult
 } from './gameStructureProfile'
-import type { HolidayDialogueEventSpec } from '../game/eventGeneration'
-import type { ApplyEventDraftResult } from '../rendering/createPixiTiledMapView'
+import type { HolidayDialogueEventSpec } from '../games/my-sample-rpg/eventGeneration'
+import type { ApplyEventDraftResult } from '../games/my-sample-rpg/rendering/createPixiTiledMapView'
 
 type SceneRenderer = {
   applyEventDraft: (

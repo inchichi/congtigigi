@@ -8,7 +8,7 @@ import {
 } from './loadMonsterSheetTextures'
 
 const MONSTER_PIG_MOTION_SHEET_URL = new URL(
-  '../assets/monsters/monster-pig-sheet.png',
+  '../../../assets/monsters/monster-pig-sheet.png',
   import.meta.url
 ).href
 const MONSTER_PIG_IDLE_BAND: FrameBand = {

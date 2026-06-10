@@ -6,7 +6,7 @@ import {
   QUEST_DEFINITIONS,
   QUEST_GIVER_NPC_IDS,
   WIZARD_NPC_ID
-} from '../game/questLog'
+} from '../questLog'
 import {
   QUEST_GIVER_PORTRAIT_FRAME_BY_NPC_ID,
   getQuestGiverPortraitFrame

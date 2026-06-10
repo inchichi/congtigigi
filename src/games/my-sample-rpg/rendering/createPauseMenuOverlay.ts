@@ -4,7 +4,7 @@ import {
   getPlayerControlBindingDisplayText,
   type PlayerControlBindingId,
   type PlayerControlBindings
-} from '../game/playerControls'
+} from '../playerControls'
 
 export type AudioSettings = {
   bgmVolume: number

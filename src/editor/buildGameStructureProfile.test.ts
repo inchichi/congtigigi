@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { parseTiledMap } from '../game/tiled/parseTiledMap'
+import { parseTiledMap } from '../games/my-sample-rpg/tiled/parseTiledMap'
 import { CURRENT_GAME_PROJECT_PROFILE } from './currentGameProjectSnapshot'
 import {
   buildGameStructureProfile,

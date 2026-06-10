@@ -2,15 +2,15 @@ import {
   PLAYER_MAX_LEVEL,
   getPlayerJobDisplayName,
   type PlayerProfile
-} from '../game/playerProfile'
-import { getPlayerExperienceToNextLevel } from '../game/playerExperience'
-import { getPlayerEquipmentItemDefinitionById } from '../game/playerEquipment'
-import type { PlayerInventory } from '../game/playerInventory'
+} from '../playerProfile'
+import { getPlayerExperienceToNextLevel } from '../playerExperience'
+import { getPlayerEquipmentItemDefinitionById } from '../playerEquipment'
+import type { PlayerInventory } from '../playerInventory'
 import {
   clearPlayerQuickslotAssignment,
   setPlayerQuickslotAssignment,
   type PlayerQuickslots
-} from '../game/playerQuickslots'
+} from '../playerQuickslots'
 import {
   PLAYER_SKILL_DRAG_MIME_TYPE,
   clearPlayerSkillSlotAssignment,
@@ -18,8 +18,8 @@ import {
   PLAYER_SKILL_SLOT_HOTKEY_LABELS,
   setPlayerSkillSlotAssignment,
   type PlayerSkillSlots
-} from '../game/playerSkillSlots'
-import { getPlayerSkillDisplayInfoById } from '../game/playerSkills'
+} from '../playerSkillSlots'
+import { getPlayerSkillDisplayInfoById } from '../playerSkills'
 import { getResponsiveUiScale } from './getResponsiveUiScale'
 
 type CreatePlayerHudOverlayInput = {
@@ -38,11 +38,11 @@ export type PlayerHudOverlay = {
 }
 
 const UI_SPRITESHEET_IMAGE_URL = new URL(
-  '../assets/spritesheets/uipack_rpg_sheet.png',
+  '../../../assets/spritesheets/uipack_rpg_sheet.png',
   import.meta.url
 ).href
 const TINY_DUNGEON_TILESET_IMAGE_URL = new URL(
-  '../assets/tilesets/tiny-dungeon-16.png',
+  '../../../assets/tilesets/tiny-dungeon-16.png',
   import.meta.url
 ).href
 const BUTTON_SQUARE_FRAME = {

@@ -5,7 +5,7 @@
 
 @font-face {
   font-family: 'NeoDunggeunmo';
-  src: url('./assets/fonts/neodgm.woff2') format('woff2');
+  src: url('../../assets/fonts/neodgm.woff2') format('woff2');
   font-display: swap;
   font-style: normal;
   font-weight: 400;
@@ -13,7 +13,7 @@
 
 @font-face {
   font-family: 'Jersey 25';
-  src: url('./assets/fonts/Jersey25-Regular.ttf') format('truetype');
+  src: url('../../assets/fonts/Jersey25-Regular.ttf') format('truetype');
   font-display: swap;
   font-style: normal;
   font-weight: 400;

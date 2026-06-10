@@ -2,7 +2,6 @@ import { CompositeTilemap } from '@pixi/tilemap'
 import {
   Application,
   AnimatedSprite,
-  Assets,
   Container,
   Graphics,
   NineSliceSprite,
@@ -14,45 +13,47 @@ import {
   UPDATE_PRIORITY
 } from 'pixi.js'
 
+import { loadTextureSafe } from './loadTextureSafe'
+
 import {
   PLAYER_CHARACTER_ID,
   createLuaCharacterController,
   moveCharacterState
-} from '../game/characterState'
+} from '../characterState'
 import type {
   CharacterAction,
   CharacterMoveDirection,
   CharacterState
-} from '../game/characterState'
-import type { CharacterControllerRuntime } from '../game/createCharacterControllerRuntime'
+} from '../characterState'
+import type { CharacterControllerRuntime } from '../createCharacterControllerRuntime'
 import {
   createGameEventQueue,
   type GameEvent
-} from '../game/events/createGameEventQueue'
-import type { HolidayDialogueEventSpec } from '../game/eventGeneration'
-import { processInteractionEvents } from '../game/interaction/processInteractionEvents'
-import { usePlayerQuickslotConsumable } from '../game/playerConsumables'
+} from '../events/createGameEventQueue'
+import type { EventReward, HolidayDialogueEventSpec } from '../eventGeneration'
+import { processInteractionEvents } from '../interaction/processInteractionEvents'
+import { usePlayerQuickslotConsumable } from '../playerConsumables'
 import {
   getPlayerEquipmentItemDefinitionById,
   type PlayerEquipment,
   type PlayerEquipmentSlotId
-} from '../game/playerEquipment'
+} from '../playerEquipment'
 import {
   findFirstEmptyPlayerInventorySlotIndex,
   setPlayerInventorySlot,
   type PlayerInventory,
   type PlayerInventoryItem
-} from '../game/playerInventory'
-import type { PlayerProfile } from '../game/playerProfile'
+} from '../playerInventory'
+import type { PlayerProfile } from '../playerProfile'
 import {
   clearPlayerQuickslotAssignment,
   type PlayerQuickslots
-} from '../game/playerQuickslots'
-import { getMonsterDisplayName } from '../game/monsterDisplayName'
+} from '../playerQuickslots'
+import { getMonsterDisplayName } from '../monsterDisplayName'
 import {
   getPlayerSkillSlotIndexFromCode,
   type PlayerSkillSlots
-} from '../game/playerSkillSlots'
+} from '../playerSkillSlots'
 import {
   PLAYER_PROTECT_SKILL_ID,
   getPlayerSkillDamageById,
@@ -60,7 +61,7 @@ import {
   getPlayerSkillLevelById,
   getPlayerProtectSkillDurationByLevel,
   isPlayerSkillUnlockedInProfile
-} from '../game/playerSkills'
+} from '../playerSkills'
 import {
   PLAYER_SMASH_SKILL_COOLDOWN_MILLISECONDS,
   PLAYER_SMASH_SKILL_EFFECT_ANIMATION_SPEED,
@@ -69,7 +70,7 @@ import {
   PLAYER_SMASH_SKILL_SEGMENT_DURATION_MILLISECONDS,
   PLAYER_SMASH_SKILL_SEGMENT_STAGGER_MILLISECONDS,
   getPlayerSmashSkillSegmentPlacement
-} from '../game/playerSmashSkill'
+} from '../playerSmashSkill'
 import {
   PLAYER_ROLL_COOLDOWN_MILLISECONDS,
   getPlayerRollDistanceTiles,
@@ -79,7 +80,7 @@ import {
   type PlayerRollState,
   type PlayerRollVector,
   type PlayerRollVisualState
-} from '../game/playerRoll'
+} from '../playerRoll'
 import {
   createInitialPlayerControlBindings,
   getPlayerControlActionFromCode,
@@ -90,7 +91,7 @@ import {
   setPlayerControlBinding,
   type PlayerControlBindingId,
   type PlayerControlBindings
-} from '../game/playerControls'
+} from '../playerControls'
 import {
   QUEST_GIVER_NPC_IDS,
   completeQuest,
@@ -105,45 +106,45 @@ import {
   type CompleteQuestResult,
   type QuestItemReward,
   type QuestLogState
-} from '../game/questLog'
+} from '../questLog'
 import {
   getPlayerMovementSpeedTilesPerSecond,
   getPlayerPhysicalAttackPower,
   shouldPlayerEvadeDamage
-} from '../game/playerStatEffects'
-import { grantPlayerExperience } from '../game/playerExperience'
-import { rollMonsterEquipmentDrop } from '../game/monsterEquipmentDrops'
-import { grantPlayerSkillPoints } from '../game/playerProgression'
+} from '../playerStatEffects'
+import { grantPlayerExperience } from '../playerExperience'
+import { rollMonsterEquipmentDrop } from '../monsterEquipmentDrops'
+import { grantPlayerSkillPoints } from '../playerProgression'
 import {
   createMonsterPatrolState,
   stepMonsterPatrol,
   type MonsterPatrolState
-} from '../game/monsterPatrol'
+} from '../monsterPatrol'
 import {
   applyMonsterDamage,
   createMonsterCombatState,
   isMonsterDefeated,
   type MonsterCombatState
-} from '../game/monsterCombat'
+} from '../monsterCombat'
 import {
   getMonsterExperienceDropAmount,
   getMonsterGoldDropAmount,
   getMonsterSkillPointDropAmount
-} from '../game/monsterRewards'
-import { resolveCharacterInteractionTarget } from '../game/interaction/resolveCharacterInteractionTarget'
+} from '../monsterRewards'
+import { resolveCharacterInteractionTarget } from '../interaction/resolveCharacterInteractionTarget'
 import {
   createMapPortalsFromEventLayers,
   type MapPortal
-} from '../game/tiled/createMapPortalsFromEventLayers'
+} from '../tiled/createMapPortalsFromEventLayers'
 import {
   createWallTileLookup,
   isWallTileAt
-} from '../game/tiled/createWallTileLookup'
+} from '../tiled/createWallTileLookup'
 import type {
   ParsedTiledMap,
   ParsedTiledTile,
   ParsedTiledTileset
-} from '../game/tiled/parseTiledMap'
+} from '../tiled/parseTiledMap'
 import {
   getSpriteTransformForTile,
   hasTileTransform
@@ -156,7 +157,6 @@ import { createPlayerHudOverlay } from './createPlayerHudOverlay'
 import { createPlayerInventoryOverlay } from './createPlayerInventoryOverlay'
 import { createPlayerStatOverlay } from './createPlayerStatOverlay'
 import { createPlayerSkillOverlay } from './createPlayerSkillOverlay'
-import { createScenarioEditorOverlay } from './createScenarioEditorOverlay'
 import type { MonsterAnimationTextures } from './monsterAnimationTextures'
 import { loadMonsterPigAnimationTextures } from './loadMonsterPigAnimationTextures'
 import { loadMonsterSlimeAnimationTextures } from './loadMonsterSlimeAnimationTextures'
@@ -395,56 +395,56 @@ type PlayerWeaponAppearanceConfig = {
 
 const DEPTH_SORTED_LAYER_NAME = 'object'
 const TINY_DUNGEON_TILESET_IMAGE_URL = new URL(
-  '../assets/tilesets/tiny-dungeon-16.png',
+  '../../../assets/tilesets/tiny-dungeon-16.png',
   import.meta.url
 ).href
 const MONSTER_EQUIPMENT_DROP_IMAGE_URL_BY_DROP_ID: Record<string, string> = {
   'iron-sword_drop': new URL(
-    '../assets/weapons/weapon-sword.png',
+    '../../../assets/weapons/weapon-sword.png',
     import.meta.url
   ).href,
   'battle-axe_drop': new URL(
-    '../assets/weapons/weapon-axe.png',
+    '../../../assets/weapons/weapon-axe.png',
     import.meta.url
   ).href,
   'long-spear_drop': new URL(
-    '../assets/weapons/weapon-spear.png',
+    '../../../assets/weapons/weapon-spear.png',
     import.meta.url
   ).href,
   'quick-dagger_drop': new URL(
-    '../assets/weapons/weapon-dagger.png',
+    '../../../assets/weapons/weapon-dagger.png',
     import.meta.url
   ).href,
   'spiked-mace_drop': new URL(
-    '../assets/weapons/weapon-mace.png',
+    '../../../assets/weapons/weapon-mace.png',
     import.meta.url
   ).href,
   'magic-staff_drop': new URL(
-    '../assets/weapons/weapon-staff.png',
+    '../../../assets/weapons/weapon-staff.png',
     import.meta.url
   ).href,
   Leather_Armor_drop: new URL(
-    '../assets/armor/dropimage/Leather_Armor_drop.png',
+    '../../../assets/armor/dropimage/Leather_Armor_drop.png',
     import.meta.url
   ).href,
   Leather_Helmet_drop: new URL(
-    '../assets/armor/dropimage/Leather_Helmet_drop.png',
+    '../../../assets/armor/dropimage/Leather_Helmet_drop.png',
     import.meta.url
   ).href,
   Chain_Armor_drop: new URL(
-    '../assets/armor/dropimage/Chain_Armor_drop.png',
+    '../../../assets/armor/dropimage/Chain_Armor_drop.png',
     import.meta.url
   ).href,
   Chain_Helmet_drop: new URL(
-    '../assets/armor/dropimage/Chain_Helmet_drop.png',
+    '../../../assets/armor/dropimage/Chain_Helmet_drop.png',
     import.meta.url
   ).href,
   Iron_Armor_drop: new URL(
-    '../assets/armor/dropimage/Iron_Armor_drop.png',
+    '../../../assets/armor/dropimage/Iron_Armor_drop.png',
     import.meta.url
   ).href,
   Iron_Helmet_drop: new URL(
-    '../assets/armor/dropimage/Iron_Helmet_drop.png',
+    '../../../assets/armor/dropimage/Iron_Helmet_drop.png',
     import.meta.url
   ).href
 }
@@ -622,27 +622,27 @@ const PLAYER_WEAPON_TILE_FRAME_SOURCE: TileTextureFrameSource = {
 }
 const WHITE_SLASH_WIDE_FRAME_URLS = [
   new URL(
-    '../assets/vfx/Sword Slashes/White Slash Wide/File1.png',
+    '../../../assets/vfx/Sword Slashes/White Slash Wide/File1.png',
     import.meta.url
   ).href,
   new URL(
-    '../assets/vfx/Sword Slashes/White Slash Wide/File2.png',
+    '../../../assets/vfx/Sword Slashes/White Slash Wide/File2.png',
     import.meta.url
   ).href,
   new URL(
-    '../assets/vfx/Sword Slashes/White Slash Wide/File3.png',
+    '../../../assets/vfx/Sword Slashes/White Slash Wide/File3.png',
     import.meta.url
   ).href,
   new URL(
-    '../assets/vfx/Sword Slashes/White Slash Wide/File4.png',
+    '../../../assets/vfx/Sword Slashes/White Slash Wide/File4.png',
     import.meta.url
   ).href,
   new URL(
-    '../assets/vfx/Sword Slashes/White Slash Wide/File5.png',
+    '../../../assets/vfx/Sword Slashes/White Slash Wide/File5.png',
     import.meta.url
   ).href,
   new URL(
-    '../assets/vfx/Sword Slashes/White Slash Wide/File6.png',
+    '../../../assets/vfx/Sword Slashes/White Slash Wide/File6.png',
     import.meta.url
   ).href
 ]
@@ -655,7 +655,7 @@ const WHITE_SLASH_WIDE_FRAME_BOUNDS: CollisionRect[] = [
   { x: 29, y: 63, width: 23, height: 55 }
 ]
 const PROTECT_VFX_FRAME_IMAGE_URL = new URL(
-  '../assets/Pipoya VFX HEXShield/192x192/pipo-btleffect207_192.png',
+  '../../../assets/Pipoya VFX HEXShield/192x192/pipo-btleffect207_192.png',
   import.meta.url
 ).href
 const PROTECT_VFX_FRAME_WIDTH = 192
@@ -693,37 +693,37 @@ const PLAYER_WEAPON_APPEARANCE_CONFIG_BY_ITEM_ID: Record<
   PlayerWeaponAppearanceConfig
 > = {
   'iron-sword': {
-    imageUrl: new URL('../assets/weapons/weapon-sword.png', import.meta.url).href,
+    imageUrl: new URL('../../../assets/weapons/weapon-sword.png', import.meta.url).href,
     worldScale: 0.085,
     idleOffsetX: -3,
     idleOffsetY: 2
   },
   'battle-axe': {
-    imageUrl: new URL('../assets/weapons/weapon-axe.png', import.meta.url).href,
+    imageUrl: new URL('../../../assets/weapons/weapon-axe.png', import.meta.url).href,
     worldScale: 0.085,
     idleOffsetX: -5,
     idleOffsetY: 4
   },
   'long-spear': {
-    imageUrl: new URL('../assets/weapons/weapon-spear.png', import.meta.url).href,
+    imageUrl: new URL('../../../assets/weapons/weapon-spear.png', import.meta.url).href,
     worldScale: 0.085,
     idleOffsetX: -2,
     idleOffsetY: 3
   },
   'quick-dagger': {
-    imageUrl: new URL('../assets/weapons/weapon-dagger.png', import.meta.url).href,
+    imageUrl: new URL('../../../assets/weapons/weapon-dagger.png', import.meta.url).href,
     worldScale: 0.085,
     idleOffsetX: -2,
     idleOffsetY: 1
   },
   'spiked-mace': {
-    imageUrl: new URL('../assets/weapons/weapon-mace.png', import.meta.url).href,
+    imageUrl: new URL('../../../assets/weapons/weapon-mace.png', import.meta.url).href,
     worldScale: 0.085,
     idleOffsetX: -4,
     idleOffsetY: 4
   },
   'magic-staff': {
-    imageUrl: new URL('../assets/weapons/weapon-staff.png', import.meta.url).href,
+    imageUrl: new URL('../../../assets/weapons/weapon-staff.png', import.meta.url).href,
     worldScale: 0.085,
     idleOffsetX: -2,
     idleOffsetY: 3
@@ -753,37 +753,37 @@ const PLAYER_EQUIPMENT_APPEARANCE_CONFIG_BY_ITEM_ID: Record<
 > = {
   Leather_Armor: {
     slotId: 'armor',
-    imageUrl: new URL('../assets/armor/Leather_Armor.png', import.meta.url).href,
+    imageUrl: new URL('../../../assets/armor/Leather_Armor.png', import.meta.url).href,
     ...PLAYER_ARMOR_EQUIPMENT_CONFIG
   },
   Leather_Helmet: {
     slotId: 'hat',
-    imageUrl: new URL('../assets/armor/Leather_Helmet.png', import.meta.url).href,
+    imageUrl: new URL('../../../assets/armor/Leather_Helmet.png', import.meta.url).href,
     ...PLAYER_HELMET_EQUIPMENT_CONFIG
   },
   Chain_Armor: {
     slotId: 'armor',
-    imageUrl: new URL('../assets/armor/Chain_Armor.png', import.meta.url).href,
+    imageUrl: new URL('../../../assets/armor/Chain_Armor.png', import.meta.url).href,
     ...PLAYER_ARMOR_EQUIPMENT_CONFIG
   },
   Chain_Helmet: {
     slotId: 'hat',
-    imageUrl: new URL('../assets/armor/Chain_Helmet.png', import.meta.url).href,
+    imageUrl: new URL('../../../assets/armor/Chain_Helmet.png', import.meta.url).href,
     ...PLAYER_HELMET_EQUIPMENT_CONFIG
   },
   Iron_Armor: {
     slotId: 'armor',
-    imageUrl: new URL('../assets/armor/Iron_Armor.png', import.meta.url).href,
+    imageUrl: new URL('../../../assets/armor/Iron_Armor.png', import.meta.url).href,
     ...PLAYER_ARMOR_EQUIPMENT_CONFIG
   },
   Iron_Helmet: {
     slotId: 'hat',
-    imageUrl: new URL('../assets/armor/Iron_Helmet.png', import.meta.url).href,
+    imageUrl: new URL('../../../assets/armor/Iron_Helmet.png', import.meta.url).href,
     ...PLAYER_HELMET_EQUIPMENT_CONFIG
   }
 }
 const PORTAL_INSIDE_IMAGE_URL = new URL(
-  '../assets/tilesets/portal_inside.png',
+  '../../../assets/tilesets/portal_inside.png',
   import.meta.url
 ).href
 const PORTAL_INSIDE_WORLD_SCALE = 0.08
@@ -953,8 +953,8 @@ export const createPixiTiledMapView = async ({
     monsterPigAnimationTextures,
     monsterSlimeAnimationTextures
   ] = await Promise.all([
-    Assets.load<Texture>(PORTAL_INSIDE_IMAGE_URL),
-    Assets.load<Texture>(TINY_DUNGEON_TILESET_IMAGE_URL),
+    loadTextureSafe(PORTAL_INSIDE_IMAGE_URL),
+    loadTextureSafe(TINY_DUNGEON_TILESET_IMAGE_URL),
     loadSlashVfxTextures(),
     loadProtectVfxTextures(),
     loadMonsterPigAnimationTextures(),
@@ -965,7 +965,7 @@ export const createPixiTiledMapView = async ({
       Object.entries(PLAYER_WEAPON_APPEARANCE_CONFIG_BY_ITEM_ID).map(
         async ([itemId, config]) => [
           itemId,
-          await Assets.load<Texture>(config.imageUrl)
+          await loadTextureSafe(config.imageUrl)
         ] as const
       )
     )
@@ -975,7 +975,7 @@ export const createPixiTiledMapView = async ({
       Object.entries(MONSTER_EQUIPMENT_DROP_IMAGE_URL_BY_DROP_ID).map(
         async ([dropId, imageUrl]) => [
           dropId,
-          await Assets.load<Texture>(imageUrl)
+          await loadTextureSafe(imageUrl)
         ] as const
       )
     )
@@ -985,7 +985,7 @@ export const createPixiTiledMapView = async ({
       Object.entries(PLAYER_EQUIPMENT_APPEARANCE_CONFIG_BY_ITEM_ID).map(
         async ([itemId, config]) => [
           itemId,
-          await Assets.load<Texture>(config.imageUrl)
+          await loadTextureSafe(config.imageUrl)
         ] as const
       )
     )
@@ -2454,9 +2454,8 @@ export const createPixiTiledMapView = async ({
     getQuestLog: () => currentQuestLog,
     onQuestLogChange: setQuestLog
   })
-  scenarioEditorOverlay = createScenarioEditorOverlay({
-    mountElement
-  })
+  // 인게임 시나리오 에디터 런처는 제거했다 — 콘텐츠 생성은 별도 에디터 페이지(/editor.html)가 담당한다.
+  // scenarioEditorOverlay는 위에서 no-op 스텁으로 초기화돼 있어 ticker/destroy 참조는 그대로 안전하다.
 
   const syncRuntimeWarningBanner = () => {
     const warnings = controllerRuntime.getRuntimeWarnings()
@@ -2540,13 +2539,13 @@ export const createPixiTiledMapView = async ({
     PLAYER_WEAPON_TILE_FRAME_SOURCE,
     PLAYER_WEAPON_TILE_LOCAL_ID
   )
-  const questNewTexture = await Assets.load<Texture>(
+  const questNewTexture = await loadTextureSafe(
     imageUrls['quest_new.png']
   )
-  const questFinTexture = await Assets.load<Texture>(
+  const questFinTexture = await loadTextureSafe(
     imageUrls['quest_fin.png']
   )
-  const caveEntranceTexture = await Assets.load<Texture>(
+  const caveEntranceTexture = await loadTextureSafe(
     imageUrls['cave1-visible.png']
   )
   caveEntranceTexture.source.addressMode = 'clamp-to-edge'
@@ -4891,6 +4890,44 @@ export const createPixiTiledMapView = async ({
     activeCharacterMessages.delete(characterId)
   }
 
+  // 이벤트 보상을 실제로 지급한다(아이템/골드/경험치). v1은 이벤트 적용 시점에 지급한다.
+  // (추후: 플레이어가 그 이벤트를 실제로 트리거할 때 지급하려면 상호작용 완료 훅이 필요하다.)
+  const grantEventReward = (reward: EventReward): void => {
+    if (reward.type === 'none' || reward.count <= 0) {
+      return
+    }
+
+    if (reward.type === 'gold') {
+      currentPlayerInventory = {
+        ...currentPlayerInventory,
+        gold: currentPlayerInventory.gold + reward.count
+      }
+      onPlayerInventoryChange(currentPlayerInventory)
+      return
+    }
+
+    if (reward.type === 'experience') {
+      grantPlayerExperienceReward(reward.count)
+      return
+    }
+
+    // type === 'item'
+    if (reward.id.length === 0) {
+      return
+    }
+    const slotIndex = findFirstEmptyPlayerInventorySlotIndex(currentPlayerInventory)
+    if (slotIndex === undefined) {
+      return // 인벤토리가 가득 차면 조용히 건너뛴다.
+    }
+    const label = getPlayerEquipmentItemDefinitionById(reward.id)?.label ?? reward.id
+    currentPlayerInventory = setPlayerInventorySlot({
+      inventory: currentPlayerInventory,
+      slotIndex,
+      item: { id: reward.id, label, quantity: reward.count }
+    })
+    onPlayerInventoryChange(currentPlayerInventory)
+  }
+
   const applyEventDraft = (
     draft: HolidayDialogueEventSpec,
     input?: ApplyEventDraftInput
@@ -4935,6 +4972,7 @@ export const createPixiTiledMapView = async ({
       Math.round(draft.duration * 1000)
     )
     syncQuestNpcBadges()
+    grantEventReward(draft.reward)
 
     return {
       didApply: true,
@@ -4971,6 +5009,48 @@ export const createPixiTiledMapView = async ({
     }
 
     return characterStates.find((character) => character.controller.kind === 'lua')
+  }
+
+  // 에디터가 생성한 Lua 컨트롤러 코드를 대상 NPC에 핫 적용한다. 런타임이 Lua를 검증·재빌드하므로
+  // 잘못된 코드면 updateLuaControllerScript가 throw하고, 호출부가 그 에러를 상태로 알린다.
+  const applyLuaScript = (input: {
+    targetCharacterId: string
+    source: string
+  }): ApplyEventDraftResult => {
+    const targetCharacter = resolveEventDraftTargetCharacter(
+      input.targetCharacterId,
+      input.targetCharacterId
+    )
+
+    if (!targetCharacter) {
+      return { didApply: false }
+    }
+
+    const scriptId = `generated:${targetCharacter.id}`
+    controllerRuntime.updateLuaControllerScript(scriptId, { source: input.source })
+
+    const nextCharacter: CharacterState = {
+      ...targetCharacter,
+      controller: createLuaCharacterController({
+        scriptId,
+        radiusInTiles:
+          targetCharacter.controller.kind === 'lua'
+            ? targetCharacter.controller.radiusInTiles
+            : 0,
+        moveSpeedTilesPerSecond:
+          targetCharacter.controller.kind === 'lua'
+            ? targetCharacter.controller.moveSpeedTilesPerSecond
+            : 8
+      })
+    }
+
+    characterStates = characterStates.map((character) =>
+      character.id === nextCharacter.id ? nextCharacter : character
+    )
+    syncCharacterSprite(nextCharacter)
+    controllerRuntime.syncCharacters(characterStates)
+
+    return { didApply: true, targetCharacterId: nextCharacter.id }
   }
 
   const pruneExpiredCharacterMessages = (now: number) => {
@@ -6057,7 +6137,8 @@ export const createPixiTiledMapView = async ({
 
   return {
     destroy,
-    applyEventDraft
+    applyEventDraft,
+    applyLuaScript
   }
 }
 
@@ -6114,11 +6195,13 @@ const createFrameTexturesFromGrid = ({
   columns: number
   rows: number
 }): Texture[] => {
+  // 시트가 기대보다 작으면(예: 다운로드 안 된 LFS 플레이스홀더) 던져서 렌더러를 죽이지 않고,
+  // 같은 프레임 수만큼 원본(플레이스홀더) 텍스처를 그대로 반환해 효과만 비어 보이게 한다.
   if (
     imageTexture.source.pixelWidth < frameWidth * columns ||
     imageTexture.source.pixelHeight < frameHeight * rows
   ) {
-    throw new Error('Protect VFX sprite sheet is smaller than expected')
+    return Array.from({ length: columns * rows }, () => imageTexture)
   }
 
   return Array.from({ length: columns * rows }, (_, index) => {
@@ -6141,7 +6224,7 @@ const createFrameTexturesFromGrid = ({
 const loadSlashVfxTextures = async (): Promise<SlashVfxRenderResources> => {
   const textures = await Promise.all(
     WHITE_SLASH_WIDE_FRAME_URLS.map((frameUrl) =>
-      Assets.load<Texture>(frameUrl)
+      loadTextureSafe(frameUrl)
     )
   )
 
@@ -6156,7 +6239,7 @@ const loadSlashVfxTextures = async (): Promise<SlashVfxRenderResources> => {
 }
 
 const loadProtectVfxTextures = async (): Promise<ProtectVfxRenderResources> => {
-  const imageTexture = await Assets.load<Texture>(PROTECT_VFX_FRAME_IMAGE_URL)
+  const imageTexture = await loadTextureSafe(PROTECT_VFX_FRAME_IMAGE_URL)
 
   imageTexture.source.scaleMode = 'nearest'
   imageTexture.source.addressMode = 'clamp-to-edge'
@@ -6181,10 +6264,14 @@ const ensureMessageFontsLoaded = async (): Promise<void> => {
     return
   }
 
+  // 폰트는 장식용이라 로드 실패(예: @font-face url 404)가 렌더러 전체를 죽이면 안 된다.
+  // 실패하면 기본 폰트로 조용히 폴백한다.
   messageFontsReadyPromise = Promise.all([
     document.fonts.load('400 14px "Jersey 25"'),
     document.fonts.load('400 14px "NeoDunggeunmo"')
-  ]).then(() => undefined)
+  ])
+    .then(() => undefined)
+    .catch(() => undefined)
 
   return messageFontsReadyPromise
 }
@@ -6200,7 +6287,7 @@ const loadTilesetRenderResources = async (
     throw new Error(`Missing image URL for ${tileset.image.source}`)
   }
 
-  const imageTexture = await Assets.load<Texture>(imageUrl)
+  const imageTexture = await loadTextureSafe(imageUrl)
 
   if (scaleMode) {
     imageTexture.source.scaleMode = scaleMode

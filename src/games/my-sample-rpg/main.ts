@@ -1,63 +1,69 @@
-import huntingGroundMapXml from './assets/maps/hunting-ground.tmx?raw'
-import caveMapXml from './assets/maps/cave.tmx?raw'
-import townMapXml from './assets/maps/town.tmx?raw'
-import replyWithMessageControllerLua from './assets/lua/reply-with-message.lua?raw'
-import wanderNearHomeControllerLua from './assets/lua/wander-near-home.lua?raw'
-import huntingGroundMusicUrl from './assets/sounds/전투브금.mp3'
-import townMusicUrl from './assets/sounds/브금5.mp3'
-import questFinUrl from './assets/tilesets/quest_fin.png'
-import questNewUrl from './assets/tilesets/quest_new.png'
-import caveEntranceVisibleUrl from './assets/tilesets/cave1-visible.png'
-import townTilesetXml from './assets/tilesets/town-32.tsx?raw'
-import townTilesetUrl from './assets/tilesets/town-32.png'
-import tinyDungeonTilesetXml from './assets/tilesets/tiny-dungeon-16.tsx?raw'
-import tinyDungeonTilesetUrl from './assets/tilesets/tiny-dungeon-16.png'
+import huntingGroundMapXml from '../../assets/maps/hunting-ground.tmx?raw'
+import caveMapXml from '../../assets/maps/cave.tmx?raw'
+import townMapXml from '../../assets/maps/town.tmx?raw'
+import replyWithMessageControllerLua from '../../assets/lua/reply-with-message.lua?raw'
+import wanderNearHomeControllerLua from '../../assets/lua/wander-near-home.lua?raw'
+import huntingGroundMusicUrl from '../../assets/sounds/전투브금.mp3'
+import townMusicUrl from '../../assets/sounds/브금5.mp3'
+import questFinUrl from '../../assets/tilesets/quest_fin.png'
+import questNewUrl from '../../assets/tilesets/quest_new.png'
+import caveEntranceVisibleUrl from '../../assets/tilesets/cave1-visible.png'
+import townTilesetXml from '../../assets/tilesets/town-32.tsx?raw'
+import townTilesetUrl from '../../assets/tilesets/town-32.png'
+import tinyDungeonTilesetXml from '../../assets/tilesets/tiny-dungeon-16.tsx?raw'
+import tinyDungeonTilesetUrl from '../../assets/tilesets/tiny-dungeon-16.png'
 
 import {
   PLAYER_CHARACTER_ID,
   createInitialPlayerCharacter,
   type CharacterMoveDirection,
   type CharacterState
-} from './game/characterState'
-import { createCharacterControllerRuntime } from './game/createCharacterControllerRuntime'
-import { createInitialBlacksmithInventory } from './game/blacksmithShop'
-import { createInitialPotionInventory } from './game/potionShop'
-import { createLuaCharacterControllerRuntime } from './game/lua/createLuaCharacterControllerRuntime'
-import { createNpcCharactersFromEventLayers } from './game/tiled/createNpcCharactersFromEventLayers'
-import { parseTiledMap, parseTiledTileset } from './game/tiled/parseTiledMap'
-import { createInitialPlayerEquipment } from './game/playerEquipment'
-import { createInitialPlayerInventory } from './game/playerInventory'
-import { createInitialPlayerProfile } from './game/playerProfile'
-import { createInitialPlayerQuickslots } from './game/playerQuickslots'
-import { createInitialPlayerSkillSlots } from './game/playerSkillSlots'
+} from './characterState'
+import { createCharacterControllerRuntime } from './createCharacterControllerRuntime'
+import { createInitialBlacksmithInventory } from './blacksmithShop'
+import { createInitialPotionInventory } from './potionShop'
+import { createLuaCharacterControllerRuntime } from './lua/createLuaCharacterControllerRuntime'
+import { createNpcCharactersFromEventLayers } from './tiled/createNpcCharactersFromEventLayers'
+import { parseTiledMap, parseTiledTileset } from './tiled/parseTiledMap'
+import { createInitialPlayerEquipment } from './playerEquipment'
+import { createInitialPlayerInventory } from './playerInventory'
+import { createInitialPlayerProfile } from './playerProfile'
+import { createInitialPlayerQuickslots } from './playerQuickslots'
+import { createInitialPlayerSkillSlots } from './playerSkillSlots'
+import {
+  PLAYER_SAVE_STATE_STORAGE_KEY,
+  parseStoredPlayerSaveState,
+  serializePlayerSaveState,
+  type PlayerSaveState
+} from './playerSaveState'
 import {
   createHolidayDialogueEventDraftFromText,
-} from './game/eventDrafting'
+} from './eventDrafting'
 import {
   OPENAI_HOLIDAY_EVENT_DRAFT_MODEL,
   generateHolidayDialogueEventDraftWithOpenAi
-} from './game/openaiHolidayEventDraft'
+} from './openaiHolidayEventDraft'
 import {
   type HolidayDialogueEventSpec,
   HOLIDAY_DIALOGUE_CONTROLLER_SCRIPT_ID,
   createHolidayDialogueEventValidationErrors,
   createTiledNpcEventObject
-} from './game/eventGeneration'
+} from './eventGeneration'
 import {
   normalizeStoredPlayerControlBindings,
   PLAYER_CONTROL_BINDINGS_STORAGE_KEY,
   type PlayerControlBindings
-} from './game/playerControls'
+} from './playerControls'
 import {
   createInitialQuestLog,
   recordSceneEnterQuestProgress
-} from './game/questLog'
-import { getSceneIntroMessage } from './game/sceneIntro'
+} from './questLog'
+import { getSceneIntroMessage } from './sceneIntro'
 import { createPixiTiledMapView } from './rendering/createPixiTiledMapView'
 import {
   loadPendingEvents,
   PENDING_EVENTS_STORAGE_KEY
-} from './editor/pendingEvents'
+} from '../../editor/pendingEvents'
 import type { AudioSettings } from './rendering/createPauseMenuOverlay'
 import type {
   SceneTransitionRequest
@@ -78,6 +84,10 @@ type SceneRenderer = {
     draft: HolidayDialogueEventSpec,
     input?: { targetCharacterId?: string }
   ) => { didApply: boolean; targetCharacterId?: string }
+  applyLuaScript: (input: {
+    targetCharacterId: string
+    source: string
+  }) => { didApply: boolean; targetCharacterId?: string }
 }
 
 const AUDIO_SETTINGS_STORAGE_KEY = 'my-sample-rpg:audio-settings'
@@ -150,11 +160,20 @@ const sceneMusicUrls: Record<SceneId, string> = {
   'hunting-ground': huntingGroundMusicUrl,
   cave: huntingGroundMusicUrl
 }
-const playerProfile = createInitialPlayerProfile()
-let playerEquipment = createInitialPlayerEquipment()
-let playerInventory = createInitialPlayerInventory()
-let playerQuickslots = createInitialPlayerQuickslots()
-let playerSkillSlots = createInitialPlayerSkillSlots()
+const storedPlayerSaveState = readStoredPlayerSaveState()
+const playerProfile = storedPlayerSaveState?.profile ?? createInitialPlayerProfile()
+// 저장 시점에 사망(hp 0) 상태였다면 로드 후 갇히지 않도록 체력을 회복해 부활시킨다.
+if (playerProfile.hp.current <= 0) {
+  playerProfile.hp.current = playerProfile.hp.max
+}
+let playerEquipment =
+  storedPlayerSaveState?.equipment ?? createInitialPlayerEquipment()
+let playerInventory =
+  storedPlayerSaveState?.inventory ?? createInitialPlayerInventory()
+let playerQuickslots =
+  storedPlayerSaveState?.quickslots ?? createInitialPlayerQuickslots()
+let playerSkillSlots =
+  storedPlayerSaveState?.skillSlots ?? createInitialPlayerSkillSlots()
 let playerControlBindings = readStoredPlayerControlBindings()
 let questLog = createInitialQuestLog()
 let merchantInventory = createInitialBlacksmithInventory()
@@ -231,15 +250,19 @@ const bootstrapScene = async (
     controllerRuntime,
     onPlayerInventoryChange: (nextInventory) => {
       playerInventory = nextInventory
+      savePlayerState()
     },
     onPlayerEquipmentChange: (nextEquipment) => {
       playerEquipment = nextEquipment
+      savePlayerState()
     },
     onPlayerQuickslotsChange: (nextQuickslots) => {
       playerQuickslots = nextQuickslots
+      savePlayerState()
     },
     onPlayerSkillSlotsChange: (nextSkillSlots) => {
       playerSkillSlots = nextSkillSlots
+      savePlayerState()
     },
     onPlayerControlBindingsChange: (nextControlBindings) => {
       playerControlBindings = nextControlBindings
@@ -776,6 +799,35 @@ function savePlayerControlBindings(
   )
 }
 
+function readStoredPlayerSaveState(): PlayerSaveState | undefined {
+  try {
+    return parseStoredPlayerSaveState(
+      window.localStorage.getItem(PLAYER_SAVE_STATE_STORAGE_KEY)
+    )
+  } catch {
+    return undefined
+  }
+}
+
+// 현재 플레이어 상태를 통째로 저장한다. playerProfile 은 렌더러가 in-place로 갱신하는
+// 동일 객체라, 호출 시점의 최신 레벨·경험치·HP/MP·스탯이 그대로 담긴다.
+function savePlayerState(): void {
+  try {
+    window.localStorage.setItem(
+      PLAYER_SAVE_STATE_STORAGE_KEY,
+      serializePlayerSaveState({
+        profile: playerProfile,
+        equipment: playerEquipment,
+        inventory: playerInventory,
+        quickslots: playerQuickslots,
+        skillSlots: playerSkillSlots
+      })
+    )
+  } catch {
+    // localStorage 사용 불가(프라이빗 모드·용량 초과 등)면 저장을 조용히 건너뛴다.
+  }
+}
+
 const renderFatalError = (error: unknown) => {
   const message = error instanceof Error ? error.message : String(error)
 
@@ -789,7 +841,7 @@ const renderFatalError = (error: unknown) => {
 
 
 if (import.meta.hot) {
-  import.meta.hot.accept('./assets/lua/reply-with-message.lua?raw', (nextModule) => {
+  import.meta.hot.accept('../../assets/lua/reply-with-message.lua?raw', (nextModule) => {
     if (!nextModule || !activeControllerRuntime) {
       return
     }
@@ -799,7 +851,7 @@ if (import.meta.hot) {
     })
   })
 
-  import.meta.hot.accept('./assets/lua/wander-near-home.lua?raw', (nextModule) => {
+  import.meta.hot.accept('../../assets/lua/wander-near-home.lua?raw', (nextModule) => {
     if (!nextModule || !activeControllerRuntime) {
       return
     }
@@ -821,6 +873,31 @@ window.addEventListener('storage', (event) => {
     activeSceneRenderer?.applyEventDraft(pendingEvent, {
       targetCharacterId: pendingEvent.npc.id
     })
+  }
+})
+
+// 레벨·경험치·HP/MP·스탯 같은 프로필 변경은 렌더러가 콜백 없이 in-place로 바꾸므로,
+// 페이지를 떠나기 직전에 현재 상태를 저장해 진행을 보존한다. visibilitychange 는
+// beforeunload 가 신뢰도 낮은 모바일/탭 전환까지 잡아주는 보강 신호다.
+window.addEventListener('beforeunload', savePlayerState)
+window.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') {
+    savePlayerState()
+  }
+})
+
+// 에디터 프리뷰(부모 창)가 맵을 바꿀 수 있도록 씬 전환 메시지를 처리한다.
+window.addEventListener('message', (event) => {
+  const data = event.data as { type?: unknown; sceneId?: unknown } | null
+
+  if (!data || data.type !== 'editor:switch-scene') {
+    return
+  }
+
+  const sceneId = data.sceneId
+
+  if (sceneId === 'town' || sceneId === 'hunting-ground' || sceneId === 'cave') {
+    void bootstrapScene(sceneId).catch(renderFatalError)
   }
 })
 

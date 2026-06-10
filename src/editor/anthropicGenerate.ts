@@ -22,12 +22,14 @@ type AnthropicErrorResponse = {
 
 export const generateJsonWithClaude = async <T>({
   apiKey,
+  model = ANTHROPIC_MODEL,
   instructions,
   input,
   schemaName,
   schema
 }: {
   apiKey: string
+  model?: string
   instructions: string
   input: string
   schemaName: string
@@ -41,7 +43,7 @@ export const generateJsonWithClaude = async <T>({
       'content-type': 'application/json'
     },
     body: JSON.stringify({
-      model: ANTHROPIC_MODEL,
+      model,
       max_tokens: 4096,
       system: instructions,
       messages: [{ role: 'user', content: input }],

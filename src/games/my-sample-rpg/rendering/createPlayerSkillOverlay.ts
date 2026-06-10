@@ -1,19 +1,19 @@
-import type { PlayerProfile } from '../game/playerProfile'
+import type { PlayerProfile } from '../playerProfile'
 import {
   getPlayerSkillLevelLabel,
   getPlayerSkillPointCost,
   getPlayerSkillUserLevel,
   spendPlayerSkillPoint
-} from '../game/playerProgression'
+} from '../playerProgression'
 import {
   PLAYER_SKILL_DRAG_MIME_TYPE
-} from '../game/playerSkillSlots'
+} from '../playerSkillSlots'
 import {
   PLAYER_PROTECT_SKILL_ID,
   getPlayerSkillDisplayInfoById,
   isPlayerSkillUnlockedInProfile
-} from '../game/playerSkills'
-import { PLAYER_SMASH_SKILL_ID } from '../game/playerSmashSkill'
+} from '../playerSkills'
+import { PLAYER_SMASH_SKILL_ID } from '../playerSmashSkill'
 import { getResponsiveUiScale } from './getResponsiveUiScale'
 
 type CreatePlayerSkillOverlayInput = {

@@ -4,7 +4,7 @@ import { generateEventJsonDraftWithClaude } from './claudeEventJsonGenerator'
 import { createGeneratedEventJsonValidationIssues } from './eventJsonSchema'
 import { createHolidayDialogueEventSpecFromGeneratedEventJson } from './eventCodeGenerator'
 import { savePendingEvent } from './pendingEvents'
-import { generateJsonWithClaude } from './anthropicGenerate'
+import { generateJson } from './llmProvider'
 import { createEntityLinesValidationIssues } from './entityLinesValidator'
 
 // 게임마다 맵/엔티티 규칙·생성·적용이 달라서, 그걸 어댑터로 분리한다. 새 게임 지원 = 새 어댑터 추가.
@@ -116,7 +116,7 @@ const generateEntityLines = async (
 ): Promise<GenerationResult> => {
   const target = entity ? `${entity.kind} "${entity.name}"` : '게임 요소'
   const contextLine = gameContext ? `\n\n게임 정보: ${gameContext}` : ''
-  const generated = await generateJsonWithClaude<{ entity: string; lines: string[] }>({
+  const generated = await generateJson<{ entity: string; lines: string[] }>({
     apiKey,
     instructions: `${gameName}의 게임 요소에 어울리는 짧은 한국어 대사 또는 설명을 1~4줄 생성한다. 주어진 게임 정보가 있으면 그 게임의 분위기에 맞춘다.`,
     input: `${userPrompt}\n\n대상: ${target}${contextLine}`,

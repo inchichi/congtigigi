@@ -2,7 +2,7 @@ import {
   getVisibleQuestTrackers,
   hideVisibleQuestTrackers,
   type QuestLogState
-} from '../game/questLog'
+} from '../questLog'
 import { getResponsiveUiScale } from './getResponsiveUiScale'
 
 type CreateQuestTrackerOverlayInput = {

@@ -1,6 +1,6 @@
 import type { GameStructureProfile } from './gameStructureProfile'
 import type { GeneratedEventJson } from './eventJsonSchema'
-import { generateJsonWithClaude } from './anthropicGenerate'
+import { generateJson } from './llmProvider'
 
 const EVENT_JSON_SCHEMA = {
   type: 'object',
@@ -124,7 +124,7 @@ export const generateEventJsonDraftWithClaude = ({
   userPrompt: string
   profile: GameStructureProfile
 }): Promise<GeneratedEventJson> =>
-  generateJsonWithClaude<GeneratedEventJson>({
+  generateJson<GeneratedEventJson>({
     apiKey,
     instructions: createSystemPrompt(profile),
     input: userPrompt,

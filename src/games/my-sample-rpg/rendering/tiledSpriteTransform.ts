@@ -1,6 +1,6 @@
 import { groupD8 } from 'pixi.js'
 
-import type { ParsedTiledTile } from '../game/tiled/parseTiledMap'
+import type { ParsedTiledTile } from '../tiled/parseTiledMap'
 
 export type TiledSpriteTransform = {
   rotation: number
