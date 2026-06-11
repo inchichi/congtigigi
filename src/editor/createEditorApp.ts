@@ -155,21 +155,21 @@ const el = <K extends keyof HTMLElementTagNameMap>(
 // 타입 스케일은 3단으로 고정한다: LABEL(11px 섹션 eyebrow) · text-xs(메타) · text-sm(본문/컨트롤).
 // 예전엔 0.65/0.7/0.72/0.8rem 등이 뒤섞여 글자 크기가 들쭉날쭉했다.
 const LABEL =
-  'text-[11px] font-semibold uppercase tracking-wider text-zinc-500'
+  'text-[11px] font-semibold uppercase tracking-wider text-zinc-400'
 const CARD =
   'rounded-xl border border-white/10 bg-white/[0.03] p-4 flex flex-col gap-2'
 const FIELD_INPUT =
-  'w-full rounded-lg border border-white/10 bg-black/30 px-3 py-2.5 text-sm text-zinc-100 outline-none transition placeholder:text-zinc-600 focus:border-indigo-500/60 focus:ring-2 focus:ring-indigo-500/25'
+  'w-full rounded-lg border border-white/15 bg-black/40 px-3 py-2.5 text-sm text-zinc-100 outline-none transition placeholder:text-zinc-500 focus:border-indigo-500/60 focus:ring-2 focus:ring-indigo-500/25'
 const PRIMARY_BUTTON =
   'rounded-lg px-4 py-2 bg-indigo-500 text-white text-sm font-medium shadow-sm shadow-indigo-500/30 transition hover:bg-indigo-400 active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed disabled:shadow-none'
 const GHOST_BUTTON =
   'rounded-lg px-3.5 py-2 bg-white/[0.04] text-zinc-300 text-sm border border-white/10 transition hover:bg-white/[0.08] hover:text-zinc-100 hover:border-white/20 disabled:opacity-40 disabled:cursor-not-allowed'
 const ENTITY_BASE =
-  'truncate text-left rounded-lg px-2.5 py-2 text-sm text-zinc-400 transition hover:bg-white/[0.06] hover:text-zinc-100'
+  'truncate text-left rounded-lg px-2.5 py-2 text-sm text-zinc-300 transition hover:bg-white/[0.06] hover:text-zinc-100'
 const ENTITY_ACTIVE =
   'truncate text-left rounded-lg px-2.5 py-2 text-sm bg-indigo-500/15 text-indigo-100 ring-1 ring-inset ring-indigo-500/30 transition'
 const ENTITY_GROUP_HEADER =
-  'w-full flex items-center gap-1.5 text-left rounded-lg px-2.5 py-2 text-sm text-zinc-300 font-medium transition hover:bg-white/[0.06] hover:text-zinc-100'
+  'w-full flex items-center gap-1.5 text-left rounded-lg px-2.5 py-2 text-sm text-zinc-200 font-medium transition hover:bg-white/[0.06] hover:text-zinc-100'
 
 export const createEditorApp = ({
   mountElement,
@@ -245,8 +245,9 @@ export const createEditorApp = ({
     'div',
     'flex-1 min-h-0 grid ' +
       'grid-cols-1 grid-rows-[auto_minmax(0,1.4fr)_minmax(0,1fr)] [grid-template-areas:"tree""main""side"] ' +
-      'md:grid-cols-[minmax(170px,210px)_minmax(0,1fr)_minmax(240px,26%)] md:grid-rows-[minmax(0,1fr)] md:[grid-template-areas:"tree_main_side"] ' +
-      'lg:grid-cols-[minmax(200px,250px)_minmax(0,1fr)_minmax(300px,30%)]'
+      // 결과 사이드는 코드 확인용이라 좁게 잡는다(26%/30%는 게임 화면을 잡아먹는다는 피드백).
+      'md:grid-cols-[minmax(170px,210px)_minmax(0,1fr)_minmax(220px,20%)] md:grid-rows-[minmax(0,1fr)] md:[grid-template-areas:"tree_main_side"] ' +
+      'lg:grid-cols-[minmax(200px,250px)_minmax(0,1fr)_minmax(250px,22%)]'
   )
 
   // ---------- left: project tree ----------
@@ -332,7 +333,8 @@ export const createEditorApp = ({
   // ---------- Evaluator (사람 이진 평가) ----------
   const evaluationWrap = el('div', CARD)
   evaluationWrap.hidden = true
-  const evaluationTop = el('div', 'flex items-center justify-between gap-2')
+  // flex-wrap: 좁은 사이드바에선 지표 줄이 라벨 옆에 끼어 두 줄 컬럼으로 뭉개지는 대신 제 줄로 내려간다.
+  const evaluationTop = el('div', 'flex flex-wrap items-center justify-between gap-x-2 gap-y-1')
   evaluationTop.append(
     el('span', LABEL, 'Evaluator · 사람 이진 평가')
   )
@@ -415,10 +417,10 @@ export const createEditorApp = ({
   center.append(preview, composer)
 
   // ---------- right: 생성 결과 사이드바 ----------
-  // 옆 배치(lg)에선 왼쪽 경계선, 아래 배치(<lg)에선 위 경계선.
+  // 옆 배치(md부터, body 그리드와 동일 기준)에선 왼쪽 경계선, 아래 배치(<md)에선 위 경계선.
   const side = el(
     'aside',
-    '[grid-area:side] min-w-0 min-h-0 overflow-y-auto p-4 flex flex-col gap-4 border-t lg:border-t-0 lg:border-l border-white/10'
+    '[grid-area:side] min-w-0 min-h-0 overflow-y-auto p-4 flex flex-col gap-4 border-t md:border-t-0 md:border-l border-white/10'
   )
   side.append(analysisPanel, validationLine, resultWrap, evaluationWrap, historyWrap)
 
@@ -639,7 +641,7 @@ export const createEditorApp = ({
         headerButton.append(
           arrow,
           el('span', 'truncate', `${KIND_ICON[kind] ?? '•'} ${KIND_LABEL[kind] ?? kind}`),
-          el('span', 'ml-auto shrink-0 text-[10px] tabular-nums text-zinc-600', String(entities.length))
+          el('span', 'ml-auto shrink-0 text-[10px] tabular-nums text-zinc-500', String(entities.length))
         )
 
         const body = el('div', 'flex flex-col gap-0.5 pl-3')
@@ -674,7 +676,7 @@ export const createEditorApp = ({
             body.append(node)
           } else {
             // 몬스터·표지판·포털·타일 구조물은 맵에 있음을 보여주되(보기 전용), 생성 대상은 아니다.
-            const row = el('div', 'truncate rounded-lg px-2.5 py-2 text-sm text-zinc-500', entity.name)
+            const row = el('div', 'truncate rounded-lg px-2.5 py-2 text-sm text-zinc-400', entity.name)
             body.append(row)
           }
         }
@@ -685,14 +687,14 @@ export const createEditorApp = ({
       // 요소는 있는데 생성 대상이 하나도 없는 맵(사냥터·동굴 등)에선, 왜 클릭할 게 없는지 알려준다.
       if (selectableCount === 0 && map.entities.length > 0) {
         group.append(
-          el('div', 'px-1 text-[11px] text-zinc-600 italic', '생성 대상이 없는 맵 — 위 요소는 보기 전용입니다.')
+          el('div', 'px-1 text-[11px] text-zinc-500 italic', '생성 대상이 없는 맵 — 위 요소는 보기 전용입니다.')
         )
       }
 
       // "ground" 같은 타일/지형 레이어 — 객체가 아니라 맵 자체의 구성. 보기 전용 정보로 한 줄에 보여준다.
       if (map.layers.length > 0) {
         group.append(
-          el('div', 'px-1 pt-0.5 text-[11px] text-zinc-600', `🗂 타일 레이어: ${map.layers.join(' · ')}`)
+          el('div', 'px-1 pt-0.5 text-[11px] text-zinc-500', `🗂 타일 레이어: ${map.layers.join(' · ')}`)
         )
       }
 
@@ -720,11 +722,12 @@ export const createEditorApp = ({
     historyList.replaceChildren(
       ...history.map((entry) => {
         const active = entry.result === currentResult
+        // truncate: 라벨은 snake_case 강제라 줄바꿈 지점이 없어, 좁은 사이드바에 가로 스크롤을 만든다.
         const node = el(
           'button',
           active
-            ? 'text-left rounded-md px-2.5 py-1.5 text-xs bg-indigo-500/15 text-indigo-200 transition'
-            : 'text-left rounded-md px-2.5 py-1.5 text-xs text-zinc-400 transition hover:bg-white/5 hover:text-zinc-100'
+            ? 'truncate text-left rounded-md px-2.5 py-1.5 text-xs bg-indigo-500/15 text-indigo-200 transition'
+            : 'truncate text-left rounded-md px-2.5 py-1.5 text-xs text-zinc-400 transition hover:bg-white/5 hover:text-zinc-100'
         ) as HTMLButtonElement
         node.type = 'button'
         const mark = entry.result.issues.length === 0 ? '✅' : '⚠️'
@@ -832,7 +835,7 @@ export const createEditorApp = ({
       )
     } else {
       targetLine.replaceChildren(
-        el('span', 'text-zinc-500', '왼쪽에서 엔티티를 선택하면 그 대상으로 생성합니다.')
+        el('span', 'text-zinc-400', '왼쪽에서 엔티티를 선택하면 그 대상으로 생성합니다.')
       )
     }
 
