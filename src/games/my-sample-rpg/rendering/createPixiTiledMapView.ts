@@ -940,6 +940,10 @@ export const createPixiTiledMapView = async ({
     draft: HolidayDialogueEventSpec,
     input?: ApplyEventDraftInput
   ) => ApplyEventDraftResult
+  applyLuaScript: (input: {
+    targetCharacterId: string
+    source: string
+  }) => ApplyEventDraftResult
 }> => {
   const app = new Application()
   let cameraZoom = CAMERA_DEFAULT_ZOOM
