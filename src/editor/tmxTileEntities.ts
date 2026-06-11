@@ -22,13 +22,18 @@ export type TmxTileCluster = {
   rect: TmxTileClusterRect
 }
 
+// 중복 제거용 object 사각형. kind가 있으면 같은 종류의 군집만 억제한다(분수 object는 분수
+// 군집만 지우고, 그 안의 다른 사물은 남긴다). 구조물 종류(STRUCTURAL_KINDS)는 kind와 무관하게
+// 모든 사각형에 억제된다 — 건물 object 하나가 지붕·벽·창문 군집을 모두 대신하기 때문.
+export type TmxTileExcludeRect = TmxTileClusterRect & { kind?: string }
+
 export type ExtractTmxTileClustersOptions = {
   // 외부 타일셋(.tsx) 텍스트를 source 경로("../tilesets/town-32.tsx")로 찾아준다.
   // 없으면(미제공/못 찾음) 그 타일셋의 타일들은 분류 불가로 조용히 무시된다.
   resolveTilesetText?: (source: string) => string | undefined
-  // 이 사각형들(픽셀)과 절반 이상 겹치는 군집은 버린다 — 이미 object로 등록된 건물 등과의
-  // 중복 방지(예: town_hall 객체가 있는데 지붕 타일 군집이 또 "건물"로 잡히는 것).
-  excludeRects?: TmxTileClusterRect[]
+  // 셀의 절반 이상이 이 사각형들(픽셀) 안에 들어가는 군집은 버린다 — 이미 object로 등록된
+  // 건물·분수 등과의 중복 방지(예: town_hall 객체가 있는데 지붕 군집이 또 "건물"로 잡히는 것).
+  excludeRects?: TmxTileExcludeRect[]
 }
 
 // 타일 type의 첫 단어 → 에디터 종류. 표에 없는 첫 단어(ground/grass/cobble/garden/cliff 등
@@ -350,14 +355,19 @@ export const extractTmxTileClusters = (
   // 빈 안쪽에 object 사각형이 있을 때 실제로는 안 겹치는데도 지워진다.
   const excludeRects = options.excludeRects ?? []
   const isSuppressed = (cluster: WorkingCluster): boolean => {
-    if (excludeRects.length === 0 || !STRUCTURAL_KINDS.has(cluster.kind)) {
+    // 구조물 종류는 모든 object 사각형에, 그 외(분수·나무 등 독립 사물)는 같은 종류의
+    // 사각형에만 억제된다 — 건물 안의 분수는 남기되, 분수 object가 있으면 그 군집은 지운다.
+    const relevantRects = STRUCTURAL_KINDS.has(cluster.kind)
+      ? excludeRects
+      : excludeRects.filter((rect) => rect.kind === cluster.kind)
+    if (relevantRects.length === 0) {
       return false
     }
     let covered = 0
     for (const index of cluster.cells) {
       const centerX = ((index % width) + 0.5) * tileWidth
       const centerY = (Math.floor(index / width) + 0.5) * tileHeight
-      const inside = excludeRects.some(
+      const inside = relevantRects.some(
         (rect) =>
           centerX >= rect.x &&
           centerX < rect.x + rect.width &&

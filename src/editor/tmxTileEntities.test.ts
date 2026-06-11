@@ -88,6 +88,19 @@ describe('extractTmxTileClusters', () => {
     expect(clusters.map((cluster) => cluster.kind)).toEqual(['fountain'])
   })
 
+  it('drops a freestanding cluster only when the exclude rect declares the same kind', () => {
+    // 분수가 object로도 등록되면(kind: 'fountain') 그 군집은 중복이라 빠진다 —
+    // 종류가 다른 object(건물 등)에는 영향받지 않는다.
+    const map = mapWith(2, 1, '5,5')
+    const fountainRect = [{ x: 0, y: 0, width: 32, height: 16, kind: 'fountain' }]
+    const buildingRect = [{ x: 0, y: 0, width: 32, height: 16, kind: 'building' }]
+
+    expect(extractTmxTileClusters(map, { excludeRects: fountainRect })).toEqual([])
+    expect(
+      extractTmxTileClusters(map, { excludeRects: buildingRect }).map((c) => c.kind)
+    ).toEqual(['fountain'])
+  })
+
   it('resolves external tilesets through the provided resolver', () => {
     const sources: string[] = []
     const map = `<?xml version="1.0"?>

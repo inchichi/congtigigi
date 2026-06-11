@@ -116,8 +116,17 @@ export const buildTileClusterEntities = (
   const seen = new Map<string, number>()
   return extractTmxTileClusters(mapFile.text, {
     resolveTilesetText: createTilesetResolver(files, mapFile.path),
-    // 면적이 있는 object(건물 등)와 절반 이상 겹치는 군집은 같은 사물의 중복 — 제외.
-    excludeRects: objects.filter((object) => object.width > 0 && object.height > 0)
+    // 면적이 있는 object(건물·분수 등)와 절반 이상 겹치는 군집은 같은 사물의 중복 — 제외.
+    // object의 type을 kind로 넘겨, 독립 사물(분수·나무 등)은 같은 종류 object에만 억제되게 한다.
+    excludeRects: objects
+      .filter((object) => object.width > 0 && object.height > 0)
+      .map((object) => ({
+        x: object.x,
+        y: object.y,
+        width: object.width,
+        height: object.height,
+        kind: object.type
+      }))
   }).map((cluster) => {
     const base = `tile:${cluster.kind}:${cluster.tileX},${cluster.tileY}`
     const duplicates = seen.get(base) ?? 0
