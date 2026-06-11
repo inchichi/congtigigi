@@ -22,7 +22,10 @@ body {
   color: #e4e4e7;
   font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto,
     'Apple SD Gothic Neo', 'Noto Sans KR', sans-serif;
-  font-size: 14px;
+  /* 에디터 컨트롤은 전부 rem 기반(Tailwind)이라, 루트 폰트만 창 폭에 비례시키면
+     엔티티 목록·프롬프트·버튼이 작은 화면에서 함께 작아진다. 폭 1000px 이상에선 14px,
+     그 아래로는 폭에 따라 11.5px까지 완만하게 줄어든다. */
+  font-size: clamp(11.5px, 1vw + 4px, 14px);
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;

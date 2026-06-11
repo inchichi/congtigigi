@@ -206,21 +206,23 @@ export const createEditorApp = ({
   let sessionTally: SessionGenerationTally = { generations: 0, validatorPasses: 0 }
 
   // ---------- shell ----------
-  const root = el('div', 'h-screen w-screen flex flex-col bg-zinc-950 text-zinc-100 overflow-hidden')
+  // w-screen이 아니라 w-full — 100vw는 세로 스크롤바 폭을 포함해 가로 스크롤을 만든다.
+  const root = el('div', 'h-screen w-full flex flex-col bg-zinc-950 text-zinc-100 overflow-hidden')
 
   const header = el('header', 'h-12 shrink-0 flex items-center justify-between px-4 border-b border-white/10 bg-zinc-900/60')
   const brand = el('div', 'flex items-center gap-2')
   brand.append(
     el('span', 'w-2.5 h-2.5 rounded-full bg-indigo-500'),
-    el('span', 'text-sm font-semibold tracking-tight', 'Scenario Editor'),
-    el('span', 'text-xs text-zinc-600', '·')
+    el('span', 'text-sm font-semibold tracking-tight whitespace-nowrap', 'Scenario Editor'),
+    // 게임 이름·모델 배지는 좁은 화면에선 숨긴다 — 헤더가 넘치면 설정 버튼이 밀려난다.
+    el('span', 'hidden sm:inline text-xs text-zinc-600', '·')
   )
-  const gameLabel = el('span', 'text-xs text-zinc-400', game.adapter.name)
+  const gameLabel = el('span', 'hidden sm:inline text-xs text-zinc-400 truncate', game.adapter.name)
   brand.append(gameLabel)
   // 모델 배지 — 입력한 키의 provider(Claude/GPT)에 따라 동적으로 갱신된다.
   const modelBadge = el(
     'span',
-    'text-[11px] rounded-full px-2 py-0.5 bg-indigo-500/10 text-indigo-300 border border-indigo-500/20',
+    'hidden md:inline-block text-[11px] rounded-full px-2 py-0.5 bg-indigo-500/10 text-indigo-300 border border-indigo-500/20',
     `Claude · ${ANTHROPIC_MODEL}`
   )
   brand.append(modelBadge)
@@ -234,10 +236,25 @@ export const createEditorApp = ({
   headerRight.append(settingsButton, connection)
   header.append(brand, headerRight)
 
-  const body = el('div', 'flex-1 grid grid-cols-[240px_1fr_minmax(360px,38%)] min-h-0')
+  // LLM 챗 스타일 배치: 가운데가 라이브 게임(위 가득) + 프롬프트(아래), 오른쪽이 생성 결과.
+  // 3열은 md(≥768px)부터 바로 적용한다 — 이전엔 lg부터여서, 브라우저 줌을 쓰는 일반 노트북
+  // 창이 "결과가 하단 전폭" 배치로 떨어지며 게임 세로 공간을 잃었다(게임이 납작한 띠가 됨).
+  //  - md(≥768px): [엔티티 트리 | 게임+프롬프트 | 생성 결과] 3열 (lg부터는 사이드가 약간 넓어짐)
+  //  - 그 미만: 트리 → 게임+프롬프트 → 생성 결과 세로 스택
+  const body = el(
+    'div',
+    'flex-1 min-h-0 grid ' +
+      'grid-cols-1 grid-rows-[auto_minmax(0,1.4fr)_minmax(0,1fr)] [grid-template-areas:"tree""main""side"] ' +
+      'md:grid-cols-[minmax(170px,210px)_minmax(0,1fr)_minmax(240px,26%)] md:grid-rows-[minmax(0,1fr)] md:[grid-template-areas:"tree_main_side"] ' +
+      'lg:grid-cols-[minmax(200px,250px)_minmax(0,1fr)_minmax(300px,30%)]'
+  )
 
   // ---------- left: project tree ----------
-  const tree = el('aside', 'border-r border-white/10 flex flex-col min-h-0')
+  // 스택 배치(<md)에선 아래 경계선 + 높이 제한(목록이 길면 자체 스크롤), 옆 배치에선 오른쪽 경계선.
+  const tree = el(
+    'aside',
+    '[grid-area:tree] min-w-0 max-h-[35vh] border-b md:max-h-none md:border-b-0 md:border-r border-white/10 flex flex-col min-h-0'
+  )
   const treeHeader = el('div', 'p-3 border-b border-white/10 flex flex-col gap-2')
   const openButton = el('button', 'rounded-lg px-3 py-2 bg-white/5 text-sm text-zinc-200 text-left transition hover:bg-white/10', '📂 게임 폴더 열기') as HTMLButtonElement
   openButton.type = 'button'
@@ -259,8 +276,9 @@ export const createEditorApp = ({
   const treeList = el('div', 'flex-1 overflow-auto p-3 flex flex-col gap-3')
   tree.append(treeHeader, treeList)
 
-  // ---------- center: generation ----------
-  const center = el('main', 'p-5 flex flex-col gap-4 min-h-0 overflow-y-auto')
+  // ---------- center: 라이브 게임(위) + 프롬프트 컴포저(아래) ----------
+  // min-w-0: grid 자식의 기본 min-width:auto 때문에 내용이 열을 밀어내는 것 방지.
+  const center = el('main', '[grid-area:main] min-w-0 min-h-0 flex flex-col')
   const targetLine = el('div', 'text-sm text-zinc-400')
   const analysisPanel = el('div', 'rounded-xl border border-indigo-500/20 bg-indigo-500/5 p-4 flex flex-col gap-1.5')
   analysisPanel.hidden = true
@@ -286,11 +304,12 @@ export const createEditorApp = ({
 
   const promptField = el('label', 'flex flex-col gap-1.5')
   promptField.append(el('span', LABEL, '자연어 프롬프트  ·  ⌘/Ctrl+Enter로 생성'))
-  const promptInput = el('textarea', `${FIELD_INPUT} min-h-[110px] resize-y`) as HTMLTextAreaElement
+  // 챗 컴포저처럼 기본 2줄 높이 — 필요하면 손잡이로 늘릴 수 있다(resize-y).
+  const promptInput = el('textarea', `${FIELD_INPUT} min-h-[60px] resize-y`) as HTMLTextAreaElement
   promptInput.placeholder = '예: 대장장이가 새로 만든 검을 자랑하는 대화'
   promptField.append(promptInput)
 
-  const actions = el('div', 'flex items-center gap-2')
+  const actions = el('div', 'flex flex-wrap items-center gap-2')
   const generateButton = el('button', PRIMARY_BUTTON, '생성') as HTMLButtonElement
   generateButton.type = 'button'
   const applyButton = el('button', GHOST_BUTTON, '게임에 적용') as HTMLButtonElement
@@ -319,7 +338,7 @@ export const createEditorApp = ({
   )
   const acceptanceStat = el('span', 'text-xs text-zinc-400')
   evaluationTop.append(acceptanceStat)
-  const evaluationButtons = el('div', 'flex items-center gap-2')
+  const evaluationButtons = el('div', 'flex flex-wrap items-center gap-2')
   const acceptButton = el('button', GHOST_BUTTON, '👍 수용') as HTMLButtonElement
   acceptButton.type = 'button'
   const rejectButton = el('button', GHOST_BUTTON, '👎 거부') as HTMLButtonElement
@@ -342,13 +361,12 @@ export const createEditorApp = ({
   const historyList = el('div', 'flex flex-col gap-1')
   historyWrap.append(historyHeader, historyList)
 
-  center.append(targetLine, analysisPanel, supportNote, promptField, actions, status, validationLine, resultWrap, evaluationWrap, historyWrap)
-
-  // ---------- right: live game preview ----------
-  const preview = el('section', 'border-l border-white/10 flex flex-col min-w-0')
-  const previewBar = el('div', 'h-9 shrink-0 flex items-center justify-between px-3 border-b border-white/10 bg-zinc-900/40')
-  previewBar.append(el('span', 'text-xs text-zinc-400', '🎮 라이브 게임 (실제 게임 실행 중)'))
-  const previewActions = el('div', 'flex items-center gap-2')
+  // ---------- center 상단: live game preview ----------
+  // min-h 바닥: 어떤 창 크기에서도 게임이 HUD만 보이는 납작한 띠로 짓눌리지 않게 한다.
+  const preview = el('section', 'flex-1 min-h-[200px] md:min-h-[300px] min-w-0 flex flex-col')
+  const previewBar = el('div', 'h-9 shrink-0 flex items-center justify-between gap-2 px-3 border-b border-white/10 bg-zinc-900/40 min-w-0')
+  previewBar.append(el('span', 'text-xs text-zinc-400 truncate', '🎮 라이브 게임 (실제 게임 실행 중)'))
+  const previewActions = el('div', 'flex items-center gap-2 shrink-0')
   // 맵 전환 — 프리뷰는 항상 my-sample-rpg를 실행하므로 그 게임의 씬(마을/사냥터/동굴)을 바꾼다.
   const previewScenes = [
     { id: 'town', label: '마을' },
@@ -389,7 +407,22 @@ export const createEditorApp = ({
   )
   preview.append(previewBar, iframe)
 
-  body.append(tree, center, preview)
+  // ---------- center 하단: 프롬프트 컴포저 (LLM 챗의 입력창처럼 게임 바로 아래) ----------
+  // 챗 입력창처럼 낮게 유지한다 — 컴포저가 높을수록 게임이 그만큼 낮아진다.
+  // max-h+스크롤: 창이 낮을 때 컴포저가 게임 영역을 통째로 밀어내지 않게 한다.
+  const composer = el('div', 'shrink-0 max-h-[45%] overflow-y-auto border-t border-white/10 p-3 flex flex-col gap-2')
+  composer.append(targetLine, supportNote, promptField, actions, status)
+  center.append(preview, composer)
+
+  // ---------- right: 생성 결과 사이드바 ----------
+  // 옆 배치(lg)에선 왼쪽 경계선, 아래 배치(<lg)에선 위 경계선.
+  const side = el(
+    'aside',
+    '[grid-area:side] min-w-0 min-h-0 overflow-y-auto p-4 flex flex-col gap-4 border-t lg:border-t-0 lg:border-l border-white/10'
+  )
+  side.append(analysisPanel, validationLine, resultWrap, evaluationWrap, historyWrap)
+
+  body.append(tree, center, side)
   // ---------- settings modal (헤더 ⚙) ----------
   // API 키·폴더 열기·분석·복귀는 상시 노출 대신 여기로 모은다. 메인은 편집에 집중.
   const settingsBackdrop = el('div', 'fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4')
