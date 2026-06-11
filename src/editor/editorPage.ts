@@ -2,6 +2,7 @@ import './editor.css'
 import townMapXml from '../assets/maps/town.tmx?raw'
 import huntingGroundMapXml from '../assets/maps/hunting-ground.tmx?raw'
 import caveMapXml from '../assets/maps/cave.tmx?raw'
+import townTilesetXml from '../assets/tilesets/town-32.tsx?raw'
 import { createEditorApp } from './createEditorApp'
 import type { GameFile } from './loadGame'
 
@@ -16,7 +17,13 @@ const initialFiles: GameFile[] = [
     path: 'src/assets/maps/hunting-ground.tmx',
     text: huntingGroundMapXml
   },
-  { name: 'cave.tmx', path: 'src/assets/maps/cave.tmx', text: caveMapXml }
+  { name: 'cave.tmx', path: 'src/assets/maps/cave.tmx', text: caveMapXml },
+  // 타일셋도 같이 넣는다 — 타일 군집 인식(tmxTileEntities)이 타일별 type 주석을 여기서 읽는다.
+  {
+    name: 'town-32.tsx',
+    path: 'src/assets/tilesets/town-32.tsx',
+    text: townTilesetXml
+  }
 ]
 
 document.body.style.margin = '0'

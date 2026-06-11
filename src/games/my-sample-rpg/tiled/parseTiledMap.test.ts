@@ -70,7 +70,8 @@ describe('parseTiledMap', () => {
     ])
     expect(map.eventLayers.map((layer) => layer.name)).toEqual([
       'characters',
-      'portals'
+      'portals',
+      'buildings'
     ])
     expect(map.tilesets).toHaveLength(1)
     expect(map.tilesets[0]).toMatchObject({

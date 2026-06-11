@@ -1,7 +1,14 @@
 import { openProjectDirectory } from './openProjectDirectory'
-import { loadGame, type GameFile, type LoadedGame, type LoadedGameMap } from './loadGame'
+import {
+  buildTileClusterEntities,
+  isTileClusterEntity,
+  loadGame,
+  type GameFile,
+  type LoadedGame,
+  type LoadedGameMap
+} from './loadGame'
 import { analyzeGame, type GameAnalysis } from './analyzeGame'
-import { extractTmxObjects, type TmxObject } from './tmxObjects'
+import { extractTmxLayerNames, extractTmxObjects, type TmxObject } from './tmxObjects'
 import { readLocalStorage, writeLocalStorage } from './safeStorage'
 import { ANTHROPIC_MODEL } from './anthropicGenerate'
 import {
@@ -57,7 +64,9 @@ const buildEntitiesFromAnalysis = (
           kind: editableKindByGroup.get(object.group) ?? 'entity',
           mapId: id
         }))
-      return { id, name: id, file: file.path, entities }
+        // 분석으로 트리를 갈아끼워도 타일 군집(보기 전용 구조물)은 유지한다 — loadGame과 동일.
+        .concat(buildTileClusterEntities(id, file, files, objects))
+      return { id, name: id, file: file.path, entities, layers: extractTmxLayerNames(file.text) }
     })
 }
 
@@ -72,9 +81,61 @@ const MODEL_STORAGE_PREFIX = 'my-sample-rpg:model:'
 
 const KIND_ICON: Record<string, string> = {
   npc: '👤',
-  enemy: '👹',
+  monster: '👹',
+  sign: '🪧',
+  portal: '🚪',
   chest: '📦',
-  loot: '💰'
+  loot: '💰',
+  building: '🏠',
+  character: '🧍',
+  // 타일 군집(tmxTileEntities)으로 인식되는 종류들.
+  tent: '⛺',
+  clocktower: '🕰',
+  fountain: '⛲',
+  lamp: '🏮',
+  banner: '🚩',
+  tree: '🌳',
+  hedge: '🌿',
+  flower: '🌸',
+  prop: '🧺',
+  rock: '🪨',
+  stairs: '🪜',
+  wall: '🧱',
+  window: '🪟'
+}
+
+// 보기 전용 요소(몬스터·표지판·포털 등)에 붙는 짧은 한국어 종류 라벨.
+const KIND_LABEL: Record<string, string> = {
+  npc: 'NPC',
+  monster: '몬스터',
+  sign: '표지판',
+  portal: '포털',
+  chest: '상자',
+  loot: '전리품',
+  building: '건물',
+  object: '객체',
+  character: '캐릭터',
+  // 타일 군집(tmxTileEntities)으로 인식되는 종류들.
+  tent: '천막',
+  clocktower: '시계탑',
+  fountain: '분수',
+  lamp: '가로등',
+  banner: '깃발',
+  tree: '나무',
+  hedge: '생울타리',
+  flower: '화단',
+  prop: '소품',
+  rock: '바위',
+  stairs: '계단',
+  wall: '벽',
+  window: '창문'
+}
+
+// 트리 그룹핑용 종류 정규화. LLM 분석이 'NPC'처럼 대소문자를 섞어 줄 수 있어 소문자로 맞추고,
+// enemy는 라벨·아이콘이 '몬스터'로 같아 monster 그룹에 합친다(그래서 위 맵에는 enemy 키가 없다).
+const groupKindOf = (kind: string): string => {
+  const normalized = kind.trim().toLowerCase()
+  return normalized === 'enemy' ? 'monster' : normalized
 }
 
 const el = <K extends keyof HTMLElementTagNameMap>(
@@ -104,9 +165,11 @@ const PRIMARY_BUTTON =
 const GHOST_BUTTON =
   'rounded-lg px-3.5 py-2 bg-white/[0.04] text-zinc-300 text-sm border border-white/10 transition hover:bg-white/[0.08] hover:text-zinc-100 hover:border-white/20 disabled:opacity-40 disabled:cursor-not-allowed'
 const ENTITY_BASE =
-  'text-left rounded-lg px-2.5 py-2 text-sm text-zinc-400 transition hover:bg-white/[0.06] hover:text-zinc-100'
+  'truncate text-left rounded-lg px-2.5 py-2 text-sm text-zinc-400 transition hover:bg-white/[0.06] hover:text-zinc-100'
 const ENTITY_ACTIVE =
-  'text-left rounded-lg px-2.5 py-2 text-sm bg-indigo-500/15 text-indigo-100 ring-1 ring-inset ring-indigo-500/30 transition'
+  'truncate text-left rounded-lg px-2.5 py-2 text-sm bg-indigo-500/15 text-indigo-100 ring-1 ring-inset ring-indigo-500/30 transition'
+const ENTITY_GROUP_HEADER =
+  'w-full flex items-center gap-1.5 text-left rounded-lg px-2.5 py-2 text-sm text-zinc-300 font-medium transition hover:bg-white/[0.06] hover:text-zinc-100'
 
 export const createEditorApp = ({
   mountElement,
@@ -122,6 +185,14 @@ export const createEditorApp = ({
   let isGenerating = false
   let isAnalyzing = false
   let entityButtons: Array<{ entity: GameEntity; node: HTMLButtonElement }> = []
+  // 라이브 게임(iframe)이 보고한 현재 맵 id. 트리를 이 맵의 요소만으로 좁힌다(showAllMaps면 전부).
+  // 게임의 sceneId 와 에디터 map.id(=tmx 파일명)가 같아 직접 비교한다. 게임이 맵을 바꿀 때마다
+  // 'game:scene-changed' 메시지로 갱신된다.
+  let currentMapId: string | undefined
+  let showAllMaps = false
+  // 트리의 종류별 그룹(NPC/몬스터 등) 펼침 상태. 키는 `${mapId}:${kind}` — 트리를 다시 그려도 유지된다.
+  // 기본은 접힘: 요소를 쭉 나열하면 목록이 길어 보기 불편하다는 피드백에 따른 동작.
+  const expandedGroups = new Set<string>()
   // 세션 내 생성 결과 누적(최신 우선, 최대 10개). 데모에서 여러 생성을 비교·재선택하려는 용도.
   const HISTORY_LIMIT = 10
   let history: Array<{ n: number; result: GenerationResult }> = []
@@ -175,7 +246,16 @@ export const createEditorApp = ({
   const resetButton = el('button', 'rounded-lg px-3 py-1.5 bg-white/5 text-xs text-zinc-400 text-left transition hover:bg-white/10 hover:text-zinc-200', '🏠 내 게임으로 복귀') as HTMLButtonElement
   resetButton.type = 'button'
   // 프로젝트 버튼(폴더 열기/분석/복귀)은 설정 모달로 이동했다. 사이드바는 엔티티 목록만.
-  treeHeader.append(el('div', LABEL, '엔티티'))
+  const treeHeaderTop = el('div', 'flex items-center justify-between gap-2')
+  treeHeaderTop.append(el('div', LABEL, '엔티티'))
+  // 라이브 게임이 맵을 보고한 뒤에만 의미가 있는 토글(현재 맵만 ↔ 전체 맵). 그 전엔 숨긴다.
+  const mapFilterToggle = el('button', 'text-[11px] text-zinc-500 transition hover:text-zinc-300', '전체 보기') as HTMLButtonElement
+  mapFilterToggle.type = 'button'
+  mapFilterToggle.hidden = true
+  treeHeaderTop.append(mapFilterToggle)
+  // 게임과의 동기화 상태(현재 맵 이름)를 보여주는 줄. 연결 전엔 대기 메시지.
+  const treeSyncLine = el('div', 'text-[11px] text-zinc-500', '게임과 연결 대기 중…')
+  treeHeader.append(treeHeaderTop, treeSyncLine)
   const treeList = el('div', 'flex-1 overflow-auto p-3 flex flex-col gap-3')
   tree.append(treeHeader, treeList)
 
@@ -408,7 +488,13 @@ export const createEditorApp = ({
       }
       currentAnalysis = analysis
       // 하드코딩 어댑터가 엔티티를 못 찾았으면(미지의 게임), 분석 결과로 트리를 채운다.
-      const totalEntities = game.maps.reduce((sum, map) => sum + map.entities.length, 0)
+      // 타일 군집(보기 전용 구조물)은 세지 않는다 — 장식만 있는 미지의 게임에서 분석 결과가
+      // 트리에 반영되지 못하게 막아버린다.
+      const totalEntities = game.maps.reduce(
+        (sum, map) =>
+          sum + map.entities.filter((entity) => !isTileClusterEntity(entity)).length,
+        0
+      )
       if (totalEntities === 0) {
         game = { ...game, maps: buildEntitiesFromAnalysis(filesAtStart, analysis) }
         // 트리를 새 엔티티로 갈아끼우므로, 이전 대상의 생성 결과·히스토리·세션 집계는 모두 무효 처리한다
@@ -418,6 +504,7 @@ export const createEditorApp = ({
         history = []
         historyCounter = 0
         sessionTally = { generations: 0, validatorPasses: 0 }
+        expandedGroups.clear()
         renderTree()
       }
       renderAnalysis()
@@ -436,32 +523,155 @@ export const createEditorApp = ({
     entityButtons = []
     const groups: HTMLElement[] = []
 
-    for (const map of game.maps) {
-      if (map.entities.length === 0) {
+    // 게임이 보고한 현재 맵을 트리의 기준으로 삼는다. 그 맵을 game.maps에서 찾으면(=같은 프로젝트)
+    // 기본적으로 그 맵의 요소만 보여준다. 다른 게임 폴더를 열어 매칭이 안 되면 전체를 보여준다.
+    const focusMap =
+      currentMapId !== undefined
+        ? game.maps.find((map) => map.id === currentMapId)
+        : undefined
+    const mapsToShow = focusMap && !showAllMaps ? [focusMap] : game.maps
+
+    // 동기화 상태줄·토글 갱신. focusMap이 있을 때만 토글이 의미가 있다.
+    if (focusMap) {
+      mapFilterToggle.hidden = false
+      mapFilterToggle.textContent = showAllMaps ? '현재 맵만' : '전체 보기'
+      treeSyncLine.replaceChildren(
+        el('span', 'inline-block w-1.5 h-1.5 rounded-full bg-emerald-400 mr-1.5 align-middle'),
+        showAllMaps
+          ? document.createTextNode('전체 맵 표시 중')
+          : el('span', 'text-zinc-300', `현재 맵: ${focusMap.name}`)
+      )
+    } else {
+      mapFilterToggle.hidden = true
+      // 연결 전(undefined)엔 대기 메시지, 매칭 안 되는 프로젝트면 줄을 비운다.
+      treeSyncLine.textContent =
+        currentMapId === undefined ? '게임과 연결 대기 중…' : ''
+    }
+
+    for (const map of mapsToShow) {
+      // 객체도 레이어도 없는 맵만 건너뛴다(예: 파싱 실패). 몬스터만 있는 맵·지형만 있는 맵도 보여준다.
+      if (map.entities.length === 0 && map.layers.length === 0) {
         continue
       }
 
       const group = el('div', 'flex flex-col gap-1')
-      group.append(el('div', 'text-xs text-zinc-300 font-medium px-1', `🗺 ${map.name}`))
+      const isCurrent = map.id === currentMapId
+      group.append(
+        el(
+          'div',
+          'text-xs text-zinc-300 font-medium px-1',
+          `🗺 ${map.name}${isCurrent ? ' · 현재 맵' : ''}`
+        )
+      )
 
+      // 같은 종류끼리 접이식 그룹으로 묶는다(쭉 나열하면 길어서 보기 불편하다는 피드백).
+      // NPC 그룹을 맨 위로, 나머지는 맵에 등장한 순서대로.
+      const byKind = new Map<string, GameEntity[]>()
       for (const entity of map.entities) {
-        const node = el('button', ENTITY_BASE, `${KIND_ICON[entity.kind] ?? '•'} ${entity.name}`) as HTMLButtonElement
-        node.type = 'button'
-        node.addEventListener('click', () => {
-          selectedEntity = entity
-          // 대상을 바꾸면 이전 생성 결과는 무효 — 새로 생성하게 한다.
-          currentResult = undefined
-          render()
+        const kind = groupKindOf(entity.kind)
+        const list = byKind.get(kind)
+        if (list) {
+          list.push(entity)
+        } else {
+          byKind.set(kind, [entity])
+        }
+      }
+      const kindEntries = [...byKind.entries()].sort(
+        (a, b) => (a[0] === 'npc' ? 0 : 1) - (b[0] === 'npc' ? 0 : 1)
+      )
+
+      // 어떤 엔티티를 생성 대상으로 고를 수 있나: 타일 군집(보기 전용 구조물)은 제외하고,
+      // rpg는 대화 NPC만(profile.npcs 큐레이션과 일치), 그 외 게임(legend-of-lua·분석된 게임)은
+      // 어댑터/분석이 찾은 모든 엔티티가 공용 대사 생성의 대상이다.
+      const isSelectableEntity = (entity: GameEntity): boolean =>
+        !isTileClusterEntity(entity) &&
+        (game.adapter.id === 'my-sample-rpg'
+          ? groupKindOf(entity.kind) === 'npc'
+          : true)
+
+      const selectableCount = map.entities.filter(isSelectableEntity).length
+      for (const [kind, entities] of kindEntries) {
+        const groupKey = `${map.id}:${kind}`
+        // 선택된 NPC가 속한 그룹은 이번 렌더에서만 펼쳐 보인다(접혀 있으면 선택 표시가 가려진다).
+        // Set에는 쓰지 않는다 — 영구 펼침으로 만들면 사용자가 접어도 다음 렌더마다 되돌아간다.
+        const containsSelected =
+          selectedEntity !== undefined && entities.some((entity) => entity === selectedEntity)
+        const expanded = expandedGroups.has(groupKey) || containsSelected
+
+        const headerButton = el('button', ENTITY_GROUP_HEADER) as HTMLButtonElement
+        headerButton.type = 'button'
+        headerButton.setAttribute('aria-expanded', String(expanded))
+        const arrow = el('span', 'w-3 shrink-0 text-[10px] text-zinc-500', expanded ? '▾' : '▸')
+        arrow.setAttribute('aria-hidden', 'true')
+        headerButton.append(
+          arrow,
+          el('span', 'truncate', `${KIND_ICON[kind] ?? '•'} ${KIND_LABEL[kind] ?? kind}`),
+          el('span', 'ml-auto shrink-0 text-[10px] tabular-nums text-zinc-600', String(entities.length))
+        )
+
+        const body = el('div', 'flex flex-col gap-0.5 pl-3')
+        body.id = `entity-group-${groupKey}`.replace(/[^A-Za-z0-9_-]/gu, '-')
+        headerButton.setAttribute('aria-controls', body.id)
+        body.hidden = !expanded
+        // 토글은 이 그룹의 DOM만 만지고 트리를 다시 그리지 않는다 — 선택 상태·버튼 참조가 그대로 유지된다.
+        headerButton.addEventListener('click', () => {
+          const nextExpanded = body.hidden
+          if (nextExpanded) {
+            expandedGroups.add(groupKey)
+          } else {
+            expandedGroups.delete(groupKey)
+          }
+          body.hidden = !nextExpanded
+          arrow.textContent = nextExpanded ? '▾' : '▸'
+          headerButton.setAttribute('aria-expanded', String(nextExpanded))
         })
-        entityButtons.push({ entity, node })
-        group.append(node)
+
+        for (const entity of entities) {
+          if (isSelectableEntity(entity)) {
+            // 생성 대상은 클릭 가능한 버튼으로 — 선택하면 그 엔티티로 생성한다.
+            const node = el('button', ENTITY_BASE, entity.name) as HTMLButtonElement
+            node.type = 'button'
+            node.addEventListener('click', () => {
+              selectedEntity = entity
+              // 대상을 바꾸면 이전 생성 결과는 무효 — 새로 생성하게 한다.
+              currentResult = undefined
+              render()
+            })
+            entityButtons.push({ entity, node })
+            body.append(node)
+          } else {
+            // 몬스터·표지판·포털·타일 구조물은 맵에 있음을 보여주되(보기 전용), 생성 대상은 아니다.
+            const row = el('div', 'truncate rounded-lg px-2.5 py-2 text-sm text-zinc-500', entity.name)
+            body.append(row)
+          }
+        }
+
+        group.append(headerButton, body)
+      }
+
+      // 요소는 있는데 생성 대상이 하나도 없는 맵(사냥터·동굴 등)에선, 왜 클릭할 게 없는지 알려준다.
+      if (selectableCount === 0 && map.entities.length > 0) {
+        group.append(
+          el('div', 'px-1 text-[11px] text-zinc-600 italic', '생성 대상이 없는 맵 — 위 요소는 보기 전용입니다.')
+        )
+      }
+
+      // "ground" 같은 타일/지형 레이어 — 객체가 아니라 맵 자체의 구성. 보기 전용 정보로 한 줄에 보여준다.
+      if (map.layers.length > 0) {
+        group.append(
+          el('div', 'px-1 pt-0.5 text-[11px] text-zinc-600', `🗂 타일 레이어: ${map.layers.join(' · ')}`)
+        )
       }
 
       groups.push(group)
     }
 
     if (groups.length === 0) {
-      groups.push(el('div', 'text-xs text-zinc-500 leading-relaxed', '로드된 엔티티가 없습니다. "게임 폴더 열기"로 프로젝트를 여세요.'))
+      const message =
+        focusMap && !showAllMaps
+          ? `현재 맵(${focusMap.name})에서 읽을 요소가 없습니다. ‘전체 보기’로 다른 맵을 볼 수 있어요.`
+          : '로드된 맵이 없습니다. "게임 폴더 열기"로 프로젝트를 여세요.'
+      groups.push(el('div', 'text-xs text-zinc-500 leading-relaxed', message))
     }
 
     treeList.replaceChildren(...groups)
@@ -594,7 +804,9 @@ export const createEditorApp = ({
     }
 
     for (const { entity, node } of entityButtons) {
-      node.className = entity.id === selectedEntity?.id ? ENTITY_ACTIVE : ENTITY_BASE
+      // id가 아니라 참조로 비교한다 — id는 맵이 달라도 겹칠 수 있어(같은 TMX 이름·그룹-번호 조합)
+      // '전체 보기'에서 다른 맵의 동명 NPC까지 선택된 것처럼 칠해진다.
+      node.className = entity === selectedEntity ? ENTITY_ACTIVE : ENTITY_BASE
     }
 
     if (!currentResult) {
@@ -757,12 +969,19 @@ export const createEditorApp = ({
       history = []
       historyCounter = 0
       sessionTally = { generations: 0, validatorPasses: 0 }
+      // 그룹 펼침 상태도 프로젝트 단위 — 맵 id(tmx 파일명)가 프로젝트끼리 겹쳐서, 안 비우면
+      // 이전 게임에서 펼친 상태가 새 게임 트리에 그대로 묻어 나온다.
+      expandedGroups.clear()
       renderTree()
       renderAnalysis()
       render()
-      const entityCount = game.maps.reduce((sum, map) => sum + map.entities.length, 0)
+      // 엔티티(어댑터가 찾은 개체)와 타일 구조물(보기 전용)을 나눠 세서, 수치가 부풀어 보이지 않게 한다.
+      const allEntities = game.maps.flatMap((map) => map.entities)
+      const tileCount = allEntities.filter(isTileClusterEntity).length
+      const entityCount = allEntities.length - tileCount
       setStatus(
-        `프로젝트 로드: ${game.adapter.name} · 맵 ${game.maps.length}개 · 엔티티 ${entityCount}개${parseErrorNote()}`
+        `프로젝트 로드: ${game.adapter.name} · 맵 ${game.maps.length}개 · 엔티티 ${entityCount}개` +
+          `${tileCount > 0 ? ` · 구조물 ${tileCount}개` : ''}${parseErrorNote()}`
       )
       // 토큰이 있으면 LLM이 이 게임을 자동 분석한다(네 아이디어: 열면 LLM이 이해).
       if (apiKey.trim().length > 0) {
@@ -785,6 +1004,7 @@ export const createEditorApp = ({
     history = []
     historyCounter = 0
     sessionTally = { generations: 0, validatorPasses: 0 }
+    expandedGroups.clear()
     renderTree()
     renderAnalysis()
     render()
@@ -924,6 +1144,34 @@ export const createEditorApp = ({
   })
   reloadButton.addEventListener('click', () => {
     iframe.src = gamePreviewUrl
+  })
+  // 현재 맵만 ↔ 전체 맵 토글. 트리만 다시 그리되, 보이는 버튼의 선택 강조는 render()가 다시 입힌다.
+  mapFilterToggle.addEventListener('click', () => {
+    showAllMaps = !showAllMaps
+    renderTree()
+    render()
+  })
+  // 라이브 게임(iframe)이 맵을 바꾸면 그 맵의 요소만 트리에 보여준다. 게임은 bootstrapScene에서
+  // 부모(에디터)로 'game:scene-changed'를 쏜다(초기 로드·포털 이동·맵 버튼 모두 포함).
+  window.addEventListener('message', (event) => {
+    // 게임 iframe에서 온 메시지만 신뢰한다(브라우저 확장 등 다른 출처 무시).
+    if (event.source !== iframe.contentWindow) {
+      return
+    }
+    const data = event.data as { type?: unknown; sceneId?: unknown } | null
+    if (
+      !data ||
+      data.type !== 'game:scene-changed' ||
+      typeof data.sceneId !== 'string' ||
+      data.sceneId === currentMapId
+    ) {
+      return
+    }
+    currentMapId = data.sceneId
+    // 게임이 새 맵으로 가면 자동으로 그 맵에 다시 집중한다(전체 보기 해제).
+    showAllMaps = false
+    renderTree()
+    render()
   })
 
   renderTree()

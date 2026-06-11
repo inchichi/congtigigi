@@ -200,6 +200,12 @@ const bootstrapScene = async (
     throw new Error(`Unknown scene "${sceneId}"`)
   }
 
+  // 에디터 프리뷰(부모 창)에 현재 맵을 알린다 — 에디터가 그 맵의 편집 가능한 요소만 보여줄 수 있게.
+  // 모든 맵 전환(초기 로드·포털 이동·에디터 맵 버튼)이 이 함수를 거치므로 여기 한 곳이면 전부 커버된다.
+  // iframe이 아니면 window.parent === window라 자기 자신에게 가지만, 게임 핸들러는 editor:switch-scene
+  // 만 처리하므로 무해하다(루프 없음). sceneId 는 에디터의 map.id(=tmx 파일명)와 동일하다.
+  window.parent.postMessage({ type: 'game:scene-changed', sceneId }, '*')
+
   destroyActiveScene()
   playSceneMusic(sceneId)
 

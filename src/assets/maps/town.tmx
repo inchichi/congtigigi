@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<map version="1.10" tiledversion="1.12.1" orientation="orthogonal" renderorder="right-down" width="50" height="50" tilewidth="32" tileheight="32" infinite="0" nextlayerid="10" nextobjectid="10">
+<map version="1.10" tiledversion="1.12.1" orientation="orthogonal" renderorder="right-down" width="50" height="50" tilewidth="32" tileheight="32" infinite="0" nextlayerid="11" nextobjectid="17">
  <tileset firstgid="1" source="../tilesets/town-32.tsx"/>
  <layer id="1" name="ground" width="50" height="50">
   <data encoding="csv">
@@ -246,6 +246,33 @@
     <property name="targetSceneId" value="hunting-ground"/>
     <property name="targetSpawnTileX" type="int" value="2"/>
     <property name="targetSpawnTileY" type="int" value="10"/>
+   </properties>
+  </object>
+ </objectgroup>
+ <objectgroup id="10" name="buildings">
+  <object id="12" name="town_hall" type="building" x="544" y="32" width="512" height="480">
+   <properties>
+    <property name="displayText" value="마을 회관"/>
+   </properties>
+  </object>
+  <object id="13" name="blacksmith_stall" type="building" x="352" y="416" width="96" height="96">
+   <properties>
+    <property name="displayText" value="대장장이 가판대"/>
+   </properties>
+  </object>
+  <object id="14" name="southwest_house" type="building" x="416" y="960" width="160" height="288">
+   <properties>
+    <property name="displayText" value="남서쪽 집"/>
+   </properties>
+  </object>
+  <object id="15" name="clock_tower" type="building" x="832" y="1024" width="96" height="160">
+   <properties>
+    <property name="displayText" value="시계탑"/>
+   </properties>
+  </object>
+  <object id="16" name="market_tent" type="building" x="992" y="1024" width="192" height="160">
+   <properties>
+    <property name="displayText" value="시장 천막"/>
    </properties>
   </object>
  </objectgroup>

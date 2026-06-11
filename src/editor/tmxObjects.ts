@@ -8,6 +8,11 @@ export type TmxObject = {
   type: string
   group: string
   properties: Record<string, string>
+  // 픽셀 단위 위치/크기. 점 객체(캐릭터 등)는 width/height가 0이다.
+  x: number
+  y: number
+  width: number
+  height: number
 }
 
 export const extractTmxObjects = (tmxText: string): TmxObject[] => {
@@ -38,6 +43,45 @@ export const extractTmxObjects = (tmxText: string): TmxObject[] => {
     throw new Error('TMX 파싱 실패: 유효한 TMX(.tmx) 문서가 아닙니다.')
   }
 
+  return collectObjects(doc)
+}
+
+// TMX의 타일/이미지 레이어 이름만 읽는다("ground" 같은 지형·바닥, 즉 "맵 자체"를 에디터에 보여주려고).
+// 객체가 아니라 표시용 정보라서, 파싱이 어긋나도 throw하지 않고 빈 배열을 돌려준다(에디터를 죽이지 않음).
+export const extractTmxLayerNames = (tmxText: string): string[] => {
+  let doc: Document | undefined
+  try {
+    doc = new DOMParser({
+      errorHandler: { warning: () => {}, error: () => {}, fatalError: () => {} }
+    }).parseFromString(tmxText, 'text/xml') as Document | undefined
+  } catch {
+    return []
+  }
+
+  if (!doc || !doc.documentElement || doc.documentElement.tagName !== 'map') {
+    return []
+  }
+
+  const names: string[] = []
+  for (const tag of ['layer', 'imagelayer'] as const) {
+    const nodes = doc.getElementsByTagName(tag)
+    for (let i = 0; i < nodes.length; i += 1) {
+      const name = nodes[i].getAttribute('name')
+      if (name && name.length > 0) {
+        names.push(name)
+      }
+    }
+  }
+
+  return names
+}
+
+const numberAttribute = (element: Element, name: string): number => {
+  const value = Number(element.getAttribute(name) ?? '')
+  return Number.isFinite(value) ? value : 0
+}
+
+const collectObjects = (doc: Document): TmxObject[] => {
   const objects: TmxObject[] = []
   const groups = doc.getElementsByTagName('objectgroup')
 
@@ -61,10 +105,16 @@ export const extractTmxObjects = (tmxText: string): TmxObject[] => {
       objects.push({
         id: node.getAttribute('id') ?? '',
         name: node.getAttribute('name') ?? '',
-        // Tiled 신버전은 class=, 구버전은 type= 를 쓴다.
-        type: node.getAttribute('type') ?? node.getAttribute('class') ?? '',
+        // Tiled 신버전은 class=, 구버전은 type= 를 쓴다 — Tiled 자체 규칙대로 class 우선
+        // (tmxTileEntities의 타일 분류와 같은 순서). ??가 아니라 || 인 이유: @xmldom/xmldom은
+        // 없는 속성에 null이 아니라 ''를 돌려줘서 nullish 폴백이 동작하지 않는다.
+        type: node.getAttribute('class') || node.getAttribute('type') || '',
         group: groupName,
-        properties
+        properties,
+        x: numberAttribute(node, 'x'),
+        y: numberAttribute(node, 'y'),
+        width: numberAttribute(node, 'width'),
+        height: numberAttribute(node, 'height')
       })
     }
   }

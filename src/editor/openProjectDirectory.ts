@@ -17,9 +17,12 @@ export const isDirectoryPickerSupported = (): boolean =>
 
 const SKIP_DIRS = new Set(['node_modules', '.git', 'dist', '.vite', 'coverage'])
 
-// 엔티티 추출용 맵(.tmx)과 게임 판별용 시그니처(conf.lua/main.lua)만 모은다.
+// 엔티티 추출용 맵(.tmx)·타일 분류용 타일셋(.tsx)과 게임 판별용 시그니처(conf.lua/main.lua)만 모은다.
 const isRelevantFile = (name: string): boolean =>
-  name.endsWith('.tmx') || name === 'conf.lua' || name === 'main.lua'
+  name.endsWith('.tmx') ||
+  name.endsWith('.tsx') ||
+  name === 'conf.lua' ||
+  name === 'main.lua'
 
 const collectFiles = async (
   dir: FileSystemDirectoryHandle,
