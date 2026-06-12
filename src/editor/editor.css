@@ -1,6 +1,6 @@
 /* 에디터 전용 스타일 — 게임의 styles.css를 가져오지 않으므로 게임 폰트/색이 새어들지 않는다.
    독립 도구처럼 보이도록 모던 sans-serif + 중립 다크 배경을 쓴다. (게임은 iframe 안에서 자기 스타일대로 렌더된다.) */
-@layer theme, components, utilities;
+@layer theme, base, components, utilities;
 @import 'tailwindcss/theme.css' layer(theme);
 @import 'tailwindcss/utilities.css' layer(utilities);
 
@@ -14,15 +14,47 @@
   display: none !important;
 }
 
+/* preflight가 없으면 폼 컨트롤이 UA 기본(밝은 ButtonFace 배경 + 시스템 폰트)으로 그려진다.
+   배경 클래스가 없는 버튼(엔티티 목록 등)이 밝은 알약 위 밝은 글자가 되어 안 보이던 원인 —
+   preflight 전체 대신 폼 컨트롤만 최소 리셋한다.
+   반드시 base 레이어 안에 둔다: 레이어 밖 규칙은 utilities 레이어를 무조건 이겨서
+   bg-indigo-500·border-white/15 같은 유틸리티가 전부 무력화된다. */
+@layer base {
+  button,
+  input,
+  select,
+  textarea {
+    background-color: transparent;
+    border: 0 solid;
+    color: inherit;
+    font: inherit;
+    letter-spacing: inherit;
+  }
+  button {
+    cursor: pointer;
+    padding: 0;
+  }
+  /* disabled:cursor-not-allowed가 없는 버튼(분석/평가 판정 버튼)이 비활성인데도
+     포인터로 보이지 않게 — 리셋의 cursor:pointer에 대한 예외. */
+  button:disabled {
+    cursor: default;
+  }
+}
+
 html,
 body {
   margin: 0;
   height: 100%;
+  /* select 팝업·스크롤바 같은 UA 위젯도 다크로 — 흰 팝업이 튀지 않게 한다. */
+  color-scheme: dark;
   background: #09090b;
   color: #e4e4e7;
   font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto,
     'Apple SD Gothic Neo', 'Noto Sans KR', sans-serif;
-  font-size: 14px;
+  /* 에디터 컨트롤은 전부 rem 기반(Tailwind)이라, 루트 폰트만 창 폭에 비례시키면
+     엔티티 목록·프롬프트·버튼이 작은 화면에서 함께 작아진다. 폭 1000px 이상에선 14px,
+     그 아래로는 폭에 따라 11.5px까지 완만하게 줄어든다. */
+  font-size: clamp(11.5px, 1vw + 4px, 14px);
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;

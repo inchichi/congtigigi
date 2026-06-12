@@ -2,7 +2,7 @@ import {
   HOLIDAY_DIALOGUE_EVENT_TYPE,
   TALK_EVENT_TRIGGER_TYPE,
   type HolidayDialogueEventSpec
-} from '../game/eventGeneration'
+} from '../games/my-sample-rpg/eventGeneration'
 import type { GameStructureProfile } from './gameStructureProfile'
 import type { GeneratedEventJson } from './eventJsonSchema'
 

@@ -1,4 +1,4 @@
-import type { HolidayDialogueEventSpec } from '../game/eventGeneration'
+import type { HolidayDialogueEventSpec } from '../games/my-sample-rpg/eventGeneration'
 import { readLocalStorage, writeLocalStorage } from './safeStorage'
 
 // 에디터(별도 페이지)와 게임은 별개 page지만 같은 origin이라 localStorage를 공유한다.

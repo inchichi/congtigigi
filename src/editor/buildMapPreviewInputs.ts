@@ -1,4 +1,4 @@
-import { parseTiledMap, type ParsedTiledMap } from '../game/tiled/parseTiledMap'
+import { parseTiledMap, type ParsedTiledMap } from '../games/my-sample-rpg/tiled/parseTiledMap'
 import type { GameFile } from './loadGame'
 
 // 열린 폴더의 raw 파일들에서 한 맵(.tmx)을 라이브 프리뷰로 그릴 재료를 만든다:

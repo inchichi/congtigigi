@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { parseTiledMap } from '../game/tiled/parseTiledMap'
+import { parseTiledMap } from '../games/my-sample-rpg/tiled/parseTiledMap'
 import { CURRENT_GAME_PROJECT_PROFILE } from './currentGameProjectSnapshot'
 import {
   buildGameStructureProfile,
@@ -38,7 +38,7 @@ const mapXml = `<?xml version="1.0" encoding="UTF-8"?>
 const source: EditorMapSource = {
   id: 'town',
   name: 'Town',
-  file: 'src/assets/maps/town.tmx',
+  file: 'src/games/my-sample-rpg/assets/maps/town.tmx',
   map: parseTiledMap({
     mapXml,
     externalTilesets: { '../tilesets/town-32.tsx': tilesetXml }
@@ -51,7 +51,7 @@ describe('extractNpcsFromParsedMap', () => {
       id: 'blacksmith',
       name: '대장장이',
       map: 'town',
-      file: 'src/assets/maps/town.tmx'
+      file: 'src/games/my-sample-rpg/assets/maps/town.tmx'
     })
   })
 
@@ -60,7 +60,7 @@ describe('extractNpcsFromParsedMap', () => {
       id: 'villager_9',
       name: 'villager_9',
       map: 'town',
-      file: 'src/assets/maps/town.tmx'
+      file: 'src/games/my-sample-rpg/assets/maps/town.tmx'
     })
   })
 
@@ -76,7 +76,7 @@ describe('buildGameStructureProfile', () => {
     const profile = buildGameStructureProfile([source], CURRENT_GAME_PROJECT_PROFILE)
 
     expect(profile.maps).toEqual([
-      { id: 'town', name: 'Town', file: 'src/assets/maps/town.tmx' }
+      { id: 'town', name: 'Town', file: 'src/games/my-sample-rpg/assets/maps/town.tmx' }
     ])
     expect(profile.npcs.map((npc) => npc.id)).toEqual(['blacksmith', 'villager_9'])
   })

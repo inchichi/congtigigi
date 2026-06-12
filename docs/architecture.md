@@ -5,8 +5,8 @@ This document is a short guide for module boundaries and code placement.
 ## Current Structure
 
 - `src/main.ts`: web entry point. Compose the application, bootstrap scenes, and route portal-driven scene transitions here.
-- `src/assets/`: runtime assets that are imported by the web client.
-- `src/assets/lua/`: project Lua controller scripts that are loaded by the web client at runtime.
+- `src/games/my-sample-rpg/assets/`: runtime assets that are imported by the web client.
+- `src/games/my-sample-rpg/assets/lua/`: project Lua controller scripts that are loaded by the web client at runtime.
 - `src/game/`: pure game or engine logic that should stay easy to test with Vitest.
 - `src/game/characterState.ts`: shared character state, optional monster level metadata, optional fixed sign text, controller decisions, and movement rules for both the player and NPCs.
 - `src/game/createCharacterControllerRuntime.ts`: controller attachment lifecycle, shared movement dispatch, and Lua script hot-update coordination.
@@ -34,6 +34,16 @@ This document is a short guide for module boundaries and code placement.
 - `src/game/tiled/`: TMX/TSX parsing, tile metadata, and event-layer data extraction.
 - `src/game/tiled/createNpcCharactersFromEventLayers.ts`: translate `character` object-layer events plus `controller.*`, `monster.level`, and optional `displayText` TMX properties into shared NPC character state.
 - `src/game/tiled/createMapPortalsFromEventLayers.ts`: translate `portal` object-layer events into scene transition data for map exits and entrances.
+- `src/editor/`: a standalone, LLM-powered game-content editor served as its own page (`editor.html` → `src/editorPage.ts`), separate from the game runtime. It opens any game folder, uses an LLM to understand it, generates content per a game adapter, and (for this game) reflects it live into the running game shown in an embedded preview. It depends on the game only through the `HolidayDialogueEventSpec` / `applyEventDraft` contract.
+- `src/editor/createEditorApp.ts`: the editor IDE shell — a three-pane layout (project entity tree, generation panel, live game preview iframe) styled by `src/editor.css` (Tailwind only). Drives the full pipeline — open-folder, LLM analysis, generation, deterministic Validation, binary human Evaluation, apply, export — plus an in-session generation history, a session metrics readout, and reset-to-bundled-game.
+- `src/editor/entityLinesValidator.ts`, `src/editor/eventEvaluator.ts`, `src/editor/sessionMetrics.ts`: the generation/validation/evaluation contract used by the live editor. `entityLinesValidator` is the deterministic Validator for the generic/legend `{entity, lines}` output (the rpg path uses `eventJsonSchema`); `eventEvaluator` records the human binary acceptable/not verdict and its `acceptance_rate`; `sessionMetrics` composes the per-session Validator pass rate and acceptance rate (with the 60% goal). All pure and unit-tested.
+- `src/editor/gameAdapter.ts`: per-game adapters (my-sample-rpg, legend-of-lua, and a generic LLM-analyzed fallback). Each adapter detects its game, extracts entities from TMX objects, and exposes a generic `generate(request)` that returns `{label, preview, issues, apply}`. New game support = new adapter.
+- `src/editor/analyzeGame.ts`: feeds deterministic TMX object evidence to the LLM so it can describe an arbitrary game (name, engine, editable entity groups, content model, apply strategy) — the generic-editor / GUS core. Grounded by real parsing to avoid hallucinated entities.
+- `src/editor/tmxObjects.ts`, `src/editor/loadGame.ts`: a tolerant tileset-free TMX object reader, and the loader that detects the adapter for an opened folder and builds its entity tree.
+- `src/editor/anthropicGenerate.ts`, `src/editor/claudeEventJsonGenerator.ts`: the editor's LLM calls go to the Anthropic Claude Messages API (forced tool use for structured JSON) via the `/api/anthropic` dev proxy; the rpg adapter generates a validated `GeneratedEventJson`.
+- `src/editor/pendingEvents.ts`, `src/editor/safeStorage.ts`: the localStorage handoff — the editor saves generated events and the game applies them on scene boot and on a `storage` event (live, no reload); `safeStorage` wraps every read/write so a blocked or quota-exceeded store degrades gracefully instead of throwing.
+- `src/editor/openProjectDirectory.ts`: opens a game folder via the File System Access API (Chrome/Edge) and returns the relevant files.
+- `src/editor/eventJsonSchema.ts`, `src/editor/eventEvaluator.ts`, `src/editor/gusCalculator.ts`, `src/editor/createLlmPanel.ts`, etc.: deterministic event validator (used by the rpg adapter) plus older single-game-panel modules kept for the presentation; the live editor is `createEditorApp`.
 - `src/rendering/`: PixiJS rendering code and asset-to-view adaptation.
 - `src/rendering/`: map tile rendering, depth sorting, event character presentation, and fixed-screen HUD overlays.
 - `src/rendering/loadMonsterSheetTextures.ts`: shared sheet slicing and background-keying helper for monster sprite sheets.
@@ -56,7 +66,7 @@ This document is a short guide for module boundaries and code placement.
 
 ## Lua Controller Interface
 
-- `src/assets/lua/`: each Lua controller script should return one controller table.
+- `src/games/my-sample-rpg/assets/lua/`: each Lua controller script should return one controller table.
 - Reserved controller methods:
   - `register`: optional setup when the runtime attaches the script to one character
   - `unregister`: optional cleanup when the runtime detaches the script from one character

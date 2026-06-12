@@ -88,27 +88,46 @@ export type GameAdapter = {
   generate: (request: GenerationRequest) => Promise<GenerationResult>
 }
 
+// my-sample-rpg의 맵 object를 에디터 종류(npc/monster/sign/portal/object)로 분류한다.
+// 외형(properties.type)의 접두사로 캐릭터류를 가르고, type="portal"은 포털로 본다.
+const classifyRpgEntityKind = (object: TmxObject): string => {
+  if (object.type === 'portal') {
+    return 'portal'
+  }
+  if (object.type === 'character') {
+    const appearance = object.properties.type ?? object.properties.appearanceType ?? ''
+    if (appearance.startsWith('character_')) {
+      return 'npc'
+    }
+    if (appearance.startsWith('monster_')) {
+      return 'monster'
+    }
+    if (appearance.startsWith('sign_')) {
+      return 'sign'
+    }
+  }
+  return object.type || 'object'
+}
+
 export const rpgAdapter: GameAdapter = {
   id: 'my-sample-rpg',
   name: 'My Sample RPG (TS/Pixi)',
   detect: (fileNames) => fileNames.includes('town.tmx'),
-  // 대화 이벤트 대상이 될 수 있는 건 캐릭터 NPC뿐이다. 같은 type="character" object여도 외형이
-  // sign_*(표지판)·monster_*(몬스터)인 것은 대화 NPC가 아니므로, character_* 외형만 NPC로 본다.
+  // 맵에 있는 모든 요소를 종류별로 뽑아 에디터 트리에 보여준다(사용자가 무엇을 바꿀지 알 수 있게).
+  // 같은 type="character" object여도 외형 접두사로 갈린다: character_*(대화 NPC)·monster_*(몬스터)·
+  // sign_*(표지판). type="portal"은 포털. 대화 생성 대상은 NPC뿐이라, profile.npcs(=생성/검증/허용목록)는
+  // loadGame이 kind==='npc'로만 좁힌다 — 트리(표시)와 생성 대상(curated)을 분리한다.
   extractEntities: (mapId, objects) =>
-    objects
-      .filter((object) => {
-        if (object.type !== 'character') {
-          return false
-        }
-        const appearance = object.properties.type ?? object.properties.appearanceType ?? ''
-        return appearance.startsWith('character_')
-      })
-      .map((object) => ({
-        id: object.name || `character-${object.id}`,
-        name: object.properties.displayText || object.name || `character-${object.id}`,
-        kind: 'npc',
+    objects.map((object) => {
+      const kind = classifyRpgEntityKind(object)
+      const fallbackName = `${kind}-${object.id}`
+      return {
+        id: object.name || fallbackName,
+        name: object.properties.displayText || object.name || fallbackName,
+        kind,
         mapId
-      })),
+      }
+    }),
   applyMode: 'local-storage',
   generate: async ({ apiKey, userPrompt, entity, profile, feedback }) => {
     if (!profile) {

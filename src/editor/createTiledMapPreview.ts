@@ -4,16 +4,16 @@ import { Application, Container, Sprite, Texture } from 'pixi.js'
 import type {
   ParsedTiledMap,
   ParsedTiledTile
-} from '../game/tiled/parseTiledMap'
+} from '../games/my-sample-rpg/tiled/parseTiledMap'
 import {
   createTileTexture,
   resolveTilesetForTile,
   type TilesetRenderResources
-} from '../rendering/tiledMapRenderResources'
+} from '../games/my-sample-rpg/rendering/tiledMapRenderResources'
 import {
   getSpriteTransformForTile,
   hasTileTransform
-} from '../rendering/tiledSpriteTransform'
+} from '../games/my-sample-rpg/rendering/tiledSpriteTransform'
 
 // 에디터 오른쪽 패널용 경량 Tiled 맵 뷰어. 본게임(createPixiTiledMapView)이 쓰는 것과 똑같은
 // 파서/타일 텍스처/CompositeTilemap 렌더 경로를 쓰되, 플레이어·몬스터·전투 같은 게임 로직은

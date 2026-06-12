@@ -22,7 +22,7 @@ const IMAGE_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp']
 const isImageFile = (name: string): boolean =>
   IMAGE_EXTENSIONS.some((extension) => name.toLowerCase().endsWith(extension))
 
-// 라이브 맵 프리뷰를 그리려면 타일셋 정의(.tsx)와 그 이미지(.png 등)도 필요하다.
+// 타일 분류(타일 군집 인식)와 라이브 맵 프리뷰에 타일셋 정의(.tsx)·그 이미지(.png 등)가 필요하다.
 const isAssetFile = (name: string): boolean =>
   name.endsWith('.tsx') || isImageFile(name)
 
