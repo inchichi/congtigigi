@@ -22,6 +22,15 @@ export type GameEntity = {
   mapId: string
 }
 
+// 재생성(피드백 루프) 맥락: 이전 결과 + 자동 검증 이슈 + 사람 거절 사유 + 반복 횟수.
+// 거절된 결과를 사유와 함께 다시 생성할 때만 채워진다.
+export type GenerationFeedback = {
+  previousOutput: string
+  validatorIssues: string[]
+  rejectionReason: string
+  iteration: number
+}
+
 export type GenerationRequest = {
   apiKey: string
   userPrompt: string
@@ -29,6 +38,30 @@ export type GenerationRequest = {
   profile?: GameStructureProfile
   // LLM 게임 분석에서 얻은 게임 설명(이름·엔진·콘텐츠 모델). 있으면 생성을 그 게임답게 유도한다.
   gameContext?: string
+  // 있으면 재생성 모드: 이전 결과를 이 피드백에 맞춰 수정한다(처음부터 새로 쓰지 않음).
+  feedback?: GenerationFeedback
+}
+
+// 재생성 시 모델에 붙이는 수정 지침. 이미 된 부분은 유지하고 거절 사유·검증 문제만 고치게 유도한다.
+export const buildFeedbackInstruction = (feedback: GenerationFeedback): string => {
+  const issues =
+    feedback.validatorIssues.length > 0
+      ? `\n\n자동 검증에서 발견된 문제:\n${feedback.validatorIssues
+          .map((issue) => `- ${issue}`)
+          .join('\n')}`
+      : ''
+
+  return (
+    `\n\n--- 수정 요청 (반복 ${feedback.iteration}회차) ---\n` +
+    `바로 직전 생성 결과:\n${feedback.previousOutput}${issues}\n\n` +
+    `사용자가 이 결과를 거절했고, 사유는: "${feedback.rejectionReason}"\n\n` +
+    `수정 지침:\n` +
+    `- 이미 잘 된 부분은 그대로 유지한다.\n` +
+    `- 거절 사유와 위 검증 문제만 고친다.\n` +
+    `- 대상 엔티티/대상은 꼭 필요한 경우가 아니면 바꾸지 않는다.\n` +
+    `- 검증 제약과 현재 게임 맥락을 따른다.\n` +
+    `- 거절 사유가 "전체가 못 쓴다"는 취지가 아니라면 처음부터 새로 쓰지 말고 부분만 수정한다.`
+  )
 }
 
 export type GenerationResult = {
@@ -77,7 +110,7 @@ export const rpgAdapter: GameAdapter = {
         mapId
       })),
   applyMode: 'local-storage',
-  generate: async ({ apiKey, userPrompt, entity, profile }) => {
+  generate: async ({ apiKey, userPrompt, entity, profile, feedback }) => {
     if (!profile) {
       throw new Error('이 게임의 구조 프로필이 없습니다.')
     }
@@ -85,9 +118,10 @@ export const rpgAdapter: GameAdapter = {
     const targetHint = entity
       ? ` 이 이벤트의 대상은 반드시 NPC id="${entity.id}"(${entity.name}, map=${entity.mapId})로 한다.`
       : ''
+    const feedbackHint = feedback ? buildFeedbackInstruction(feedback) : ''
     const eventJson = await generateEventJsonDraftWithClaude({
       apiKey,
-      userPrompt: `${userPrompt}${targetHint}`,
+      userPrompt: `${userPrompt}${targetHint}${feedbackHint}`,
       profile
     })
 
@@ -150,14 +184,15 @@ const isLegendEntityObject = (group: string): boolean =>
 // 결과의 bridgePayload는 'bridge' 게임에서 실행 중인 게임으로 전송하는 데 쓰인다('none' 게임은 무시).
 const generateEntityLines = async (
   gameName: string,
-  { apiKey, userPrompt, entity, gameContext }: GenerationRequest
+  { apiKey, userPrompt, entity, gameContext, feedback }: GenerationRequest
 ): Promise<GenerationResult> => {
   const target = entity ? `${entity.kind} "${entity.name}"` : '게임 요소'
   const contextLine = gameContext ? `\n\n게임 정보: ${gameContext}` : ''
+  const feedbackLine = feedback ? buildFeedbackInstruction(feedback) : ''
   const generated = await generateJson<{ entity: string; lines: string[] }>({
     apiKey,
-    instructions: `${gameName}의 게임 요소에 어울리는 짧은 한국어 대사 또는 설명을 1~4줄 생성한다. 주어진 게임 정보가 있으면 그 게임의 분위기에 맞춘다.`,
-    input: `${userPrompt}\n\n대상: ${target}${contextLine}`,
+    instructions: `${gameName}의 게임 요소에 어울리는 짧은 대사 또는 설명을 1~4줄 생성한다. 게임 안 영문 폰트로 표시되므로 lines는 반드시 영어로 작성한다(사용자 프롬프트가 한국어여도 출력 대사는 영어). 주어진 게임 정보가 있으면 그 분위기에 맞춘다.`,
+    input: `${userPrompt}\n\n대상: ${target}${contextLine}${feedbackLine}`,
     schemaName: 'entity_lines',
     schema: {
       type: 'object',

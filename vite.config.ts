@@ -91,6 +91,17 @@ const LOVE_EMBED_BRIDGE_SCRIPT = `
       console.log('[editor-bridge] goto-map 큐:', data.mapId);
       queue.push('goto-map:' + data.mapId);
       flush();
+    } else if (
+      data.type === 'editor:apply' &&
+      data.payload &&
+      Array.isArray(data.payload.lines)
+    ) {
+      // 생성된 대사를 화면 오버레이로 라이브 반영. 대상이 있으면 이름을 앞에 붙인다.
+      var target = data.payload.target;
+      var prefix = target && target.name ? target.name + ' — ' : '';
+      console.log('[editor-bridge] apply 큐:', data.payload.lines.length + '줄');
+      queue.push('apply-lines:' + prefix + data.payload.lines.join('\\n'));
+      flush();
     }
   });
 })();

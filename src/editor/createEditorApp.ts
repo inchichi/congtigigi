@@ -27,7 +27,11 @@ import {
   type EventEvaluationVerdict
 } from './eventEvaluator'
 import { buildSessionMetrics, type SessionGenerationTally } from './sessionMetrics'
-import type { GameEntity, GenerationResult } from './gameAdapter'
+import type {
+  GameEntity,
+  GenerationFeedback,
+  GenerationResult
+} from './gameAdapter'
 
 // 하드코딩 어댑터가 엔티티를 못 찾은 미지의 게임을, LLM 분석이 찾은 editable 그룹으로 채운다.
 const buildEntitiesFromAnalysis = (
@@ -153,6 +157,10 @@ export const createEditorApp = ({
   // 중복 집계되어 acceptance_rate가 오염됨). WeakMap이라 참조가 사라진 결과는 알아서 GC된다.
   let evaluations: EventEvaluation[] = loadEventEvaluations()
   let verdictByResult = new WeakMap<GenerationResult, EventEvaluationVerdict>()
+  // 피드백 루프: 거절 사유를 결과별로 기억해 재생성 입력에 넣는다. iteration은 현재 시도 회차
+  // (새 생성=1, 재생성마다 +1). 프로젝트를 바꾸면 초기화한다.
+  let rejectedReasonByResult = new WeakMap<GenerationResult, string>()
+  let iteration = 1
   // 이번 세션 집계: 생성 수 + Validator 통과 수. 프로젝트를 바꾸면 초기화한다.
   let sessionTally: SessionGenerationTally = { generations: 0, validatorPasses: 0 }
 
@@ -247,9 +255,11 @@ export const createEditorApp = ({
   const validationLine = el('div', 'text-xs')
   validationLine.hidden = true
 
-  const resultWrap = el('div', 'flex flex-col gap-1.5 flex-1 min-h-0')
+  // 결과 박스는 항상 읽히도록 최소 높이를 주고, 길면 자체 스크롤한다(예전엔 flex-1 min-h-0이라
+  // 분석 패널·평가 카드에 밀려 0 높이로 찌그러져 결과가 안 보였다).
+  const resultWrap = el('div', 'flex flex-col gap-1.5 shrink-0')
   resultWrap.append(el('span', LABEL, '생성 결과'))
-  const result = el('pre', 'm-0 flex-1 min-h-0 overflow-auto rounded-lg border border-white/10 bg-black/40 p-3.5 text-xs leading-relaxed text-zinc-300 whitespace-pre-wrap break-words')
+  const result = el('pre', 'm-0 min-h-[8rem] max-h-[40vh] overflow-auto rounded-lg border border-white/10 bg-black/40 p-3.5 text-xs leading-relaxed text-zinc-300 whitespace-pre-wrap break-words')
   resultWrap.append(result)
 
   // ---------- Evaluator (사람 이진 평가) ----------
@@ -261,16 +271,22 @@ export const createEditorApp = ({
   )
   const acceptanceStat = el('span', 'text-xs text-zinc-400')
   evaluationTop.append(acceptanceStat)
-  const evaluationButtons = el('div', 'flex items-center gap-2')
+  // 거절 사유 입력 — 거부 시 평가 기록(reason)과 다음 재생성 입력에 들어간다.
+  const reasonInput = el('input', `${FIELD_INPUT} text-sm`) as HTMLInputElement
+  reasonInput.type = 'text'
+  reasonInput.placeholder = '거절 사유 (예: 너무 장황함 · 톤이 안 맞음 · 맥락 누락 · 구조 오류)'
+  const evaluationButtons = el('div', 'flex items-center gap-2 flex-wrap')
   const acceptButton = el('button', GHOST_BUTTON, '👍 수용') as HTMLButtonElement
   acceptButton.type = 'button'
   const rejectButton = el('button', GHOST_BUTTON, '👎 거부') as HTMLButtonElement
   rejectButton.type = 'button'
-  const evaluationVerdict = el('span', 'text-xs flex-1')
+  const regenerateButton = el('button', GHOST_BUTTON, '🔄 사유로 재생성') as HTMLButtonElement
+  regenerateButton.type = 'button'
+  const evaluationVerdict = el('span', 'text-xs flex-1 min-w-[6rem]')
   const resetEvaluationsButton = el('button', 'text-[11px] text-zinc-500 transition hover:text-zinc-300', '누적 기록 초기화') as HTMLButtonElement
   resetEvaluationsButton.type = 'button'
-  evaluationButtons.append(acceptButton, rejectButton, evaluationVerdict, resetEvaluationsButton)
-  evaluationWrap.append(evaluationTop, evaluationButtons)
+  evaluationButtons.append(acceptButton, rejectButton, regenerateButton, evaluationVerdict, resetEvaluationsButton)
+  evaluationWrap.append(evaluationTop, reasonInput, evaluationButtons)
 
   const historyWrap = el('div', 'flex flex-col gap-1.5')
   historyWrap.hidden = true
@@ -292,31 +308,26 @@ export const createEditorApp = ({
   // Tiled 렌더 경로로 그 게임의 맵을 라이브로 그려 보여준다. iframe(내 게임)과 Pixi 캔버스(다른
   // 게임 맵)를 한 자리에 겹쳐 두고 모드에 따라 바꿔 켠다.
   const preview = el('section', 'border-l border-white/10 flex flex-col min-w-0')
-  // 맵 버튼이 많아도 바가 안 잘리도록: [제목(잘림)] [맵 버튼(가로 스크롤)] [새창·새로고침(고정)].
-  const previewBar = el('div', 'h-9 shrink-0 flex items-center gap-2 px-3 border-b border-white/10 bg-zinc-900/40')
-  const previewTitle = el('span', 'text-xs text-zinc-400 shrink-0 whitespace-nowrap truncate max-w-[30%]', '🎮 라이브 게임 (실제 게임 실행 중)')
+  // 맵 버튼이 많아도 바가 안 잘리도록: [제목(잘림)] [맵 버튼(줄바꿈)] [새창·새로고침(고정)].
+  // 가로 스크롤 대신 줄바꿈(wrap)을 쓴다 — 스크롤은 클릭과 제스처가 충돌(관성 스크롤 중 클릭이
+  // 빗나감)하지만, 줄바꿈은 모든 버튼이 제자리에 고정돼 클릭이 항상 확실하다.
+  const previewBar = el('div', 'shrink-0 flex items-start gap-2 px-3 py-1.5 border-b border-white/10 bg-zinc-900/40')
+  const previewTitle = el('span', 'text-xs text-zinc-400 shrink-0 whitespace-nowrap truncate max-w-[30%] leading-6', '🎮 라이브 게임 (실제 게임 실행 중)')
   // 내 게임 iframe 모드에서 전환할 씬(마을/사냥터/동굴).
   const rpgPreviewScenes = [
     { id: 'town', label: '마을' },
     { id: 'hunting-ground', label: '사냥터' },
     { id: 'cave', label: '동굴' }
   ]
-  // 맵 버튼 줄: 남는 공간을 차지하고 넘치면 가로 스크롤(macOS 오버레이 스크롤바라 높이 영향 없음).
-  const mapSwitcher = el('div', 'flex items-center gap-1 flex-1 min-w-0 overflow-x-auto')
-  const previewActions = el('div', 'flex items-center gap-2 shrink-0')
+  // 맵 버튼 줄: 남는 공간을 차지하고, 넘치면 다음 줄로 접힌다(wrap). 스크롤이 없어 클릭이 항상 확실.
+  const mapSwitcher = el('div', 'flex flex-wrap items-center gap-1 flex-1 min-w-0')
+  const previewActions = el('div', 'flex items-center gap-2 shrink-0 leading-6')
   const popoutButton = el('button', 'text-xs text-zinc-400 transition hover:text-zinc-100', '↗ 새 창') as HTMLButtonElement
   popoutButton.type = 'button'
   const reloadButton = el('button', 'text-xs text-zinc-400 transition hover:text-zinc-100', '↻ 새로고침') as HTMLButtonElement
   reloadButton.type = 'button'
   previewActions.append(popoutButton, reloadButton)
   previewBar.append(previewTitle, mapSwitcher, previewActions)
-  // 세로 휠로도 맵 버튼 줄을 좌우로 스크롤할 수 있게 한다(트랙패드 가로 스크롤은 기본 지원).
-  mapSwitcher.addEventListener('wheel', (event) => {
-    if (event.deltaY !== 0 && mapSwitcher.scrollWidth > mapSwitcher.clientWidth) {
-      mapSwitcher.scrollLeft += event.deltaY
-      event.preventDefault()
-    }
-  })
 
   const previewBody = el('div', 'flex-1 relative min-h-0')
   const iframe = el('iframe', 'absolute inset-0 w-full h-full border-0 bg-black') as HTMLIFrameElement
@@ -881,32 +892,49 @@ export const createEditorApp = ({
     // 현재 결과가 이미 평가됐으면(객체 단위로 기억) 그 판정을 보여주고 버튼을 잠근다(중복 집계 방지).
     const verdict = verdictByResult.get(currentResult)
     const evaluated = verdict !== undefined
+    const accepted = verdict === 'acceptable'
+    const rejected = verdict === 'not_acceptable'
     acceptButton.disabled = evaluated
     rejectButton.disabled = evaluated
-    acceptButton.className =
-      verdict === 'acceptable'
-        ? 'rounded-lg px-3.5 py-2 bg-emerald-500/15 text-emerald-200 text-sm border border-emerald-500/30'
-        : GHOST_BUTTON
-    rejectButton.className =
-      verdict === 'not_acceptable'
-        ? 'rounded-lg px-3.5 py-2 bg-rose-500/15 text-rose-200 text-sm border border-rose-500/30'
-        : GHOST_BUTTON
-    if (evaluated) {
-      evaluationVerdict.className =
-        verdict === 'acceptable' ? 'text-xs text-emerald-300' : 'text-xs text-rose-300'
-      evaluationVerdict.textContent =
-        verdict === 'acceptable' ? '· 이 결과를 수용함' : '· 이 결과를 거부함'
+    acceptButton.className = accepted
+      ? 'rounded-lg px-3.5 py-2 bg-emerald-500/15 text-emerald-200 text-sm border border-emerald-500/30'
+      : GHOST_BUTTON
+    rejectButton.className = rejected
+      ? 'rounded-lg px-3.5 py-2 bg-rose-500/15 text-rose-200 text-sm border border-rose-500/30'
+      : GHOST_BUTTON
+
+    // 재생성은 거부된 결과에서만 가능(피드백 루프). 사유 입력은 수락 전까지만 활성.
+    regenerateButton.disabled = !rejected || isGenerating
+    reasonInput.disabled = accepted
+
+    if (accepted) {
+      evaluationVerdict.className = 'text-xs text-emerald-300'
+      evaluationVerdict.textContent = '· 수락됨 — 이제 ‘게임에 적용’할 수 있습니다'
+    } else if (rejected) {
+      evaluationVerdict.className = 'text-xs text-rose-300'
+      evaluationVerdict.textContent = '· 거부됨 — ‘사유로 재생성’하거나 사유를 고쳐 다시 시도하세요'
     } else {
-      evaluationVerdict.textContent = ''
+      evaluationVerdict.className = 'text-xs text-zinc-500'
+      evaluationVerdict.textContent =
+        iteration > 1 ? `· ${iteration}회차 — 검토 후 수용/거부` : '· 검토 후 수용/거부 (적용은 수락 후)'
     }
+  }
+
+  // 피드백 루프 상태 초기화(프로젝트 전환 시). 회차·사유 입력·결과별 사유 기억을 비운다.
+  const resetFeedbackLoop = (): void => {
+    iteration = 1
+    reasonInput.value = ''
+    rejectedReasonByResult = new WeakMap<GenerationResult, string>()
   }
 
   const runResetEvaluations = (): void => {
     clearEventEvaluations()
     evaluations = []
-    // 영속 기록을 비웠으니 현재 결과의 잠금(verdict)도 함께 풀어 정합성을 맞춘다.
+    // 영속 기록을 비웠으니 현재 결과의 잠금(verdict)·거절 사유도 함께 풀어 정합성을 맞춘다.
     verdictByResult = new WeakMap<GenerationResult, EventEvaluationVerdict>()
+    rejectedReasonByResult = new WeakMap<GenerationResult, string>()
     renderEvaluation()
+    render()
     setStatus('누적 평가 기록을 초기화했습니다.')
   }
 
@@ -915,20 +943,29 @@ export const createEditorApp = ({
       return
     }
 
+    // 거부면 사유를 기록(다음 재생성 입력에 사용). 수용이면 사유는 의미 없음.
+    const reason =
+      verdict === 'not_acceptable' ? reasonInput.value.trim() : ''
+    if (verdict === 'not_acceptable') {
+      rejectedReasonByResult.set(currentResult, reason)
+    }
+
     evaluations = appendEventEvaluation({
       event_id: `${currentResult.label || 'generation'}-${evaluations.length + 1}`,
       event_name: currentResult.label,
       verdict,
-      reason: '',
+      reason,
       evaluated_at: Date.now()
     })
     verdictByResult.set(currentResult, verdict)
     renderEvaluation()
+    // 적용 버튼은 '수락된 결과'에서만 활성 — 평가가 바뀌었으니 다시 그린다.
+    render()
     const metrics = buildSessionMetrics(sessionTally, evaluations)
     setStatus(
-      `평가 기록됨(${verdict === 'acceptable' ? '수용' : '거부'}) · 누적 수용률 ${Math.round(
-        metrics.acceptanceRate * 100
-      )}%`
+      verdict === 'acceptable'
+        ? `수락됨 — 이제 ‘게임에 적용’할 수 있습니다 · 누적 수용률 ${Math.round(metrics.acceptanceRate * 100)}%`
+        : `거부됨${reason ? ` (사유: ${reason})` : ''} — ‘사유로 재생성’으로 고쳐 보세요`
     )
   }
 
@@ -989,9 +1026,12 @@ export const createEditorApp = ({
     generateButton.textContent = isGenerating ? '생성 중...' : '생성'
     generateButton.disabled =
       isGenerating || apiKey.trim().length === 0 || promptInput.value.trim().length === 0
-    // 검증(issues)이 적용을 막지 않는다 — 사용자 요청대로 검증과 무관하게 바로 적용 가능.
+    // 피드백 루프: 적용은 '수락된 결과'에서만 가능하다(거부·미평가 결과는 적용 불가).
     // 같은 origin 웹게임은 apply()로, love.js 패널게임은 iframe postMessage로, 브리지 게임은
-    // 연결돼 있을 때 bridgePayload로 적용한다.
+    // 연결돼 있을 때 bridgePayload로 적용한다. 검증(issues)은 적용을 막지 않는다(생성/검증 분리).
+    const accepted =
+      currentResult !== undefined &&
+      verdictByResult.get(currentResult) === 'acceptable'
     const canApplyLocal = currentResult?.apply != null
     const canApplyWeb = isWebBuildMode() && currentResult?.bridgePayload != null
     const canApplyBridge =
@@ -1000,7 +1040,9 @@ export const createEditorApp = ({
       bridgeStatus === 'connected' &&
       currentResult?.bridgePayload != null
     applyButton.disabled =
-      isGenerating || (!canApplyLocal && !canApplyWeb && !canApplyBridge)
+      isGenerating ||
+      !accepted ||
+      (!canApplyLocal && !canApplyWeb && !canApplyBridge)
     copyButton.disabled = !currentResult || isGenerating
     exportButton.disabled = !currentResult || isGenerating
     result.textContent = currentResult ? currentResult.preview : '생성 결과가 여기에 표시됩니다.'
@@ -1008,7 +1050,8 @@ export const createEditorApp = ({
     renderHistory()
   }
 
-  const runGenerate = async (): Promise<void> => {
+  // feedback이 있으면 재생성(이전 결과를 사유·검증에 맞춰 수정). 없으면 새 생성(1회차부터).
+  const runGenerate = async (feedback?: GenerationFeedback): Promise<void> => {
     if (isGenerating) {
       return
     }
@@ -1023,12 +1066,20 @@ export const createEditorApp = ({
       return
     }
 
+    if (!feedback) {
+      iteration = 1 // 새 생성은 1회차부터 시작(재생성은 호출부가 회차를 올려 feedback으로 넘긴다).
+    }
+
     isGenerating = true
     // 생성은 비동기다. 도중에 다른 프로젝트를 열거나(runOpenProject) 복귀(runReset)하면, 늦게 도착한
     // 이 결과를 새 게임에 섞으면 안 된다(히스토리/집계 오염 + 옛 게임에 묶인 apply() 클로저). 시작 시점의
     // 프로젝트 정체성을 캡처해 커밋 전에 검사한다(runAnalyze의 filesAtStart 가드와 동일).
     const filesAtStart = currentFiles
-    setStatus(`${game.adapter.name}로 생성 중...`)
+    setStatus(
+      feedback
+        ? `${game.adapter.name} 재생성 중 (${feedback.iteration}회차)...`
+        : `${game.adapter.name}로 생성 중...`
+    )
     render()
 
     try {
@@ -1039,13 +1090,15 @@ export const createEditorApp = ({
         profile: game.profile,
         gameContext: currentAnalysis
           ? `${currentAnalysis.game_name} (${currentAnalysis.engine}). 콘텐츠 모델: ${currentAnalysis.content_model}`
-          : undefined
+          : undefined,
+        feedback
       })
       // 생성 중 프로젝트가 바뀌었으면 이 결과는 버린다.
       if (currentFiles !== filesAtStart) {
         return
       }
       currentResult = result
+      reasonInput.value = '' // 새 결과 → 거절 사유 입력 비우기(이 결과를 새로 검토).
       historyCounter += 1
       history = [{ n: historyCounter, result }, ...history].slice(0, HISTORY_LIMIT)
       // 세션 지표 집계: 생성 1건 + (Validator 통과면) 통과 1건.
@@ -1053,7 +1106,11 @@ export const createEditorApp = ({
         generations: sessionTally.generations + 1,
         validatorPasses: sessionTally.validatorPasses + (result.issues.length === 0 ? 1 : 0)
       }
-      setStatus(`생성 완료: ${result.label}`)
+      setStatus(
+        feedback
+          ? `재생성 완료 (${feedback.iteration}회차): ${result.label} — 검토 후 수용/거부`
+          : `생성 완료: ${result.label} — 검토 후 수용/거부`
+      )
     } catch (error) {
       // 프로젝트가 바뀐 뒤 도착한 실패는 새 게임의 상태를 건드리지 않는다.
       if (currentFiles !== filesAtStart) {
@@ -1069,8 +1126,37 @@ export const createEditorApp = ({
     }
   }
 
+  // 피드백 루프: 거부된 결과를 사유 + 검증 이슈 + 이전 출력으로 다시 생성한다.
+  const runRegenerate = async (): Promise<void> => {
+    if (isGenerating || !currentResult) {
+      return
+    }
+
+    if (verdictByResult.get(currentResult) !== 'not_acceptable') {
+      setStatus('재생성은 거부된 결과에서만 가능합니다. 먼저 사유와 함께 거부하세요.')
+      return
+    }
+
+    const previous = currentResult
+    const reason =
+      rejectedReasonByResult.get(previous) ?? reasonInput.value.trim()
+    iteration += 1
+    await runGenerate({
+      previousOutput: previous.preview,
+      validatorIssues: previous.issues,
+      rejectionReason: reason,
+      iteration
+    })
+  }
+
   const runApply = async (): Promise<void> => {
     if (!currentResult) {
+      return
+    }
+
+    // 피드백 루프: 수락된 결과만 적용한다(거부·미평가는 막는다). 버튼도 비활성이지만 방어적으로 가드.
+    if (verdictByResult.get(currentResult) !== 'acceptable') {
+      setStatus('적용은 수락된 결과에서만 됩니다. 결과를 검토하고 👍 수용을 누르세요.')
       return
     }
 
@@ -1092,7 +1178,8 @@ export const createEditorApp = ({
         { type: 'editor:apply', payload: currentResult.bridgePayload },
         '*'
       )
-      setStatus('패널의 게임에 적용을 보냈습니다 (love.js).')
+      // 게임-쪽 다리(editor_bridge)가 이 대사를 화면 상단 오버레이로 라이브 반영한다(재빌드 없이).
+      setStatus('게임에 적용됨 — love.js 화면 상단에 대사가 표시됩니다 (라이브).')
       return
     }
 
@@ -1173,6 +1260,7 @@ export const createEditorApp = ({
       history = []
       historyCounter = 0
       sessionTally = { generations: 0, validatorPasses: 0 }
+      resetFeedbackLoop()
       renderTree()
       renderAnalysis()
       render()
@@ -1207,6 +1295,7 @@ export const createEditorApp = ({
     history = []
     historyCounter = 0
     sessionTally = { generations: 0, validatorPasses: 0 }
+    resetFeedbackLoop()
     renderTree()
     renderAnalysis()
     render()
@@ -1332,6 +1421,21 @@ export const createEditorApp = ({
   })
   rejectButton.addEventListener('click', () => {
     runEvaluate('not_acceptable')
+  })
+  regenerateButton.addEventListener('click', () => {
+    void runRegenerate()
+  })
+  // 사유 입력에서 Enter로 바로 거부(아직 미평가일 때). 이미 거부됐으면 Enter로 재생성.
+  reasonInput.addEventListener('keydown', (event) => {
+    if (event.isComposing || event.key !== 'Enter') {
+      return
+    }
+    event.preventDefault()
+    if (currentResult && verdictByResult.get(currentResult) === 'not_acceptable') {
+      void runRegenerate()
+    } else {
+      runEvaluate('not_acceptable')
+    }
   })
   resetEvaluationsButton.addEventListener('click', runResetEvaluations)
   exportButton.addEventListener('click', runExport)
