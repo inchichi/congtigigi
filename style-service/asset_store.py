@@ -10,6 +10,7 @@ import shutil
 import threading
 from datetime import datetime
 from pathlib import Path
+from typing import Callable
 
 import adain_service
 
@@ -59,33 +60,52 @@ def list_assets() -> list[dict]:
     return out
 
 
+def _backup_and_write_locked(target: Path, relative: str, data: bytes) -> str:
+    """_write_lock 안에서만 호출 — 원본 시드 + 백업 + 덮어쓰기."""
+    # 첫 적용이면 최초 원본을 시드한다(이미 있으면 보존) — 되돌리기의 복원 지점.
+    original_path = _original_path(relative)
+    if not original_path.exists():
+        _ORIGINALS_DIR.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(target, original_path)
+
+    _BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+    # 마이크로초 + 충돌 시 카운터 — 같은 초 안의 재적용이 직전 백업(원본일 수 있음)을
+    # 덮어써 영구 소실시키는 것을 막는다.
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+    flattened = relative.replace("/", "__")
+    backup_path = _BACKUP_DIR / f"{stamp}__{flattened}"
+    counter = 1
+    while backup_path.exists():
+        backup_path = _BACKUP_DIR / f"{stamp}_{counter}__{flattened}"
+        counter += 1
+    shutil.copy2(target, backup_path)
+
+    target.write_bytes(data)
+    return str(backup_path)
+
+
 def backup_and_write(relative: str, data: bytes) -> str:
     """기존 에셋을 backups/에 복사한 뒤 덮어쓴다. 새 파일 생성은 허용하지 않는다(오타 경로 방지)."""
     target = resolve_asset_path(relative)
     if not target.is_file():
         raise FileNotFoundError(f"덮어쓸 에셋이 없습니다: {relative}")
-
     with _write_lock:
-        # 첫 적용이면 최초 원본을 시드한다(이미 있으면 보존) — 되돌리기의 복원 지점.
-        original_path = _original_path(relative)
-        if not original_path.exists():
-            _ORIGINALS_DIR.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(target, original_path)
+        return _backup_and_write_locked(target, relative, data)
 
-        _BACKUP_DIR.mkdir(parents=True, exist_ok=True)
-        # 마이크로초 + 충돌 시 카운터 — 같은 초 안의 재적용이 직전 백업(원본일 수 있음)을
-        # 덮어써 영구 소실시키는 것을 막는다.
-        stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-        flattened = relative.replace("/", "__")
-        backup_path = _BACKUP_DIR / f"{stamp}__{flattened}"
-        counter = 1
-        while backup_path.exists():
-            backup_path = _BACKUP_DIR / f"{stamp}_{counter}__{flattened}"
-            counter += 1
-        shutil.copy2(target, backup_path)
 
-        target.write_bytes(data)
-    return str(backup_path)
+def backup_and_transform(relative: str, transform: Callable[[bytes], bytes]) -> str:
+    """현재 에셋 바이트를 읽어 변환한 결과로 덮어쓴다 — read-modify-write 전체를 락 안에서.
+
+    apply가 락 밖에서 파일을 읽으면 병렬 적용 시 lost update(나중 쓰기가 먼저 적용된
+    패치를 패치 전 픽셀로 되돌림)와 부분 읽기가 생긴다. 변환 함수까지 락 안에서 돌려
+    /apply-asset·/revert-asset과도 직렬화한다.
+    """
+    target = resolve_asset_path(relative)
+    if not target.is_file():
+        raise FileNotFoundError(f"덮어쓸 에셋이 없습니다: {relative}")
+    with _write_lock:
+        data = transform(target.read_bytes())
+        return _backup_and_write_locked(target, relative, data)
 
 
 def asset_status(relative: str) -> dict:

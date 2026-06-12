@@ -61,7 +61,22 @@ export type StyleTransferMapObject = {
   sharedOutsideCells: number
 }
 
-type ContentMode = 'file' | 'asset' | 'object'
+type ContentMode = 'file' | 'asset' | 'object' | 'extracted'
+
+// 자동 추출된 오브젝트(서비스 GET /extracted-objects의 사이드카 메타).
+type ExtractedObject = {
+  id: string
+  key: string
+  label: string
+  tilesetPath: string
+  sharedOutsideCells: number
+}
+
+// '게임에 적용'의 대상 — 모드에 따라 적용 방식이 다르다.
+type ApplyTarget =
+  | { kind: 'asset'; path: string; blob: Blob } // 결과 PNG로 에셋 자체를 덮어쓰기
+  | { kind: 'patched-tileset'; path: string; blob: Blob } // 맵 오브젝트 모드: 서비스가 만든 패치 타일셋
+  | { kind: 'extracted-object'; key: string; path: string; blob: Blob } // 추출 모드: 서비스가 역패치
 
 export interface StyleTransferModal {
   openButton: HTMLButtonElement
@@ -134,6 +149,7 @@ export const createStyleTransferModal = (): StyleTransferModal => {
   let mapObject: StyleTransferMapObject | undefined
   let assetPath: string | undefined
   let assetListLoaded = false
+  let extractedObject: ExtractedObject | undefined
 
   const contentCard = el('div', CARD)
   const contentHead = el('div', 'flex items-center justify-between gap-2')
@@ -142,7 +158,10 @@ export const createStyleTransferModal = (): StyleTransferModal => {
   fileTab.type = 'button'
   const assetTab = el('button', MODE_TAB, '게임 에셋')
   assetTab.type = 'button'
-  modeTabs.append(fileTab, assetTab)
+  const extractedTab = el('button', MODE_TAB, '추출 오브젝트')
+  extractedTab.type = 'button'
+  extractedTab.title = '맵 인식 시 자동으로 누끼 추출된 오브젝트들'
+  modeTabs.append(fileTab, assetTab, extractedTab)
   contentHead.append(el('div', LABEL, '콘텐츠 이미지'), modeTabs)
 
   const contentPicker = createImagePicker()
@@ -157,7 +176,10 @@ export const createStyleTransferModal = (): StyleTransferModal => {
   objectBanner.append(objectLabel, objectClear)
   const objectPreview = el('img', 'max-h-36 w-full rounded-lg object-contain bg-black/40 [image-rendering:pixelated]')
   objectPreview.style.display = 'none'
-  contentCard.append(contentHead, objectBanner, contentPicker.input, assetSelect, contentPicker.thumb, objectPreview)
+  // 추출 오브젝트 썸네일 그리드 — 자동 추출된 누끼 PNG들에서 고른다.
+  const extractedGrid = el('div', 'grid grid-cols-4 gap-1.5 max-h-44 overflow-y-auto')
+  extractedGrid.style.display = 'none'
+  contentCard.append(contentHead, objectBanner, contentPicker.input, assetSelect, extractedGrid, contentPicker.thumb, objectPreview)
 
   const stylePicker = createImagePicker()
   const styleCard = el('div', CARD)
@@ -238,8 +260,8 @@ export const createStyleTransferModal = (): StyleTransferModal => {
   let isReverting = false
   let resultBlob: Blob | undefined
   let resultName = 'stylized.png'
-  // '게임에 적용'이 쓸 대상: 에셋 모드는 결과 자체, 오브젝트 모드는 패치된 타일셋 전체.
-  let applyTarget: { path: string; blob: Blob } | undefined
+  // '게임에 적용'이 쓸 대상 — kind에 따라 적용 엔드포인트가 다르다.
+  let applyTarget: ApplyTarget | undefined
   // '원본으로 되돌리기' 대상 — 현재 대상 에셋이 스타일 적용 상태일 때만 채워진다.
   let revertPath: string | undefined
   // 요청 세대 토큰: 변환이 도는 동안 콘텐츠/모드가 바뀌면 증가시켜, 완료된 옛 요청이
@@ -257,8 +279,18 @@ export const createStyleTransferModal = (): StyleTransferModal => {
   }
 
   // 현재 모드의 "게임 에셋 경로" — 적용/되돌리기의 대상.
-  const currentTargetPath = (): string | undefined =>
-    contentMode === 'asset' ? assetPath : contentMode === 'object' ? mapObject?.tilesetImagePath : undefined
+  const currentTargetPath = (): string | undefined => {
+    if (contentMode === 'asset') {
+      return assetPath
+    }
+    if (contentMode === 'object') {
+      return mapObject?.tilesetImagePath
+    }
+    if (contentMode === 'extracted') {
+      return extractedObject?.tilesetPath
+    }
+    return undefined
+  }
 
   // 대상 에셋이 스타일 적용 상태인지 서비스에 물어 되돌리기 버튼을 갱신한다.
   // 응답이 올 때까지 대상이 바뀌었으면 결과를 버린다(레이스 가드).
@@ -312,6 +344,7 @@ export const createStyleTransferModal = (): StyleTransferModal => {
       contentPicker.setFile(undefined)
       assetPath = undefined
       assetSelect.value = ''
+      extractedObject = undefined
     }
     contentMode = mode
     if (mode !== 'object') {
@@ -319,11 +352,13 @@ export const createStyleTransferModal = (): StyleTransferModal => {
     }
     fileTab.className = mode === 'file' ? MODE_TAB_ACTIVE : MODE_TAB
     assetTab.className = mode === 'asset' ? MODE_TAB_ACTIVE : MODE_TAB
+    extractedTab.className = mode === 'extracted' ? MODE_TAB_ACTIVE : MODE_TAB
     modeTabs.style.display = mode === 'object' ? 'none' : 'flex'
     objectBanner.style.display = mode === 'object' ? 'flex' : 'none'
     objectPreview.style.display = 'none'
     contentPicker.input.style.display = mode === 'file' ? 'block' : 'none'
     assetSelect.style.display = mode === 'asset' ? 'block' : 'none'
+    extractedGrid.style.display = mode === 'extracted' ? 'grid' : 'none'
     contentPicker.thumb.style.display =
       mode !== 'object' && contentPicker.getFile() ? 'block' : 'none'
     clearResult()
@@ -391,6 +426,81 @@ export const createStyleTransferModal = (): StyleTransferModal => {
     setContentMode('file')
   })
 
+  // ---------- 추출 오브젝트 모드: 자동 누끼 추출본 썸네일 그리드 ----------
+  const selectExtractedObject = (meta: ExtractedObject, node: HTMLButtonElement): void => {
+    void (async () => {
+      // 클릭 시점에 세대를 올려서 캡처한다 — 빠른 연속 클릭 시 늦게 도착한 이전 응답이
+      // 마지막 선택을 덮거나, 모드 전환으로 지운 선택을 부활시키는 것을 막는다.
+      runSeq += 1
+      const seq = runSeq
+      try {
+        const response = await fetch(`${STYLE_SERVICE_BASE}/extracted-objects/${encodeURIComponent(meta.key)}.png`)
+        if (!response.ok) {
+          throw new Error(String(response.status))
+        }
+        const blob = await response.blob()
+        if (seq !== runSeq) {
+          return
+        }
+        extractedObject = meta
+        contentPicker.setFile(new File([blob], `${meta.key}.png`, { type: 'image/png' }))
+        contentPicker.thumb.style.display = 'block'
+        for (const sibling of extractedGrid.querySelectorAll('button')) {
+          sibling.classList.remove('ring-2', 'ring-indigo-500/60')
+        }
+        node.classList.add('ring-2', 'ring-indigo-500/60')
+        setStatus(
+          meta.sharedOutsideCells > 0
+            ? `${meta.label} 선택됨 · ⚠ 같은 타일을 쓰는 영역 밖 ${meta.sharedOutsideCells}칸도 함께 바뀝니다`
+            : `${meta.label} 선택됨`
+        )
+        void refreshRevertState()
+      } catch {
+        if (seq === runSeq) {
+          setStatus('추출 오브젝트 이미지를 불러오지 못했습니다.')
+        }
+      }
+    })()
+  }
+
+  const loadExtractedList = async (): Promise<void> => {
+    try {
+      const response = await fetch(`${STYLE_SERVICE_BASE}/extracted-objects`)
+      if (!response.ok) {
+        throw new Error(String(response.status))
+      }
+      const data = (await response.json()) as { objects: ExtractedObject[] }
+      extractedGrid.replaceChildren()
+      if (data.objects.length === 0) {
+        extractedGrid.append(
+          el('div', 'col-span-4 text-xs text-zinc-500 leading-relaxed', '추출된 오브젝트가 없습니다 — 게임에서 맵을 열면 자동으로 추출됩니다.')
+        )
+        return
+      }
+      for (const meta of data.objects) {
+        const item = el('button', 'flex flex-col items-center gap-0.5 rounded-lg bg-black/40 p-1 transition hover:bg-white/[0.08]')
+        item.type = 'button'
+        const thumb = el('img', 'h-12 w-full object-contain [image-rendering:pixelated]')
+        thumb.src = `${STYLE_SERVICE_BASE}/extracted-objects/${encodeURIComponent(meta.key)}.png`
+        thumb.loading = 'lazy'
+        const caption = el('span', 'w-full truncate text-center text-[10px] text-zinc-400', meta.label)
+        item.title = meta.label
+        item.append(thumb, caption)
+        item.addEventListener('click', () => {
+          selectExtractedObject(meta, item)
+        })
+        extractedGrid.append(item)
+      }
+    } catch {
+      setStatus(SERVICE_GUIDE)
+    }
+  }
+  extractedTab.addEventListener('click', () => {
+    setContentMode('extracted')
+    // 맵 인식 때마다 새 오브젝트가 추가될 수 있어 탭을 열 때마다 새로 받는다.
+    void loadExtractedList()
+  })
+
   // ---------- 변환 ----------
   // 대상(target/applyPath)은 호출 시점에 캡처하고, 완료 시 세대(seq)가 그대로일 때만 결과를
   // 반영한다 — 변환 중 모드·선택이 바뀌어 엉뚱한 에셋에 적용되거나 stale 결과가 살아나는 것 방지.
@@ -422,14 +532,23 @@ export const createStyleTransferModal = (): StyleTransferModal => {
     }
     resultBlob = base64ToBlob(data.object_png)
     resultName = `${target.label.replace(/[^\w가-힣]+/gu, '_')}_stylized.png`
-    applyTarget = { path: target.tilesetImagePath, blob: base64ToBlob(data.tileset_png) }
+    applyTarget = {
+      kind: 'patched-tileset',
+      path: target.tilesetImagePath,
+      blob: base64ToBlob(data.tileset_png)
+    }
     setStatus('완료 — 미리보기를 확인하고 🕹 게임에 적용을 누르세요. (같은 타일을 쓰는 동일 오브젝트가 함께 바뀝니다)')
   }
+
+  // 적용 컨텍스트(대상 종류·경로·키)는 변환 시작 시점에 캡처되어 그대로 들어온다.
+  type ApplyContext =
+    | { kind: 'asset'; path: string }
+    | { kind: 'extracted-object'; key: string; path: string }
 
   const runImageTransfer = async (
     contentFile: File,
     styleFile: File,
-    applyPath: string | undefined,
+    applyContext: ApplyContext | undefined,
     seq: number
   ): Promise<void> => {
     const form = new FormData()
@@ -453,12 +572,14 @@ export const createStyleTransferModal = (): StyleTransferModal => {
     }
     resultBlob = blob
     resultName = `${fileStem(contentFile.name)}_stylized_${fileStem(styleFile.name)}.png`
-    applyTarget = applyPath !== undefined ? { path: applyPath, blob } : undefined
-    setStatus(
-      applyTarget
-        ? `완료: ${resultName} — 🕹 게임에 적용으로 에셋을 덮어쓸 수 있습니다.`
-        : `완료: ${resultName}`
-    )
+    applyTarget = applyContext !== undefined ? { ...applyContext, blob } : undefined
+    if (!applyTarget) {
+      setStatus(`완료: ${resultName}`)
+    } else if (applyTarget.kind === 'extracted-object' && extractedObject && extractedObject.sharedOutsideCells > 0) {
+      setStatus(`완료: ${resultName} — 🕹 게임에 적용 시 영역 밖 ${extractedObject.sharedOutsideCells}칸도 함께 바뀝니다.`)
+    } else {
+      setStatus(`완료: ${resultName} — 🕹 게임에 적용으로 에셋을 덮어쓸 수 있습니다.`)
+    }
   }
 
   const runTransfer = async (): Promise<void> => {
@@ -471,8 +592,13 @@ export const createStyleTransferModal = (): StyleTransferModal => {
     if (contentMode === 'object' && !target) {
       return
     }
-    // 적용 경로·세대를 await 이전(동기 구간)에 캡처한다.
-    const applyPath = contentMode === 'asset' ? assetPath : undefined
+    // 적용 대상·세대를 await 이전(동기 구간)에 캡처한다.
+    const applyContext: ApplyContext | undefined =
+      contentMode === 'asset' && assetPath !== undefined
+        ? { kind: 'asset', path: assetPath }
+        : contentMode === 'extracted' && extractedObject !== undefined
+          ? { kind: 'extracted-object', key: extractedObject.key, path: extractedObject.tilesetPath }
+          : undefined
     const seq = runSeq
     isRunning = true
     syncButtons()
@@ -481,7 +607,7 @@ export const createStyleTransferModal = (): StyleTransferModal => {
       if (contentMode === 'object') {
         await runObjectTransfer(target as StyleTransferMapObject, styleFile, seq)
       } else {
-        await runImageTransfer(contentFile as File, styleFile, applyPath, seq)
+        await runImageTransfer(contentFile as File, styleFile, applyContext, seq)
       }
       if (seq === runSeq && resultBlob) {
         if (resultImage.src) {
@@ -513,8 +639,15 @@ export const createStyleTransferModal = (): StyleTransferModal => {
     try {
       const form = new FormData()
       form.append('file', new File([applyTarget.blob], 'patched.png', { type: 'image/png' }))
-      form.append('path', applyTarget.path)
-      const response = await fetch(`${STYLE_SERVICE_BASE}/apply-asset`, {
+      let endpoint = `${STYLE_SERVICE_BASE}/apply-asset`
+      if (applyTarget.kind === 'extracted-object') {
+        // 추출 오브젝트: 결과 PNG를 서비스가 셀 정보로 타일셋에 역패치한다.
+        endpoint = `${STYLE_SERVICE_BASE}/apply-object`
+        form.append('object_key', applyTarget.key)
+      } else {
+        form.append('path', applyTarget.path)
+      }
+      const response = await fetch(endpoint, {
         method: 'POST',
         body: form
       })

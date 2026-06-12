@@ -21,12 +21,13 @@ import json
 from urllib.parse import urlparse
 
 import torch
-from fastapi import FastAPI, File, Form, UploadFile
+from fastapi import Body, FastAPI, File, Form, UploadFile
 from fastapi.responses import JSONResponse, Response
 from PIL import Image
 
 import adain_service
 import asset_store
+import object_extract
 import tile_stylize
 
 app = FastAPI(title="AdaIN style-transfer service")
@@ -204,6 +205,84 @@ def asset_status(path: str):
         return asset_store.asset_status(path)
     except ValueError as error:
         return JSONResponse(status_code=422, content={"error": str(error)})
+
+
+def _validate_cells(cell_list) -> bool:
+    if not isinstance(cell_list, list) or not 0 < len(cell_list) <= 2048:
+        return False
+    for cell in cell_list:
+        if not isinstance(cell, dict):
+            return False
+        if not all(isinstance(cell.get(field), int) for field in ("col", "row", "tileId")):
+            return False
+        if cell["tileId"] < 0:
+            return False
+    return True
+
+
+@app.post("/extract-objects")
+def extract_objects(payload: dict = Body(...)):
+    """맵 인식 시점의 배치 누끼 추출. 이미 추출된 오브젝트는 건너뛴다."""
+    tileset_path = payload.get("tileset_path")
+    tile_width = payload.get("tile_width")
+    tile_height = payload.get("tile_height")
+    columns = payload.get("columns")
+    objects = payload.get("objects")
+    if (
+        not isinstance(tileset_path, str)
+        or not isinstance(tile_width, int)
+        or not isinstance(tile_height, int)
+        or not isinstance(columns, int)
+        or not 1 <= tile_width <= 512
+        or not 1 <= tile_height <= 512
+        or columns < 1
+        or not isinstance(objects, list)
+        or not 0 < len(objects) <= 256
+    ):
+        return JSONResponse(status_code=422, content={"error": "추출 요청 형식이 올바르지 않습니다."})
+    for entry in objects:
+        if not isinstance(entry, dict) or "id" not in entry or not _validate_cells(entry.get("cells")):
+            return JSONResponse(status_code=422, content={"error": "오브젝트 셀 형식이 올바르지 않습니다."})
+
+    try:
+        return object_extract.extract_objects(tileset_path, tile_width, tile_height, columns, objects)
+    except ValueError as error:
+        return JSONResponse(status_code=422, content={"error": str(error)})
+    except FileNotFoundError as error:
+        return JSONResponse(status_code=404, content={"error": str(error)})
+
+
+@app.get("/extracted-objects")
+def list_extracted_objects() -> dict:
+    return {"objects": object_extract.list_objects()}
+
+
+@app.get("/extracted-objects/{key}.png")
+def extracted_object_png(key: str):
+    try:
+        return Response(content=object_extract.read_png(key), media_type="image/png")
+    except ValueError as error:
+        return JSONResponse(status_code=422, content={"error": str(error)})
+    except FileNotFoundError as error:
+        return JSONResponse(status_code=404, content={"error": str(error)})
+
+
+@app.post("/apply-object")
+def apply_object(file: UploadFile = File(...), object_key: str = Form(...)):
+    """스타일 적용된 오브젝트 PNG를 타일셋에 역패치해 게임 에셋에 반영한다(백업 포함)."""
+    data = file.file.read()
+    try:
+        probe = Image.open(io.BytesIO(data))
+        probe.load()
+    except OSError:
+        return JSONResponse(status_code=422, content={"error": "PNG로 해석할 수 없는 데이터입니다."})
+
+    try:
+        return object_extract.apply_styled_object(object_key, data)
+    except ValueError as error:
+        return JSONResponse(status_code=422, content={"error": str(error)})
+    except FileNotFoundError as error:
+        return JSONResponse(status_code=404, content={"error": str(error)})
 
 
 @app.post("/revert-asset")

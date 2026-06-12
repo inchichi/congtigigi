@@ -1,6 +1,7 @@
 import { openProjectDirectory } from './openProjectDirectory'
 import {
   buildTileClusterEntities,
+  findAllStyleTargetCells,
   findFileByRelativeSource,
   findObjectKindCells,
   findTileClusterDetail,
@@ -646,6 +647,110 @@ export const createEditorApp = ({
       cells: detail.cells,
       sharedOutsideCells: detail.sharedOutsideCells
     }
+  }
+
+  // 맵 인식 시점의 자동 누끼 추출: 현재 맵의 변환 가능 오브젝트들의 셀 정보를 모아 서비스에
+  // 배치로 보낸다. 서비스가 타일을 조립해 투명 PNG로 저장하고(이미 추출된 키는 스킵),
+  // 모달의 '추출 오브젝트' 탭이 그 목록을 쓴다. 백그라운드 fetch라 에디터 UI는 멈추지 않고,
+  // 서비스가 꺼져 있으면 조용히 무시한다. 성공한 맵은 세션 내 재전송하지 않는다.
+  const extractedMapIds = new Set<string>()
+  const extractMapObjectsInBackground = (mapId: string): void => {
+    if (game.adapter.id !== 'my-sample-rpg' || extractedMapIds.has(mapId)) {
+      return
+    }
+    const map = game.maps.find((candidate) => candidate.id === mapId)
+    if (!map) {
+      return
+    }
+    // 준비(파싱)는 scene-changed 핸들러의 페인트를 막지 않게 타이머로 미루고,
+    // 엔티티별 재파싱 대신 일괄 수집(맵당 파싱 2회)으로 메인 스레드 점유를 줄인다.
+    window.setTimeout(() => {
+      const mapFile = currentFiles.find((file) => file.path === map.file)
+      if (!mapFile) {
+        return
+      }
+      let objects: TmxObject[] = []
+      try {
+        objects = extractTmxObjects(mapFile.text)
+      } catch {
+        return
+      }
+      const styleable = map.entities.filter(
+        (entity) => !STYLE_TARGET_EXCLUDED_KINDS.has(groupKindOf(entity.kind))
+      )
+      const cellsByEntityId = findAllStyleTargetCells(mapFile, currentFiles, objects, styleable)
+
+      // 타일셋 .tsx 해석은 source별로 1회만.
+      type ResolvedTileset = { imagePath: string; tileWidth: number; tileHeight: number; columns: number }
+      const tilesetBySource = new Map<string, ResolvedTileset | undefined>()
+      const resolveTileset = (source: string): ResolvedTileset | undefined => {
+        if (!tilesetBySource.has(source)) {
+          const tsxFile = findFileByRelativeSource(currentFiles, mapFile.path, source)
+          const info = tsxFile ? extractTmxTilesetImageInfo(tsxFile.text) : undefined
+          const imagePath = tsxFile && info ? resolveRelativePath(tsxFile.path, info.imageSource) : undefined
+          tilesetBySource.set(
+            source,
+            info && imagePath && imagePath.startsWith('src/assets/')
+              ? { imagePath, tileWidth: info.tileWidth, tileHeight: info.tileHeight, columns: info.columns }
+              : undefined
+          )
+        }
+        return tilesetBySource.get(source)
+      }
+
+      const targets: Array<StyleTransferMapObject & { id: string }> = []
+      for (const entity of styleable) {
+        const detail = cellsByEntityId.get(entity.id)
+        if (!detail || detail.cells.length === 0 || detail.tilesetSource === undefined) {
+          continue
+        }
+        const tileset = resolveTileset(detail.tilesetSource)
+        if (!tileset) {
+          continue
+        }
+        const kind = groupKindOf(entity.kind)
+        targets.push({
+          id: entity.id,
+          label: `${KIND_ICON[kind] ?? '•'} ${entity.name}`,
+          tilesetImagePath: tileset.imagePath,
+          tileWidth: tileset.tileWidth,
+          tileHeight: tileset.tileHeight,
+          columns: tileset.columns,
+          cells: detail.cells,
+          sharedOutsideCells: detail.sharedOutsideCells
+        })
+      }
+      if (targets.length === 0) {
+        return
+      }
+      // 현재 데이터는 맵당 타일셋이 하나라 첫 대상 기준으로 묶는다(다른 타일셋 대상은 제외).
+      const first = targets[0]
+      const sameTileset = targets.filter(
+        (candidate) => candidate.tilesetImagePath === first.tilesetImagePath
+      )
+      void fetch('/api/style/extract-objects', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tileset_path: first.tilesetImagePath,
+          tile_width: first.tileWidth,
+          tile_height: first.tileHeight,
+          columns: first.columns,
+          objects: sameTileset.map((candidate) => ({
+            id: candidate.id,
+            label: candidate.label,
+            cells: candidate.cells,
+            sharedOutsideCells: candidate.sharedOutsideCells
+          }))
+        })
+      })
+        .then((response) => {
+          if (response.ok) {
+            extractedMapIds.add(mapId)
+          }
+        })
+        .catch(() => undefined)
+    }, 0)
   }
 
   const renderTree = (): void => {
@@ -1326,6 +1431,8 @@ export const createEditorApp = ({
     showAllMaps = false
     renderTree()
     render()
+    // 맵 인식 시점의 자동 누끼 추출 — 백그라운드라 UI를 막지 않는다.
+    extractMapObjectsInBackground(currentMapId)
   })
 
   renderTree()

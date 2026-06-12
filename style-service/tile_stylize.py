@@ -25,6 +25,86 @@ def _tile_rect(tile_id: int, columns: int, tile_width: int, tile_height: int) ->
     return (left, top, left + tile_width, top + tile_height)
 
 
+def compose_object_canvas(
+    tileset_image: Image.Image,
+    cells: list[dict],
+    columns: int,
+    tile_width: int,
+    tile_height: int,
+) -> tuple[Image.Image, int, int]:
+    """오브젝트의 셀들을 맵 배치 그대로 투명 캔버스에 조립한다 — 결과가 곧 누끼 RGBA.
+
+    (canvas, min_col, min_row)를 반환한다. min_col/min_row는 역패치(셀 → 캔버스 영역)에 필요.
+    타일셋 원본 타일이 알파를 갖고 있으므로 별도 배경 제거가 필요 없다.
+    """
+    tileset_image = tileset_image.convert("RGBA")
+    for cell in cells:
+        rect = _tile_rect(cell["tileId"], columns, tile_width, tile_height)
+        if rect[2] > tileset_image.width or rect[3] > tileset_image.height:
+            raise ValueError(f"타일 id {cell['tileId']}가 타일셋 이미지 범위를 벗어납니다.")
+
+    min_col = min(cell["col"] for cell in cells)
+    min_row = min(cell["row"] for cell in cells)
+    width_tiles = max(cell["col"] for cell in cells) - min_col + 1
+    height_tiles = max(cell["row"] for cell in cells) - min_row + 1
+    canvas_width = width_tiles * tile_width
+    canvas_height = height_tiles * tile_height
+    if canvas_width * canvas_height > 4096 * 4096:
+        raise ValueError("오브젝트가 너무 큽니다(셀 좌표 범위 초과).")
+    canvas = Image.new("RGBA", (canvas_width, canvas_height), (0, 0, 0, 0))
+    for cell in cells:
+        tile = tileset_image.crop(_tile_rect(cell["tileId"], columns, tile_width, tile_height))
+        canvas.paste(tile, ((cell["col"] - min_col) * tile_width, (cell["row"] - min_row) * tile_height))
+    return canvas, min_col, min_row
+
+
+def patch_tileset_from_object(
+    tileset_image: Image.Image,
+    styled_object: Image.Image,
+    cells: list[dict],
+    columns: int,
+    tile_width: int,
+    tile_height: int,
+) -> Image.Image:
+    """스타일이 적용된 오브젝트 RGBA를 타일별로 잘라 타일셋의 해당 타일 자리에 되써넣는다.
+
+    styled_object는 compose_object_canvas와 같은 크기여야 한다(크기로 검증).
+    알파는 styled_object의 것을 그대로 쓴다 — 알파 보존/침식이 이미 반영된 상태.
+    """
+    tileset_image = tileset_image.convert("RGBA")
+    # compose와 동일한 경계 검증 — 추출 이후 타일셋이 교체되어 작아졌으면 PIL paste가
+    # 조용히 클리핑해 "성공"으로 보이는 무패치가 된다. 명시적으로 실패시킨다(→422).
+    for cell in cells:
+        rect = _tile_rect(cell["tileId"], columns, tile_width, tile_height)
+        if rect[2] > tileset_image.width or rect[3] > tileset_image.height:
+            raise ValueError(f"타일 id {cell['tileId']}가 타일셋 이미지 범위를 벗어납니다.")
+    min_col = min(cell["col"] for cell in cells)
+    min_row = min(cell["row"] for cell in cells)
+    width_tiles = max(cell["col"] for cell in cells) - min_col + 1
+    height_tiles = max(cell["row"] for cell in cells) - min_row + 1
+    expected = (width_tiles * tile_width, height_tiles * tile_height)
+    if styled_object.size != expected:
+        raise ValueError(
+            f"오브젝트 이미지 크기가 맞지 않습니다: {styled_object.size} (기대: {expected})"
+        )
+
+    styled_object = styled_object.convert("RGBA")
+    patched = tileset_image.copy()
+    seen_tile_ids: set[int] = set()
+    for cell in cells:
+        if cell["tileId"] in seen_tile_ids:
+            continue
+        seen_tile_ids.add(cell["tileId"])
+        region = (
+            (cell["col"] - min_col) * tile_width,
+            (cell["row"] - min_row) * tile_height,
+            (cell["col"] - min_col + 1) * tile_width,
+            (cell["row"] - min_row + 1) * tile_height,
+        )
+        patched.paste(styled_object.crop(region), _tile_rect(cell["tileId"], columns, tile_width, tile_height))
+    return patched
+
+
 def stylize_tiles(
     tileset_image: Image.Image,
     cells: list[dict],
@@ -37,29 +117,16 @@ def stylize_tiles(
     alpha_erode: int = 0,
 ) -> tuple[Image.Image, Image.Image]:
     """(오브젝트 미리보기 RGBA, 패치된 타일셋 RGBA)를 반환한다."""
-    tileset_image = tileset_image.convert("RGBA")
+    # 1) 오브젝트 조립(누끼 캔버스).
+    canvas, _min_col, _min_row = compose_object_canvas(
+        tileset_image, cells, columns, tile_width, tile_height
+    )
 
-    for cell in cells:
-        rect = _tile_rect(cell["tileId"], columns, tile_width, tile_height)
-        if rect[2] > tileset_image.width or rect[3] > tileset_image.height:
-            raise ValueError(f"타일 id {cell['tileId']}가 타일셋 이미지 범위를 벗어납니다.")
-
-    # 1) 오브젝트 조립: 셀들을 맵 배치 그대로 투명 캔버스에 붙인다.
-    min_col = min(cell["col"] for cell in cells)
-    min_row = min(cell["row"] for cell in cells)
-    width_tiles = max(cell["col"] for cell in cells) - min_col + 1
-    height_tiles = max(cell["row"] for cell in cells) - min_row + 1
-    canvas_width = width_tiles * tile_width
-    canvas_height = height_tiles * tile_height
     # 업스케일 배율을 먼저 계산해 작업 면적에 상한을 둔다 — 멀리 떨어진 셀 두 개만으로
     # bbox가 거대해지고(셀 극값 기준) 거기에 업스케일까지 곱해지면 메모리가 폭주한다.
-    scale = max(1, round(work_size / min(canvas_width, canvas_height))) if work_size > 0 else 1
-    if canvas_width * canvas_height * scale * scale > 4096 * 4096:
+    scale = max(1, round(work_size / min(canvas.size))) if work_size > 0 else 1
+    if canvas.width * canvas.height * scale * scale > 4096 * 4096:
         raise ValueError("변환 대상이 너무 큽니다(셀 좌표 범위 초과). 더 작은 오브젝트를 선택하세요.")
-    canvas = Image.new("RGBA", (canvas_width, canvas_height), (0, 0, 0, 0))
-    for cell in cells:
-        tile = tileset_image.crop(_tile_rect(cell["tileId"], columns, tile_width, tile_height))
-        canvas.paste(tile, ((cell["col"] - min_col) * tile_width, (cell["row"] - min_row) * tile_height))
 
     # 2) 정수배 업스케일 + 중성 회색 배경 합성(투명부가 검정으로 새는 halo 방지) 후 변환.
     work = (
@@ -85,22 +152,9 @@ def stylize_tiles(
     preview = result_rgb.convert("RGBA")
     preview.putalpha(object_alpha)
 
-    # 4) 타일셋 패치: 타일 id별로 한 번씩(첫 등장 셀 기준), 변환 RGB + 그 칸의 알파.
-    patched = tileset_image.copy()
-    seen_tile_ids: set[int] = set()
-    for cell in cells:
-        if cell["tileId"] in seen_tile_ids:
-            continue
-        seen_tile_ids.add(cell["tileId"])
-        source_rect = _tile_rect(cell["tileId"], columns, tile_width, tile_height)
-        region = (
-            (cell["col"] - min_col) * tile_width,
-            (cell["row"] - min_row) * tile_height,
-            (cell["col"] - min_col + 1) * tile_width,
-            (cell["row"] - min_row + 1) * tile_height,
-        )
-        new_tile = result_rgb.crop(region).convert("RGBA")
-        new_tile.putalpha(object_alpha.crop(region))
-        patched.paste(new_tile, source_rect)
+    # 4) 타일셋 패치: 미리보기(RGBA)를 타일별로 잘라 되써넣는다.
+    patched = patch_tileset_from_object(
+        tileset_image, preview, cells, columns, tile_width, tile_height
+    )
 
     return preview, patched

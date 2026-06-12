@@ -2,12 +2,14 @@ import { CURRENT_GAME_PROJECT_PROFILE } from './currentGameProjectSnapshot'
 import { detectAdapter, type GameAdapter, type GameEntity } from './gameAdapter'
 import { extractTmxLayerNames, extractTmxObjects, type TmxObject } from './tmxObjects'
 import {
+  extractTmxObjectCellsBatch,
   extractTmxObjectCellsInRect,
   extractTmxTileClusterDetails,
   extractTmxTileClusters,
   type TmxTileCluster,
   type TmxTileClusterCell,
-  type TmxTileClusterDetail
+  type TmxTileClusterDetail,
+  type TmxTileExcludeRect
 } from './tmxTileEntities'
 import type { GameStructureProfile } from './gameStructureProfile'
 
@@ -204,6 +206,68 @@ export const findObjectKindCells = (
         }))
     }
   )
+}
+
+// 맵 인식 시점의 일괄 수집: 엔티티마다 TMX를 재파싱하면(엔티티 40개 × xmldom 파싱) 메인
+// 스레드가 수백 ms 멈춘다. 군집 상세 1회 + 영역 오브젝트 배치 1회 — 파싱 2회로 끝낸다.
+export const findAllStyleTargetCells = (
+  mapFile: GameFile,
+  files: GameFile[],
+  objects: TmxObject[],
+  entities: GameEntity[]
+): Map<string, StyleTargetCells> => {
+  const out = new Map<string, StyleTargetCells>()
+  const options = { resolveTilesetText: createTilesetResolver(files, mapFile.path) }
+  const areaRects: TmxTileExcludeRect[] = objects
+    .filter((object) => object.width > 0 && object.height > 0)
+    .map((object) => ({
+      x: object.x,
+      y: object.y,
+      width: object.width,
+      height: object.height,
+      kind: object.type
+    }))
+
+  // 군집 엔티티: 한 번의 상세 추출 + buildTileClusterEntities와 동일한 id 재현.
+  const seen = new Map<string, number>()
+  for (const cluster of extractTmxTileClusterDetails(mapFile.text, {
+    ...options,
+    excludeRects: areaRects
+  })) {
+    const base = `tile:${cluster.kind}:${cluster.tileX},${cluster.tileY}`
+    const duplicates = seen.get(base) ?? 0
+    seen.set(base, duplicates + 1)
+    out.set(duplicates === 0 ? base : `${base}#${duplicates}`, cluster)
+  }
+
+  // 영역 오브젝트 엔티티: 사각형들을 모아 배치로 수집.
+  const matched = entities
+    .filter((entity) => !isTileClusterEntity(entity))
+    .map((entity) => {
+      const object =
+        objects.find((candidate) => candidate.name === entity.id) ??
+        objects.find((candidate) => `${entity.kind}-${candidate.id}` === entity.id)
+      return object && object.width > 0 && object.height > 0 ? { entity, object } : undefined
+    })
+    .filter(
+      (pair): pair is { entity: GameEntity; object: TmxObject } => pair !== undefined
+    )
+  const results = extractTmxObjectCellsBatch(
+    mapFile.text,
+    matched.map(({ entity, object }) => ({
+      rect: object,
+      objectKind: object.type || entity.kind
+    })),
+    options,
+    areaRects
+  )
+  matched.forEach(({ entity }, index) => {
+    const result = results[index]
+    if (result) {
+      out.set(entity.id, result)
+    }
+  })
+  return out
 }
 
 // 부분 스타일 변환용: 군집 엔티티 id로 상세 군집(셀·타일 id 목록)을 되찾는다.

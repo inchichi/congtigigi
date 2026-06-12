@@ -427,6 +427,33 @@ export const extractTmxObjectCellsInRect = (
   if (!grid) {
     return undefined
   }
+  return collectObjectCellsFromGrid(grid, rect, context)
+}
+
+// 일괄 수집: 맵 인식 시점의 자동 추출처럼 한 맵의 여러 영역 오브젝트를 다룰 때,
+// TMX 파싱(xmldom — 오브젝트당 수 ms)을 요청 수만큼 반복하지 않고 1회로 끝낸다.
+export const extractTmxObjectCellsBatch = (
+  mapText: string,
+  requests: Array<{ rect: TmxTileClusterRect; objectKind?: string }>,
+  options: ExtractTmxTileClustersOptions = {},
+  objectRects: TmxTileExcludeRect[] = []
+): Array<TmxObjectCellsResult | undefined> => {
+  const grid = parseTileKindGrid(mapText, options)
+  return requests.map((request) =>
+    grid
+      ? collectObjectCellsFromGrid(grid, request.rect, {
+          objectKind: request.objectKind,
+          objectRects
+        })
+      : undefined
+  )
+}
+
+const collectObjectCellsFromGrid = (
+  grid: TileKindGrid,
+  rect: TmxTileClusterRect,
+  context: TmxObjectCellsContext
+): TmxObjectCellsResult => {
   const centerOf = (index: number): { x: number; y: number } => ({
     x: ((index % grid.width) + 0.5) * grid.tileWidth,
     y: (Math.floor(index / grid.width) + 0.5) * grid.tileHeight
