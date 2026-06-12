@@ -470,7 +470,8 @@ export const createEditorApp = ({
 
   const previewBody = el('div', 'flex-1 relative min-h-0')
   const iframe = el('iframe', 'absolute inset-0 w-full h-full border-0 bg-black') as HTMLIFrameElement
-  iframe.src = gamePreviewUrl
+  // src는 여기서 넣지 않는다 — 시작 화면에서 프로젝트를 고르기 전엔 게임을 로드하지 않는다
+  // (자동 실행되면 시작 화면 뒤에서 샘플 게임이 돌며 소리·CPU를 쓴다). showRpgPreview가 로드한다.
   iframe.title = '게임 프리뷰'
   // 실제로 로드가 끝난 URL. 모드 전환 함수들이 "이미 로드됨"과 "로딩 중"을 구분하는 데 쓴다
   // (연결 표시등을 로드 전에 초록으로 만들지 않기 위해 — 초록 = 진짜 로드됨 의미 보존).
@@ -901,7 +902,75 @@ export const createEditorApp = ({
     }
   })
 
-  root.append(header, body, settingsBackdrop, styleTransfer.backdrop)
+  // ---------- 시작 화면: 프로젝트 선택 ----------
+  // 에디터는 특정 게임에 묶이지 않는다 — 첫 화면에서 어떤 프로젝트를 편집할지 고른 뒤에야
+  // 게임 로드(프리뷰 실행 포함)를 시작한다. 내장 샘플 게임도 자동 선택이 아니라 선택지 중 하나.
+  const landingBackdrop = el('div', 'fixed inset-0 z-40 bg-zinc-950 flex items-center justify-center p-6')
+  const landingPanel = el('div', 'w-full max-w-md flex flex-col gap-6')
+  const landingBrand = el('div', 'flex flex-col gap-1.5')
+  const landingBrandRow = el('div', 'flex items-center gap-2')
+  landingBrandRow.append(
+    el('span', 'w-2.5 h-2.5 rounded-full bg-indigo-500'),
+    el('span', 'text-lg font-semibold tracking-tight', 'Scenario Editor')
+  )
+  landingBrand.append(
+    landingBrandRow,
+    el('div', 'text-sm text-zinc-400', '편집할 게임 프로젝트를 선택하세요.')
+  )
+
+  const LANDING_CARD =
+    'w-full text-left rounded-2xl border border-white/10 bg-white/[0.03] p-5 flex flex-col gap-1 transition hover:bg-white/[0.06] hover:border-indigo-500/40 disabled:opacity-50 disabled:cursor-not-allowed'
+  const landingOpenButton = el('button', LANDING_CARD) as HTMLButtonElement
+  landingOpenButton.type = 'button'
+  landingOpenButton.append(
+    el('div', 'text-sm font-semibold text-zinc-100', '📂 게임 폴더 열기'),
+    el('div', 'text-xs text-zinc-400 leading-relaxed', '내 컴퓨터의 게임 프로젝트 폴더(.tmx 맵 포함)를 선택해 엽니다.')
+  )
+  const landingSampleButton = el('button', LANDING_CARD) as HTMLButtonElement
+  landingSampleButton.type = 'button'
+  landingSampleButton.append(
+    el('div', 'text-sm font-semibold text-zinc-100', '🎮 샘플 게임으로 시작'),
+    el('div', 'text-xs text-zinc-400 leading-relaxed', '내장 샘플(My Sample RPG)을 열어 라이브 프리뷰와 함께 에디터를 사용합니다.')
+  )
+  // 폴더 열기 실패 사유(맵 없음·권한 등)를 시작 화면 안에서 바로 보여준다 — 뒤의 상태줄은 가려져 안 보인다.
+  const landingError = el('div', 'text-xs text-amber-300 min-h-[1rem]')
+  landingPanel.append(landingBrand, landingOpenButton, landingSampleButton, landingError)
+  landingBackdrop.append(landingPanel)
+
+  // 선택이 끝나면 시작 화면을 닫고 편집을 시작한다(프리뷰·브리지 동기화 + 데모 흐름 포커스).
+  const startEditing = (): void => {
+    landingBackdrop.style.display = 'none'
+    syncPreviewToGame()
+    syncBridgeForGame()
+    // 데모 흐름: 키가 없으면 키 입력에, 있으면 바로 프롬프트에 포커스.
+    ;(apiKey.trim().length > 0 ? promptInput : apiKeyInput).focus()
+  }
+
+  landingSampleButton.addEventListener('click', () => {
+    // 샘플 게임 상태는 부팅 때 이미 로드돼 있다(트리·프로필) — 프리뷰 실행만 시작하면 된다.
+    startEditing()
+  })
+  landingOpenButton.addEventListener('click', () => {
+    void (async () => {
+      landingOpenButton.disabled = true
+      landingSampleButton.disabled = true
+      const statusBefore = status.textContent
+      const opened = await runOpenProject()
+      landingOpenButton.disabled = false
+      landingSampleButton.disabled = false
+      if (opened) {
+        // runOpenProject가 프리뷰·브리지 동기화까지 끝냈다 — 화면만 닫고 포커스를 준다.
+        landingBackdrop.style.display = 'none'
+        ;(apiKey.trim().length > 0 ? promptInput : apiKeyInput).focus()
+        return
+      }
+      // 실패 사유는 상태줄에 적힌다. 단순 취소(메시지 무변화)면 조용히 시작 화면에 머문다.
+      landingError.textContent =
+        status.textContent !== statusBefore ? (status.textContent ?? '') : ''
+    })()
+  })
+
+  root.append(header, body, settingsBackdrop, styleTransfer.backdrop, landingBackdrop)
   mountElement.append(root)
 
   // ---------- behavior ----------
@@ -1651,14 +1720,15 @@ export const createEditorApp = ({
     setStatus(`내보냄: ${fileName}`)
   }
 
-  const runOpenProject = async (): Promise<void> => {
+  // 프로젝트가 실제로 바뀌었으면 true — 시작 화면이 "성공 시에만 닫기" 판단에 쓴다.
+  const runOpenProject = async (): Promise<boolean> => {
     try {
       const files = await openProjectDirectory()
       const loaded = loadGame(files)
 
       if (loaded.maps.length === 0) {
         setStatus('선택한 폴더에서 .tmx 맵을 찾지 못했습니다.')
-        return
+        return false
       }
 
       const previousFiles = currentFiles
@@ -1696,11 +1766,13 @@ export const createEditorApp = ({
       if (apiKey.trim().length > 0) {
         void runAnalyze()
       }
+      return true
     } catch (error) {
       if (error instanceof DOMException && error.name === 'AbortError') {
-        return
+        return false
       }
       setStatus(error instanceof Error ? error.message : String(error))
+      return false
     }
   }
 
@@ -1926,11 +1998,9 @@ export const createEditorApp = ({
   renderTree()
   renderAnalysis()
   render()
-  syncPreviewToGame()
-  syncBridgeForGame()
+  // 프리뷰·브리지 동기화와 포커스는 여기서 하지 않는다 — 시작 화면(프로젝트 선택)에서 선택한
+  // 뒤에 startEditing/runOpenProject가 수행한다. 선택 전엔 게임이 자동 실행되지 않는다.
   if (game.parseErrors.length > 0) {
     setStatus(`기본 맵 일부를 읽지 못했습니다${parseErrorNote()}`)
   }
-  // 데모 흐름: 키가 없으면 키 입력에, 있으면 바로 프롬프트에 포커스.
-  ;(apiKey.trim().length > 0 ? promptInput : apiKeyInput).focus()
 }
