@@ -1,7 +1,14 @@
 import { CURRENT_GAME_PROJECT_PROFILE } from './currentGameProjectSnapshot'
 import { detectAdapter, type GameAdapter, type GameEntity } from './gameAdapter'
 import { extractTmxLayerNames, extractTmxObjects, type TmxObject } from './tmxObjects'
-import { extractTmxTileClusters, type TmxTileCluster } from './tmxTileEntities'
+import {
+  extractTmxObjectCellsInRect,
+  extractTmxTileClusterDetails,
+  extractTmxTileClusters,
+  type TmxTileCluster,
+  type TmxTileClusterCell,
+  type TmxTileClusterDetail
+} from './tmxTileEntities'
 import type { GameStructureProfile } from './gameStructureProfile'
 
 export type GameFile = {
@@ -78,27 +85,38 @@ export const loadGame = (files: GameFile[]): LoadedGame => {
   return { adapter, maps, profile, parseErrors }
 }
 
-// 맵의 타일셋 참조("../tilesets/town-32.tsx")를 맵 파일 경로 기준으로 풀어, 열린 파일들에서 찾는다.
+// 파일 기준 상대 참조("../tilesets/town-32.tsx")를 그 파일의 경로 기준으로 푼다.
+export const resolveRelativePath = (fromFilePath: string, source: string): string => {
+  const segments = fromFilePath.split('/').slice(0, -1)
+  for (const part of source.split('/')) {
+    if (part === '..') {
+      segments.pop()
+    } else if (part !== '.' && part !== '') {
+      segments.push(part)
+    }
+  }
+  return segments.join('/')
+}
+
+// 맵의 타일셋 참조를 맵 파일 경로 기준으로 풀어, 열린 파일들에서 찾는다.
 // 폴더 업로드마다 path 형태가 달라서(절대/상대 혼재) 정규화한 suffix 일치 → 파일명 일치 순으로 찾는다.
+export const findFileByRelativeSource = (
+  files: GameFile[],
+  fromFilePath: string,
+  source: string
+): GameFile | undefined => {
+  const resolved = resolveRelativePath(fromFilePath, source)
+  const baseName = source.split('/').pop() ?? source
+  const bySuffix = files.find(
+    (file) => file.path === resolved || file.path.endsWith(`/${resolved}`)
+  )
+  return bySuffix ?? files.find((file) => file.name === baseName)
+}
+
 const createTilesetResolver =
   (files: GameFile[], mapPath: string) =>
-  (source: string): string | undefined => {
-    const mapDir = mapPath.split('/').slice(0, -1)
-    const segments = [...mapDir]
-    for (const part of source.split('/')) {
-      if (part === '..') {
-        segments.pop()
-      } else if (part !== '.' && part !== '') {
-        segments.push(part)
-      }
-    }
-    const resolved = segments.join('/')
-    const baseName = source.split('/').pop() ?? source
-    const bySuffix = files.find(
-      (file) => file.path === resolved || file.path.endsWith(`/${resolved}`)
-    )
-    return (bySuffix ?? files.find((file) => file.name === baseName))?.text
-  }
+  (source: string): string | undefined =>
+    findFileByRelativeSource(files, mapPath, source)?.text
 
 // 타일 군집에서 만들어진 보기 전용 엔티티인지. 트리에는 보여주되, 생성 대상 선택·LLM 분석
 // 폴백 판단("어댑터가 아무것도 못 찾은 게임인가")에서는 제외해야 한다.
@@ -145,3 +163,78 @@ const tileClusterName = (cluster: TmxTileCluster): string =>
   cluster.widthTiles > 1 || cluster.heightTiles > 1
     ? `(${cluster.tileX}, ${cluster.tileY}) · ${cluster.widthTiles}×${cluster.heightTiles}`
     : `(${cluster.tileX}, ${cluster.tileY})`
+
+// 부분 스타일 변환용 셀 묶음 — 군집 엔티티와 영역 오브젝트 엔티티가 같은 형태로 돌려준다.
+export type StyleTargetCells = {
+  cells: TmxTileClusterCell[]
+  tilesetSource?: string
+  sharedOutsideCells: number
+}
+
+// 영역 오브젝트(이름 있는 사각형 — 건물·분수·나무 장식 등) 엔티티의 부분 변환 셀을 모은다.
+// 엔티티 id는 rpgAdapter 규칙(object.name, 없으면 `${kind}-${object.id}`)을 따라 역매칭한다.
+export const findObjectKindCells = (
+  mapFile: GameFile,
+  files: GameFile[],
+  objects: TmxObject[],
+  entity: GameEntity
+): StyleTargetCells | undefined => {
+  const object =
+    objects.find((candidate) => candidate.name === entity.id) ??
+    objects.find((candidate) => `${entity.kind}-${candidate.id}` === entity.id)
+  if (!object || object.width <= 0 || object.height <= 0) {
+    return undefined
+  }
+  // objectKind/objectRects: 사각형이 이웃 구조물과 겹칠 때 종류가 다른 공유 타일(예: 나무
+  // 사각형에 걸친 건물 창문 — 마을 전체 창문과 공유)이 수집되는 오염을 막기 위한 문맥.
+  return extractTmxObjectCellsInRect(
+    mapFile.text,
+    object,
+    { resolveTilesetText: createTilesetResolver(files, mapFile.path) },
+    {
+      objectKind: object.type || entity.kind,
+      objectRects: objects
+        .filter((candidate) => candidate.width > 0 && candidate.height > 0)
+        .map((candidate) => ({
+          x: candidate.x,
+          y: candidate.y,
+          width: candidate.width,
+          height: candidate.height,
+          kind: candidate.type
+        }))
+    }
+  )
+}
+
+// 부분 스타일 변환용: 군집 엔티티 id로 상세 군집(셀·타일 id 목록)을 되찾는다.
+// buildTileClusterEntities와 같은 입력·같은 옵션으로 다시 추출하면 군집 순서가 결정적으로
+// 일치하므로, id 생성 규칙(좌표 base + 일련번호)을 그대로 재현해 짝을 맞춘다.
+export const findTileClusterDetail = (
+  mapFile: GameFile,
+  files: GameFile[],
+  objects: TmxObject[],
+  entityId: string
+): TmxTileClusterDetail | undefined => {
+  const seen = new Map<string, number>()
+  for (const cluster of extractTmxTileClusterDetails(mapFile.text, {
+    resolveTilesetText: createTilesetResolver(files, mapFile.path),
+    excludeRects: objects
+      .filter((object) => object.width > 0 && object.height > 0)
+      .map((object) => ({
+        x: object.x,
+        y: object.y,
+        width: object.width,
+        height: object.height,
+        kind: object.type
+      }))
+  })) {
+    const base = `tile:${cluster.kind}:${cluster.tileX},${cluster.tileY}`
+    const duplicates = seen.get(base) ?? 0
+    seen.set(base, duplicates + 1)
+    const id = duplicates === 0 ? base : `${base}#${duplicates}`
+    if (id === entityId) {
+      return cluster
+    }
+  }
+  return undefined
+}

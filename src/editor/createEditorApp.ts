@@ -1,12 +1,17 @@
 import { openProjectDirectory } from './openProjectDirectory'
 import {
   buildTileClusterEntities,
+  findFileByRelativeSource,
+  findObjectKindCells,
+  findTileClusterDetail,
   isTileClusterEntity,
   loadGame,
+  resolveRelativePath,
   type GameFile,
   type LoadedGame,
   type LoadedGameMap
 } from './loadGame'
+import { extractTmxTilesetImageInfo } from './tmxTileEntities'
 import { analyzeGame, type GameAnalysis } from './analyzeGame'
 import { extractTmxLayerNames, extractTmxObjects, type TmxObject } from './tmxObjects'
 import { readLocalStorage, writeLocalStorage } from './safeStorage'
@@ -28,6 +33,10 @@ import {
   type EventEvaluationVerdict
 } from './eventEvaluator'
 import { buildSessionMetrics, type SessionGenerationTally } from './sessionMetrics'
+import {
+  createStyleTransferModal,
+  type StyleTransferMapObject
+} from './createStyleTransferModal'
 import type { GameEntity, GenerationResult } from './gameAdapter'
 
 // 하드코딩 어댑터가 엔티티를 못 찾은 미지의 게임을, LLM 분석이 찾은 editable 그룹으로 채운다.
@@ -138,6 +147,10 @@ const groupKindOf = (kind: string): string => {
   return normalized === 'enemy' ? 'monster' : normalized
 }
 
+// 부분 스타일 변환 대상에서 제외할 종류: 캐릭터·표지판·포털은 점 객체(스프라이트)라
+// 타일셋 패치 방식의 대상이 아니다. NPC는 LLM 생성 대상으로 이미 클릭이 점유돼 있다.
+const STYLE_TARGET_EXCLUDED_KINDS = new Set(['npc', 'monster', 'sign', 'portal'])
+
 const el = <K extends keyof HTMLElementTagNameMap>(
   tag: K,
   className: string,
@@ -232,8 +245,43 @@ export const createEditorApp = ({
   connection.append(connectionDot, connectionLabel)
   const settingsButton = el('button', 'rounded-lg px-2.5 py-1 text-sm bg-white/[0.04] border border-white/10 text-zinc-300 transition hover:bg-white/[0.08] hover:text-zinc-100', '⚙ 설정') as HTMLButtonElement
   settingsButton.type = 'button'
+  // 음소거 토글 — 소리는 게임(iframe)이 내므로 postMessage로 즉시 끄고, 게임 리로드/에디터
+  // 재시작에도 유지되도록 게임의 오디오 설정(localStorage, 같은 origin 공유)에 함께 기록한다.
+  const AUDIO_SETTINGS_KEY = 'my-sample-rpg:audio-settings'
+  const readStoredMuted = (): boolean => {
+    try {
+      const settings = JSON.parse(readLocalStorage(AUDIO_SETTINGS_KEY) ?? '{}') as { isMuted?: unknown }
+      return settings.isMuted === true
+    } catch {
+      return false
+    }
+  }
+  let isGameMuted = readStoredMuted()
+  const muteButton = el('button', 'rounded-lg px-2.5 py-1 text-sm bg-white/[0.04] border border-white/10 text-zinc-300 transition hover:bg-white/[0.08] hover:text-zinc-100') as HTMLButtonElement
+  muteButton.type = 'button'
+  const renderMuteButton = (): void => {
+    muteButton.textContent = isGameMuted ? '🔇' : '🔊'
+    muteButton.title = isGameMuted ? '음소거 해제' : '게임 소리 끄기'
+    muteButton.setAttribute('aria-pressed', String(isGameMuted))
+  }
+  renderMuteButton()
+  muteButton.addEventListener('click', () => {
+    isGameMuted = !isGameMuted
+    let settings: Record<string, unknown> = {}
+    try {
+      settings = JSON.parse(readLocalStorage(AUDIO_SETTINGS_KEY) ?? '{}') as Record<string, unknown>
+    } catch {
+      settings = {}
+    }
+    writeLocalStorage(AUDIO_SETTINGS_KEY, JSON.stringify({ ...settings, isMuted: isGameMuted }))
+    iframe.contentWindow?.postMessage({ type: 'editor:set-mute', isMuted: isGameMuted }, '*')
+    renderMuteButton()
+  })
+
+  // AdaIN 스타일 트랜스퍼 — 로컬 Python 서비스(/api/style 프록시)로 이미지를 변환하는 독립 모달.
+  const styleTransfer = createStyleTransferModal()
   const headerRight = el('div', 'flex items-center gap-3')
-  headerRight.append(settingsButton, connection)
+  headerRight.append(muteButton, styleTransfer.openButton, settingsButton, connection)
   header.append(brand, headerRight)
 
   // LLM 챗 스타일 배치: 가운데가 라이브 게임(위 가득) + 프롬프트(아래), 오른쪽이 생성 결과.
@@ -461,7 +509,7 @@ export const createEditorApp = ({
     }
   })
 
-  root.append(header, body, settingsBackdrop)
+  root.append(header, body, settingsBackdrop, styleTransfer.backdrop)
   mountElement.append(root)
 
   // ---------- behavior ----------
@@ -551,6 +599,52 @@ export const createEditorApp = ({
       isAnalyzing = false
       analyzeButton.disabled = false
       analyzeButton.textContent = '🔍 LLM 게임 분석'
+    }
+  }
+
+  // 트리에서 클릭한 타일 군집(나무·분수·가로등 등)을 부분 스타일 변환 대상으로 변환한다.
+  // 셀·타일 id를 되찾고, 타일셋 .tsx에서 이미지 경로·격자 정보를 읽는다. 실패하면 undefined —
+  // 호출부가 상태줄로 알린다. 서비스는 src/assets 안만 다루므로 다른 폴더로 연 게임은 대상 외.
+  const buildStyleObjectTarget = (
+    map: LoadedGameMap,
+    entity: GameEntity
+  ): StyleTransferMapObject | undefined => {
+    const mapFile = currentFiles.find((file) => file.path === map.file)
+    if (!mapFile) {
+      return undefined
+    }
+    let objects: TmxObject[] = []
+    try {
+      objects = extractTmxObjects(mapFile.text)
+    } catch {
+      return undefined
+    }
+    // 타일 군집(좌표 id)은 군집 재추출로, 영역 오브젝트(건물·분수·나무 장식 등)는
+    // 사각형 안의 같은 종류 타일 수집으로 셀 목록을 얻는다.
+    const detail = isTileClusterEntity(entity)
+      ? findTileClusterDetail(mapFile, currentFiles, objects, entity.id)
+      : findObjectKindCells(mapFile, currentFiles, objects, entity)
+    if (!detail || detail.cells.length === 0 || detail.tilesetSource === undefined) {
+      return undefined
+    }
+    const tsxFile = findFileByRelativeSource(currentFiles, mapFile.path, detail.tilesetSource)
+    const info = tsxFile ? extractTmxTilesetImageInfo(tsxFile.text) : undefined
+    if (!tsxFile || !info) {
+      return undefined
+    }
+    const imagePath = resolveRelativePath(tsxFile.path, info.imageSource)
+    if (!imagePath.startsWith('src/assets/')) {
+      return undefined
+    }
+    const kind = groupKindOf(entity.kind)
+    return {
+      label: `${KIND_ICON[kind] ?? '•'} ${entity.name}`,
+      tilesetImagePath: imagePath,
+      tileWidth: info.tileWidth,
+      tileHeight: info.tileHeight,
+      columns: info.columns,
+      cells: detail.cells,
+      sharedOutsideCells: detail.sharedOutsideCells
     }
   }
 
@@ -674,8 +768,32 @@ export const createEditorApp = ({
             })
             entityButtons.push({ entity, node })
             body.append(node)
+          } else if (
+            game.adapter.id === 'my-sample-rpg' &&
+            !STYLE_TARGET_EXCLUDED_KINDS.has(groupKindOf(entity.kind))
+          ) {
+            // 타일 구조물·장식 오브젝트: LLM 생성 대상은 아니지만, 클릭하면 그 오브젝트만 스타일 변환한다.
+            const node = el(
+              'button',
+              'flex items-center gap-1 text-left rounded-lg px-2.5 py-2 text-sm text-zinc-400 transition hover:bg-white/[0.06] hover:text-zinc-200'
+            ) as HTMLButtonElement
+            node.type = 'button'
+            node.title = '클릭하면 이 오브젝트를 스타일 변환합니다 (같은 타일을 쓰는 다른 곳도 함께 바뀔 수 있습니다)'
+            node.append(
+              el('span', 'truncate', entity.name),
+              el('span', 'ml-auto shrink-0 text-[10px]', '🎨')
+            )
+            node.addEventListener('click', () => {
+              const target = buildStyleObjectTarget(map, entity)
+              if (target) {
+                styleTransfer.openForMapObject(target)
+              } else {
+                setStatus('이 오브젝트의 타일 정보를 읽지 못해 스타일 변환을 열 수 없습니다.')
+              }
+            })
+            body.append(node)
           } else {
-            // 몬스터·표지판·포털·타일 구조물은 맵에 있음을 보여주되(보기 전용), 생성 대상은 아니다.
+            // 몬스터·표지판·포털(및 다른 게임의 구조물)은 맵에 있음을 보여주되(보기 전용), 생성 대상은 아니다.
             const row = el('div', 'truncate rounded-lg px-2.5 py-2 text-sm text-zinc-400', entity.name)
             body.append(row)
           }

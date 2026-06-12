@@ -12,3 +12,12 @@
 
 - `npm run test:run`
 - `npm run build`
+
+## 스타일 트랜스퍼 (AdaIN)
+
+에디터(`/editor.html`)의 🎨 스타일 변환 기능은 로컬 Python 서비스가 필요하다.
+
+1. `cd style-service && pip install -r requirements.txt` (최초 1회)
+2. `python server.py`
+
+자세한 구조·설정은 [docs/style-transfer.md](docs/style-transfer.md) 참고.
