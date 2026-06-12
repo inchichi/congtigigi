@@ -1,8 +1,13 @@
 import { openProjectDirectory } from './openProjectDirectory'
 import {
   buildTileClusterEntities,
+  findAllStyleTargetCells,
+  findFileByRelativeSource,
+  findObjectKindCells,
+  findTileClusterDetail,
   isTileClusterEntity,
   loadGame,
+  resolveRelativePath,
   type GameFile,
   type LoadedGame,
   type LoadedGameMap
@@ -13,6 +18,7 @@ import {
   type TiledMapPreview
 } from './createTiledMapPreview'
 import { createGameBridge, type BridgeStatus } from './gameBridge'
+import { extractTmxTilesetImageInfo } from './tmxTileEntities'
 import { analyzeGame, type GameAnalysis } from './analyzeGame'
 import { extractTmxLayerNames, extractTmxObjects, type TmxObject } from './tmxObjects'
 import { readLocalStorage, writeLocalStorage } from './safeStorage'
@@ -34,6 +40,10 @@ import {
   type EventEvaluationVerdict
 } from './eventEvaluator'
 import { buildSessionMetrics, type SessionGenerationTally } from './sessionMetrics'
+import {
+  createStyleTransferModal,
+  type StyleTransferMapObject
+} from './createStyleTransferModal'
 import type { GameEntity, GenerationResult } from './gameAdapter'
 
 // 하드코딩 어댑터가 엔티티를 못 찾은 미지의 게임을, LLM 분석이 찾은 editable 그룹으로 채운다.
@@ -149,6 +159,10 @@ const groupKindOf = (kind: string): string => {
   return normalized === 'enemy' ? 'monster' : normalized
 }
 
+// 부분 스타일 변환 대상에서 제외할 종류: 캐릭터·표지판·포털은 점 객체(스프라이트)라
+// 타일셋 패치 방식의 대상이 아니다. NPC는 LLM 생성 대상으로 이미 클릭이 점유돼 있다.
+const STYLE_TARGET_EXCLUDED_KINDS = new Set(['npc', 'monster', 'sign', 'portal'])
+
 const el = <K extends keyof HTMLElementTagNameMap>(
   tag: K,
   className: string,
@@ -255,8 +269,43 @@ export const createEditorApp = ({
   connection.append(connectionDot, connectionLabel)
   const settingsButton = el('button', 'rounded-lg px-2.5 py-1 text-sm bg-white/[0.04] border border-white/10 text-zinc-300 transition hover:bg-white/[0.08] hover:text-zinc-100', '⚙ 설정') as HTMLButtonElement
   settingsButton.type = 'button'
+  // 음소거 토글 — 소리는 게임(iframe)이 내므로 postMessage로 즉시 끄고, 게임 리로드/에디터
+  // 재시작에도 유지되도록 게임의 오디오 설정(localStorage, 같은 origin 공유)에 함께 기록한다.
+  const AUDIO_SETTINGS_KEY = 'my-sample-rpg:audio-settings'
+  const readStoredMuted = (): boolean => {
+    try {
+      const settings = JSON.parse(readLocalStorage(AUDIO_SETTINGS_KEY) ?? '{}') as { isMuted?: unknown }
+      return settings.isMuted === true
+    } catch {
+      return false
+    }
+  }
+  let isGameMuted = readStoredMuted()
+  const muteButton = el('button', 'rounded-lg px-2.5 py-1 text-sm bg-white/[0.04] border border-white/10 text-zinc-300 transition hover:bg-white/[0.08] hover:text-zinc-100') as HTMLButtonElement
+  muteButton.type = 'button'
+  const renderMuteButton = (): void => {
+    muteButton.textContent = isGameMuted ? '🔇' : '🔊'
+    muteButton.title = isGameMuted ? '음소거 해제' : '게임 소리 끄기'
+    muteButton.setAttribute('aria-pressed', String(isGameMuted))
+  }
+  renderMuteButton()
+  muteButton.addEventListener('click', () => {
+    isGameMuted = !isGameMuted
+    let settings: Record<string, unknown> = {}
+    try {
+      settings = JSON.parse(readLocalStorage(AUDIO_SETTINGS_KEY) ?? '{}') as Record<string, unknown>
+    } catch {
+      settings = {}
+    }
+    writeLocalStorage(AUDIO_SETTINGS_KEY, JSON.stringify({ ...settings, isMuted: isGameMuted }))
+    iframe.contentWindow?.postMessage({ type: 'editor:set-mute', isMuted: isGameMuted }, '*')
+    renderMuteButton()
+  })
+
+  // AdaIN 스타일 트랜스퍼 — 로컬 Python 서비스(/api/style 프록시)로 이미지를 변환하는 독립 모달.
+  const styleTransfer = createStyleTransferModal()
   const headerRight = el('div', 'flex items-center gap-3')
-  headerRight.append(settingsButton, connection)
+  headerRight.append(muteButton, styleTransfer.openButton, settingsButton, connection)
   header.append(brand, headerRight)
 
   // LLM 챗 스타일 배치: 가운데가 라이브 게임(위 가득) + 프롬프트(아래), 오른쪽이 생성 결과.
@@ -699,6 +748,12 @@ export const createEditorApp = ({
 
   // 게임이 바뀔 때(열기/복귀) 프리뷰를 그 게임에 맞게 동기화한다.
   const syncPreviewToGame = (): void => {
+    // 음소거·스타일 변환은 내 게임(rpg)에만 배선돼 있다 — 'editor:set-mute' 핸들러도, 스타일
+    // 서비스의 대상(src/assets)도 my-sample-rpg뿐이라, 다른 게임을 보는 동안 누르면 화면의
+    // 게임이 아니라 안 보이는 rpg의 설정/에셋만 바뀐다. 그 모드에선 헤더에서 숨긴다.
+    // (hidden 속성 대신 인라인 display — 유틸리티 클래스가 [hidden]을 덮어쓰는 사고 방지 관례.)
+    muteButton.style.display = isRpgPreviewMode() ? '' : 'none'
+    styleTransfer.openButton.style.display = isRpgPreviewMode() ? '' : 'none'
     if (isRpgPreviewMode()) {
       showRpgPreview()
       return
@@ -846,7 +901,7 @@ export const createEditorApp = ({
     }
   })
 
-  root.append(header, body, settingsBackdrop)
+  root.append(header, body, settingsBackdrop, styleTransfer.backdrop)
   mountElement.append(root)
 
   // ---------- behavior ----------
@@ -937,6 +992,156 @@ export const createEditorApp = ({
       analyzeButton.disabled = false
       analyzeButton.textContent = '🔍 LLM 게임 분석'
     }
+  }
+
+  // 트리에서 클릭한 타일 군집(나무·분수·가로등 등)을 부분 스타일 변환 대상으로 변환한다.
+  // 셀·타일 id를 되찾고, 타일셋 .tsx에서 이미지 경로·격자 정보를 읽는다. 실패하면 undefined —
+  // 호출부가 상태줄로 알린다. 서비스는 src/assets 안만 다루므로 다른 폴더로 연 게임은 대상 외.
+  const buildStyleObjectTarget = (
+    map: LoadedGameMap,
+    entity: GameEntity
+  ): StyleTransferMapObject | undefined => {
+    const mapFile = currentFiles.find((file) => file.path === map.file)
+    if (!mapFile) {
+      return undefined
+    }
+    let objects: TmxObject[] = []
+    try {
+      objects = extractTmxObjects(mapFile.text)
+    } catch {
+      return undefined
+    }
+    // 타일 군집(좌표 id)은 군집 재추출로, 영역 오브젝트(건물·분수·나무 장식 등)는
+    // 사각형 안의 같은 종류 타일 수집으로 셀 목록을 얻는다.
+    const detail = isTileClusterEntity(entity)
+      ? findTileClusterDetail(mapFile, currentFiles, objects, entity.id)
+      : findObjectKindCells(mapFile, currentFiles, objects, entity)
+    if (!detail || detail.cells.length === 0 || detail.tilesetSource === undefined) {
+      return undefined
+    }
+    const tsxFile = findFileByRelativeSource(currentFiles, mapFile.path, detail.tilesetSource)
+    const info = tsxFile ? extractTmxTilesetImageInfo(tsxFile.text) : undefined
+    if (!tsxFile || !info) {
+      return undefined
+    }
+    const imagePath = resolveRelativePath(tsxFile.path, info.imageSource)
+    if (!imagePath.startsWith('src/assets/')) {
+      return undefined
+    }
+    const kind = groupKindOf(entity.kind)
+    return {
+      label: `${KIND_ICON[kind] ?? '•'} ${entity.name}`,
+      tilesetImagePath: imagePath,
+      tileWidth: info.tileWidth,
+      tileHeight: info.tileHeight,
+      columns: info.columns,
+      cells: detail.cells,
+      sharedOutsideCells: detail.sharedOutsideCells
+    }
+  }
+
+  // 맵 인식 시점의 자동 누끼 추출: 현재 맵의 변환 가능 오브젝트들의 셀 정보를 모아 서비스에
+  // 배치로 보낸다. 서비스가 타일을 조립해 투명 PNG로 저장하고(이미 추출된 키는 스킵),
+  // 모달의 '추출 오브젝트' 탭이 그 목록을 쓴다. 백그라운드 fetch라 에디터 UI는 멈추지 않고,
+  // 서비스가 꺼져 있으면 조용히 무시한다. 성공한 맵은 세션 내 재전송하지 않는다.
+  const extractedMapIds = new Set<string>()
+  const extractMapObjectsInBackground = (mapId: string): void => {
+    if (game.adapter.id !== 'my-sample-rpg' || extractedMapIds.has(mapId)) {
+      return
+    }
+    const map = game.maps.find((candidate) => candidate.id === mapId)
+    if (!map) {
+      return
+    }
+    // 준비(파싱)는 scene-changed 핸들러의 페인트를 막지 않게 타이머로 미루고,
+    // 엔티티별 재파싱 대신 일괄 수집(맵당 파싱 2회)으로 메인 스레드 점유를 줄인다.
+    window.setTimeout(() => {
+      const mapFile = currentFiles.find((file) => file.path === map.file)
+      if (!mapFile) {
+        return
+      }
+      let objects: TmxObject[] = []
+      try {
+        objects = extractTmxObjects(mapFile.text)
+      } catch {
+        return
+      }
+      const styleable = map.entities.filter(
+        (entity) => !STYLE_TARGET_EXCLUDED_KINDS.has(groupKindOf(entity.kind))
+      )
+      const cellsByEntityId = findAllStyleTargetCells(mapFile, currentFiles, objects, styleable)
+
+      // 타일셋 .tsx 해석은 source별로 1회만.
+      type ResolvedTileset = { imagePath: string; tileWidth: number; tileHeight: number; columns: number }
+      const tilesetBySource = new Map<string, ResolvedTileset | undefined>()
+      const resolveTileset = (source: string): ResolvedTileset | undefined => {
+        if (!tilesetBySource.has(source)) {
+          const tsxFile = findFileByRelativeSource(currentFiles, mapFile.path, source)
+          const info = tsxFile ? extractTmxTilesetImageInfo(tsxFile.text) : undefined
+          const imagePath = tsxFile && info ? resolveRelativePath(tsxFile.path, info.imageSource) : undefined
+          tilesetBySource.set(
+            source,
+            info && imagePath && imagePath.startsWith('src/assets/')
+              ? { imagePath, tileWidth: info.tileWidth, tileHeight: info.tileHeight, columns: info.columns }
+              : undefined
+          )
+        }
+        return tilesetBySource.get(source)
+      }
+
+      const targets: Array<StyleTransferMapObject & { id: string }> = []
+      for (const entity of styleable) {
+        const detail = cellsByEntityId.get(entity.id)
+        if (!detail || detail.cells.length === 0 || detail.tilesetSource === undefined) {
+          continue
+        }
+        const tileset = resolveTileset(detail.tilesetSource)
+        if (!tileset) {
+          continue
+        }
+        const kind = groupKindOf(entity.kind)
+        targets.push({
+          id: entity.id,
+          label: `${KIND_ICON[kind] ?? '•'} ${entity.name}`,
+          tilesetImagePath: tileset.imagePath,
+          tileWidth: tileset.tileWidth,
+          tileHeight: tileset.tileHeight,
+          columns: tileset.columns,
+          cells: detail.cells,
+          sharedOutsideCells: detail.sharedOutsideCells
+        })
+      }
+      if (targets.length === 0) {
+        return
+      }
+      // 현재 데이터는 맵당 타일셋이 하나라 첫 대상 기준으로 묶는다(다른 타일셋 대상은 제외).
+      const first = targets[0]
+      const sameTileset = targets.filter(
+        (candidate) => candidate.tilesetImagePath === first.tilesetImagePath
+      )
+      void fetch('/api/style/extract-objects', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tileset_path: first.tilesetImagePath,
+          tile_width: first.tileWidth,
+          tile_height: first.tileHeight,
+          columns: first.columns,
+          objects: sameTileset.map((candidate) => ({
+            id: candidate.id,
+            label: candidate.label,
+            cells: candidate.cells,
+            sharedOutsideCells: candidate.sharedOutsideCells
+          }))
+        })
+      })
+        .then((response) => {
+          if (response.ok) {
+            extractedMapIds.add(mapId)
+          }
+        })
+        .catch(() => undefined)
+    }, 0)
   }
 
   const renderTree = (): void => {
@@ -1059,8 +1264,32 @@ export const createEditorApp = ({
             })
             entityButtons.push({ entity, node })
             body.append(node)
+          } else if (
+            game.adapter.id === 'my-sample-rpg' &&
+            !STYLE_TARGET_EXCLUDED_KINDS.has(groupKindOf(entity.kind))
+          ) {
+            // 타일 구조물·장식 오브젝트: LLM 생성 대상은 아니지만, 클릭하면 그 오브젝트만 스타일 변환한다.
+            const node = el(
+              'button',
+              'flex items-center gap-1 text-left rounded-lg px-2.5 py-2 text-sm text-zinc-400 transition hover:bg-white/[0.06] hover:text-zinc-200'
+            ) as HTMLButtonElement
+            node.type = 'button'
+            node.title = '클릭하면 이 오브젝트를 스타일 변환합니다 (같은 타일을 쓰는 다른 곳도 함께 바뀔 수 있습니다)'
+            node.append(
+              el('span', 'truncate', entity.name),
+              el('span', 'ml-auto shrink-0 text-[10px]', '🎨')
+            )
+            node.addEventListener('click', () => {
+              const target = buildStyleObjectTarget(map, entity)
+              if (target) {
+                styleTransfer.openForMapObject(target)
+              } else {
+                setStatus('이 오브젝트의 타일 정보를 읽지 못해 스타일 변환을 열 수 없습니다.')
+              }
+            })
+            body.append(node)
           } else {
-            // 몬스터·표지판·포털·타일 구조물은 맵에 있음을 보여주되(보기 전용), 생성 대상은 아니다.
+            // 몬스터·표지판·포털(및 다른 게임의 구조물)은 맵에 있음을 보여주되(보기 전용), 생성 대상은 아니다.
             const row = el('div', 'truncate rounded-lg px-2.5 py-2 text-sm text-zinc-400', entity.name)
             body.append(row)
           }
@@ -1690,6 +1919,8 @@ export const createEditorApp = ({
     render()
     // 프리뷰 바의 씬 버튼 강조도 게임이 보고한 현재 맵을 따라간다.
     updateMapSwitcherActive()
+    // 맵 인식 시점의 자동 누끼 추출 — 백그라운드라 UI를 막지 않는다.
+    extractMapObjectsInBackground(currentMapId)
   })
 
   renderTree()

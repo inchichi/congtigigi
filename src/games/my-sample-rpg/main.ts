@@ -80,6 +80,8 @@ type SceneSpawn = {
 
 type SceneRenderer = {
   destroy: () => void
+  // 에디터의 음소거 토글 등 외부에서 오디오 설정을 갱신할 때 — SFX 마스터 볼륨까지 반영된다.
+  updateAudioSettings: (nextAudioSettings: AudioSettings) => void
   applyEventDraft: (
     draft: HolidayDialogueEventSpec,
     input?: { targetCharacterId?: string }
@@ -95,7 +97,8 @@ const EVENT_DRAFT_MODE_STORAGE_KEY = 'my-sample-rpg:event-draft-mode'
 const OPENAI_API_KEY_STORAGE_KEY = 'my-sample-rpg:openai-api-key'
 const DEFAULT_AUDIO_SETTINGS: AudioSettings = {
   bgmVolume: 1,
-  sfxVolume: 1
+  sfxVolume: 1,
+  isMuted: false
 }
 type EventDraftMode = 'rule' | 'llm'
 const DEFAULT_EVENT_DRAFT_MODE: EventDraftMode = 'rule'
@@ -390,14 +393,16 @@ const playActiveSceneMusic = () => {
 
 const applyActiveSceneMusicVolume = () => {
   if (activeSceneMusic) {
-    activeSceneMusic.volume = audioSettings.bgmVolume
+    // 음소거는 볼륨값과 독립적으로 곱한다 — 해제하면 저장된 볼륨이 그대로 돌아온다.
+    activeSceneMusic.volume = audioSettings.isMuted ? 0 : audioSettings.bgmVolume
   }
 }
 
 const updateAudioSettings = (nextAudioSettings: AudioSettings) => {
   audioSettings = {
     bgmVolume: clampVolume(nextAudioSettings.bgmVolume),
-    sfxVolume: clampVolume(nextAudioSettings.sfxVolume)
+    sfxVolume: clampVolume(nextAudioSettings.sfxVolume),
+    isMuted: nextAudioSettings.isMuted === true
   }
   saveAudioSettings(audioSettings)
   applyActiveSceneMusicVolume()
@@ -472,7 +477,8 @@ function readStoredAudioSettings(): AudioSettings {
       ),
       sfxVolume: clampVolume(
         parsedAudioSettings.sfxVolume ?? DEFAULT_AUDIO_SETTINGS.sfxVolume
-      )
+      ),
+      isMuted: parsedAudioSettings.isMuted === true
     }
   } catch {
     return DEFAULT_AUDIO_SETTINGS
@@ -892,11 +898,27 @@ window.addEventListener('visibilitychange', () => {
   }
 })
 
-// 에디터 프리뷰(부모 창)가 맵을 바꿀 수 있도록 씬 전환 메시지를 처리한다.
+// 에디터 프리뷰(부모 창)의 메시지 처리: 씬 전환 + 음소거 토글.
 window.addEventListener('message', (event) => {
-  const data = event.data as { type?: unknown; sceneId?: unknown } | null
+  const data = event.data as { type?: unknown; sceneId?: unknown; isMuted?: unknown } | null
 
-  if (!data || data.type !== 'editor:switch-scene') {
+  if (!data) {
+    return
+  }
+
+  if (data.type === 'editor:set-mute') {
+    const nextSettings = { ...audioSettings, isMuted: data.isMuted === true }
+    // 렌더러를 거치면 SFX 마스터 볼륨까지 갱신되고, 렌더러가 onAudioSettingsChange로
+    // updateAudioSettings(저장 + BGM 반영)를 되부른다. 씬 로딩 중이면 직접 갱신만 한다.
+    if (activeSceneRenderer) {
+      activeSceneRenderer.updateAudioSettings(nextSettings)
+    } else {
+      updateAudioSettings(nextSettings)
+    }
+    return
+  }
+
+  if (data.type !== 'editor:switch-scene') {
     return
   }
 

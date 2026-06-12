@@ -929,6 +929,7 @@ export const createPixiTiledMapView = async ({
   onRequestSceneChange
 }: CreatePixiTiledMapViewInput): Promise<{
   destroy: () => void
+  updateAudioSettings: (nextAudioSettings: AudioSettings) => void
   applyEventDraft: (
     draft: HolidayDialogueEventSpec,
     input?: ApplyEventDraftInput
@@ -1086,7 +1087,7 @@ export const createPixiTiledMapView = async ({
   const gameEventQueue = createGameEventQueue()
   let currentAudioSettings = audioSettings
   const gameSoundEffects = createGameSoundEffects({
-    masterVolume: currentAudioSettings.sfxVolume
+    masterVolume: currentAudioSettings.isMuted ? 0 : currentAudioSettings.sfxVolume
   })
   const interactionLockUntilByCharacterPair = new Map<string, number>()
   const activeCharacterMessages = new Map<string, ActiveCharacterMessage>()
@@ -1970,7 +1971,10 @@ export const createPixiTiledMapView = async ({
   }
   const updateCurrentAudioSettings = (nextAudioSettings: AudioSettings) => {
     currentAudioSettings = nextAudioSettings
-    gameSoundEffects.setMasterVolume(currentAudioSettings.sfxVolume)
+    // 음소거는 마스터 볼륨에 곱해 적용 — 해제 시 저장된 sfxVolume이 그대로 돌아온다.
+    gameSoundEffects.setMasterVolume(
+      currentAudioSettings.isMuted ? 0 : currentAudioSettings.sfxVolume
+    )
     onAudioSettingsChange(currentAudioSettings)
     pauseMenuOverlay.syncFrame()
   }
@@ -6118,6 +6122,7 @@ export const createPixiTiledMapView = async ({
 
   return {
     destroy,
+    updateAudioSettings: updateCurrentAudioSettings,
     applyEventDraft,
     applyLuaScript
   }
