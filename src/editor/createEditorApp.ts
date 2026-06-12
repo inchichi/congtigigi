@@ -7,6 +7,12 @@ import {
   type LoadedGame,
   type LoadedGameMap
 } from './loadGame'
+import { buildMapPreviewInputs } from './buildMapPreviewInputs'
+import {
+  createTiledMapPreview,
+  type TiledMapPreview
+} from './createTiledMapPreview'
+import { createGameBridge, type BridgeStatus } from './gameBridge'
 import { analyzeGame, type GameAnalysis } from './analyzeGame'
 import { extractTmxLayerNames, extractTmxObjects, type TmxObject } from './tmxObjects'
 import { readLocalStorage, writeLocalStorage } from './safeStorage'
@@ -78,6 +84,11 @@ type CreateEditorAppInput = {
 
 const API_KEY_STORAGE_KEY = 'my-sample-rpg:anthropic-api-key'
 const MODEL_STORAGE_PREFIX = 'my-sample-rpg:model:'
+const BRIDGE_URL_STORAGE_KEY = 'my-sample-rpg:game-bridge-url'
+// 실행 중인 외부 게임(Love2D 등)의 로컬 HTTP 브리지 기본 주소.
+const DEFAULT_BRIDGE_URL = 'http://localhost:17320'
+// love.js로 빌드한 게임의 웹 URL(예: /legend-of-lua/). 설정하면 그 게임을 패널에서 직접 플레이한다.
+const WEB_BUILD_URL_STORAGE_KEY = 'my-sample-rpg:web-build-url'
 
 const KIND_ICON: Record<string, string> = {
   npc: '👤',
@@ -171,6 +182,15 @@ const ENTITY_ACTIVE =
 const ENTITY_GROUP_HEADER =
   'w-full flex items-center gap-1.5 text-left rounded-lg px-2.5 py-2 text-sm text-zinc-200 font-medium transition hover:bg-white/[0.06] hover:text-zinc-100'
 
+// 폴더에서 만든 이미지 object URL을 정리한다(새 프로젝트를 열 때 옛 URL 누수 방지).
+const revokePreviewObjectUrls = (files: GameFile[]): void => {
+  for (const file of files) {
+    if (file.url?.startsWith('blob:')) {
+      URL.revokeObjectURL(file.url)
+    }
+  }
+}
+
 export const createEditorApp = ({
   mountElement,
   initialFiles,
@@ -190,6 +210,9 @@ export const createEditorApp = ({
   // 'game:scene-changed' 메시지로 갱신된다.
   let currentMapId: string | undefined
   let showAllMaps = false
+  // 게임이 마지막으로 보고한 씬. 열기/복귀가 currentMapId를 비운 뒤, iframe을 리로드하지 않고
+  // rpg 모드로 돌아올 때(리로드가 없으면 게임이 다시 보고하지 않음) 트리 집중을 복원하는 데 쓴다.
+  let lastRpgSceneId: string | undefined
   // 트리의 종류별 그룹(NPC/몬스터 등) 펼침 상태. 키는 `${mapId}:${kind}` — 트리를 다시 그려도 유지된다.
   // 기본은 접힘: 요소를 쭉 나열하면 목록이 길어 보기 불편하다는 피드백에 따른 동작.
   const expandedGroups = new Set<string>()
@@ -365,49 +388,60 @@ export const createEditorApp = ({
 
   // ---------- center 상단: live game preview ----------
   // min-h 바닥: 어떤 창 크기에서도 게임이 HUD만 보이는 납작한 띠로 짓눌리지 않게 한다.
+  // 내 게임(my-sample-rpg)은 웹 런타임이 있어 iframe으로 "실제 실행"을 보여주지만, 다른 게임
+  // (예: Love2D의 legend-of-lua)은 브라우저에서 런타임을 못 돌린다. love.js 웹 빌드가 있으면
+  // iframe으로 직접 플레이하고, 없으면 본게임과 똑같은 Pixi Tiled 렌더 경로로 그 게임의 맵을
+  // 라이브로 그려 보여준다. iframe과 Pixi 캔버스를 한 자리에 겹쳐 두고 모드에 따라 바꿔 켠다.
   const preview = el('section', 'flex-1 min-h-[200px] md:min-h-[300px] min-w-0 flex flex-col')
-  const previewBar = el('div', 'h-9 shrink-0 flex items-center justify-between gap-2 px-3 border-b border-white/10 bg-zinc-900/40 min-w-0')
-  previewBar.append(el('span', 'text-xs text-zinc-400 truncate', '🎮 라이브 게임 (실제 게임 실행 중)'))
-  const previewActions = el('div', 'flex items-center gap-2 shrink-0')
-  // 맵 전환 — 프리뷰는 항상 my-sample-rpg를 실행하므로 그 게임의 씬(마을/사냥터/동굴)을 바꾼다.
-  const previewScenes = [
+  // 맵 버튼이 많아도 바가 안 잘리도록: [제목(잘림)] [맵 버튼(가로 스크롤)] [새창·새로고침(고정)].
+  const previewBar = el('div', 'h-9 shrink-0 flex items-center gap-2 px-3 border-b border-white/10 bg-zinc-900/40 min-w-0')
+  const previewTitle = el('span', 'text-xs text-zinc-400 shrink-0 whitespace-nowrap truncate max-w-[30%]', '🎮 라이브 게임 (실제 게임 실행 중)')
+  // 내 게임 iframe 모드에서 전환할 씬(마을/사냥터/동굴).
+  const rpgPreviewScenes = [
     { id: 'town', label: '마을' },
     { id: 'hunting-ground', label: '사냥터' },
     { id: 'cave', label: '동굴' }
   ]
-  const mapSwitcher = el('div', 'flex items-center gap-1')
+  // 맵 버튼 줄: 남는 공간을 차지하고 넘치면 가로 스크롤(macOS 오버레이 스크롤바라 높이 영향 없음).
+  const mapSwitcher = el('div', 'flex items-center gap-1 flex-1 min-w-0 overflow-x-auto')
+  const previewActions = el('div', 'flex items-center gap-2 shrink-0')
   const popoutButton = el('button', 'text-xs text-zinc-400 transition hover:text-zinc-100', '↗ 새 창') as HTMLButtonElement
   popoutButton.type = 'button'
   const reloadButton = el('button', 'text-xs text-zinc-400 transition hover:text-zinc-100', '↻ 새로고침') as HTMLButtonElement
   reloadButton.type = 'button'
-  previewActions.append(mapSwitcher, popoutButton, reloadButton)
-  previewBar.append(previewActions)
-  const iframe = el('iframe', 'flex-1 w-full border-0 bg-black') as HTMLIFrameElement
+  previewActions.append(popoutButton, reloadButton)
+  previewBar.append(previewTitle, mapSwitcher, previewActions)
+  // 세로 휠로도 맵 버튼 줄을 좌우로 스크롤할 수 있게 한다(트랙패드 가로 스크롤은 기본 지원).
+  mapSwitcher.addEventListener('wheel', (event) => {
+    if (event.deltaY !== 0 && mapSwitcher.scrollWidth > mapSwitcher.clientWidth) {
+      mapSwitcher.scrollLeft += event.deltaY
+      event.preventDefault()
+    }
+  })
+
+  const previewBody = el('div', 'flex-1 relative min-h-0')
+  const iframe = el('iframe', 'absolute inset-0 w-full h-full border-0 bg-black') as HTMLIFrameElement
   iframe.src = gamePreviewUrl
   iframe.title = '게임 프리뷰'
+  // 실제로 로드가 끝난 URL. 모드 전환 함수들이 "이미 로드됨"과 "로딩 중"을 구분하는 데 쓴다
+  // (연결 표시등을 로드 전에 초록으로 만들지 않기 위해 — 초록 = 진짜 로드됨 의미 보존).
+  let loadedIframeSrc: string | undefined
   iframe.addEventListener('load', () => {
-    connectionDot.className = 'w-2 h-2 rounded-full bg-emerald-400'
-    connectionLabel.textContent = '게임 연결됨'
+    loadedIframeSrc = iframe.src
+    // iframe이 게임을 띄우는 모드(rpg 웹게임 / love.js 웹빌드)면 연결됨으로 표시한다.
+    if (isRpgPreviewMode() || isWebBuildMode()) {
+      connectionDot.className = 'w-2 h-2 rounded-full bg-emerald-400'
+      connectionLabel.textContent = '게임 연결됨'
+    }
   })
-  // iframe 정의 후 맵 버튼을 채운다 — 클릭하면 게임에 씬 전환 메시지를 보낸다.
-  mapSwitcher.append(
-    ...previewScenes.map((scene) => {
-      const button = el(
-        'button',
-        'text-[11px] rounded px-2 py-0.5 bg-white/[0.04] border border-white/10 text-zinc-300 transition hover:bg-white/[0.08] hover:text-zinc-100',
-        scene.label
-      ) as HTMLButtonElement
-      button.type = 'button'
-      button.addEventListener('click', () => {
-        iframe.contentWindow?.postMessage(
-          { type: 'editor:switch-scene', sceneId: scene.id },
-          '*'
-        )
-      })
-      return button
-    })
-  )
-  preview.append(previewBar, iframe)
+  // 다른 게임의 맵을 Pixi로 그릴 호스트. 드래그 팬을 위해 기본 커서를 grab으로.
+  const mapPreviewHost = el('div', 'absolute inset-0 bg-black overflow-hidden cursor-grab')
+  mapPreviewHost.style.display = 'none'
+  // 렌더 진행/실패 안내(이미지 누락, 미지원 인코딩 등).
+  const previewMessage = el('div', 'absolute inset-0 flex items-center justify-center p-6 text-center text-xs text-zinc-400 pointer-events-none')
+  previewMessage.style.display = 'none'
+  previewBody.append(iframe, mapPreviewHost, previewMessage)
+  preview.append(previewBar, previewBody)
 
   // ---------- center 하단: 프롬프트 컴포저 (LLM 챗의 입력창처럼 게임 바로 아래) ----------
   // 챗 입력창처럼 낮게 유지한다 — 컴포저가 높을수록 게임이 그만큼 낮아진다.
@@ -425,6 +459,322 @@ export const createEditorApp = ({
   side.append(analysisPanel, validationLine, resultWrap, evaluationWrap, historyWrap)
 
   body.append(tree, center, side)
+
+  // ---------- live preview behavior ----------
+  // 내 게임(rpg)은 iframe 실행. 다른 게임은: love.js 웹 빌드 URL이 있으면 그걸 패널에서 플레이,
+  // 없으면 맵을 Pixi로 렌더(정적 미리보기).
+  let webBuildUrl = (readLocalStorage(WEB_BUILD_URL_STORAGE_KEY) ?? '').trim()
+  const isRpgPreviewMode = (): boolean => game.adapter.id === 'my-sample-rpg'
+  // 다른 게임 + love.js 빌드 URL이 있으면 패널에서 실제 게임을 iframe으로 플레이한다.
+  const isWebBuildMode = (): boolean =>
+    !isRpgPreviewMode() && webBuildUrl.length > 0
+
+  let activeMapPreview: TiledMapPreview | undefined
+  // 맵 전환이 빠르게 겹쳐도 늦게 끝난 렌더가 패널을 덮지 않게 토큰으로 최신 요청만 커밋한다.
+  let mapPreviewToken = 0
+  let selectedPreviewMapId: string | undefined
+
+  const setPreviewMessage = (message: string | undefined): void => {
+    if (message === undefined) {
+      previewMessage.style.display = 'none'
+      previewMessage.textContent = ''
+      return
+    }
+
+    previewMessage.style.display = 'flex'
+    previewMessage.textContent = message
+  }
+
+  const destroyMapPreview = (): void => {
+    activeMapPreview?.destroy()
+    activeMapPreview = undefined
+  }
+
+  const MAP_BUTTON_BASE =
+    'shrink-0 whitespace-nowrap text-[11px] rounded px-2 py-0.5 bg-white/[0.04] border border-white/10 text-zinc-300 transition hover:bg-white/[0.08] hover:text-zinc-100'
+  const MAP_BUTTON_ACTIVE =
+    'shrink-0 whitespace-nowrap text-[11px] rounded px-2 py-0.5 bg-indigo-500/20 border border-indigo-500/40 text-indigo-100 transition'
+
+  // 스위처 버튼들을 추적해, 클릭 시 전체를 다시 그리지 않고 활성 표시만 바꾼다.
+  // (replaceChildren로 매번 다시 그리면 가로 스크롤이 0으로 리셋되고 버튼이 커서 밑에서 움직여
+  //  다음 클릭이 엉뚱하게 떨어진다.) 활성 = 트리가 집중하는 맵(currentMapId), 전체 보기면 '전체'.
+  let mapSwitcherButtons: Array<{ id: string | undefined; node: HTMLButtonElement }> = []
+
+  const updateMapSwitcherActive = (): void => {
+    const activeId = showAllMaps ? undefined : currentMapId
+    for (const { id, node } of mapSwitcherButtons) {
+      node.className = id === activeId ? MAP_BUTTON_ACTIVE : MAP_BUTTON_BASE
+    }
+  }
+
+  const makeMapButton = (
+    id: string | undefined,
+    label: string,
+    onClick: () => void
+  ): HTMLButtonElement => {
+    const button = el('button', MAP_BUTTON_BASE, label) as HTMLButtonElement
+    button.type = 'button'
+    // 부분만 보이는 버튼을 클릭할 때 브라우저가 포커스로 자동 스크롤(=튕김)하면서 버튼이 커서 밑에서
+    // 움직여 click이 안 먹는다. 포커스를 막으면 자동 스크롤이 사라지고, click은 그대로 발생한다.
+    button.addEventListener('mousedown', (event) => event.preventDefault())
+    button.addEventListener('click', onClick)
+    mapSwitcherButtons.push({ id, node: button })
+    return button
+  }
+
+  // 스위처를 처음부터 다시 그린다(모드/게임 변경 시에만 호출 — 클릭 시엔 updateMapSwitcherActive 사용).
+  const renderMapSwitcher = (): void => {
+    mapSwitcherButtons = []
+    const children: HTMLButtonElement[] = []
+
+    // "전체": 트리 맵 집중 해제(전체 맵 표시) — 트리 헤더의 '전체 보기' 토글과 같은 동작.
+    children.push(
+      makeMapButton(undefined, '전체', () => {
+        showAllMaps = true
+        renderTree()
+        render()
+        updateMapSwitcherActive()
+      })
+    )
+
+    if (isRpgPreviewMode()) {
+      // 씬 = 맵. 누르면 iframe에 씬 전환을 보낸다. 트리 좁히기는 게임이 돌려보내는
+      // 'game:scene-changed' 메시지가 처리한다(초기 로드·포털 이동과 같은 경로).
+      for (const scene of rpgPreviewScenes) {
+        children.push(
+          makeMapButton(scene.id, scene.label, () => {
+            iframe.contentWindow?.postMessage(
+              { type: 'editor:switch-scene', sceneId: scene.id },
+              '*'
+            )
+          })
+        )
+      }
+    } else {
+      // 다른 게임: 맵 버튼이 트리를 그 맵으로 좁힌다(이 게임들은 씬 변경을 보고하지 않으므로
+      // 버튼이 currentMapId의 소유자다). 맵 미리보기 모드면 Pixi 렌더, love.js 플레이 모드면
+      // 게임에 맵 전환 요청(미리보기로 갈아끼우지 않음).
+      for (const map of game.maps) {
+        children.push(
+          makeMapButton(map.id, map.name, () => {
+            currentMapId = map.id
+            showAllMaps = false
+            renderTree()
+            render()
+            updateMapSwitcherActive()
+            if (isWebBuildMode()) {
+              iframe.contentWindow?.postMessage(
+                { type: 'editor:goto-map', mapId: map.id, mapName: map.name },
+                '*'
+              )
+            } else {
+              void renderMapPreview(map.id)
+            }
+          })
+        )
+      }
+    }
+
+    mapSwitcher.replaceChildren(...children)
+    updateMapSwitcherActive()
+  }
+
+  const showRpgPreview = (): void => {
+    destroyMapPreview()
+    setPreviewMessage(undefined)
+    mapPreviewHost.style.display = 'none'
+    iframe.style.display = 'block'
+    popoutButton.style.display = 'inline'
+    const rpgUrl = new URL(gamePreviewUrl, location.href).href
+    if (iframe.src !== rpgUrl) {
+      iframe.src = gamePreviewUrl
+    } else if (currentMapId === undefined && lastRpgSceneId !== undefined) {
+      // 리로드가 없으면 게임이 씬을 다시 보고하지 않는다(bootstrapScene에서만 보냄) —
+      // 열기/복귀가 비운 트리 집중을 마지막으로 보고된 씬으로 복원한다.
+      currentMapId = lastRpgSceneId
+      showAllMaps = false
+      renderTree()
+      render()
+    }
+    previewTitle.textContent = '🎮 라이브 게임 (실제 게임 실행 중)'
+    // 초록 = 진짜 로드됨. 아직 로딩 중이면 load 리스너가 곧 초록으로 갱신한다.
+    if (loadedIframeSrc === rpgUrl) {
+      connectionDot.className = 'w-2 h-2 rounded-full bg-emerald-400'
+      connectionLabel.textContent = '게임 연결됨'
+    } else {
+      connectionDot.className = 'w-2 h-2 rounded-full bg-amber-400'
+      connectionLabel.textContent = '게임 로딩…'
+    }
+    renderMapSwitcher()
+  }
+
+  // love.js 웹 빌드를 패널에서 직접 플레이한다(별도 창 없이, my-sample-rpg처럼 iframe 안에서).
+  const showWebGamePreview = (): void => {
+    destroyMapPreview()
+    setPreviewMessage(undefined)
+    mapPreviewHost.style.display = 'none'
+    iframe.style.display = 'block'
+    popoutButton.style.display = 'inline'
+    if (iframe.src !== new URL(webBuildUrl, location.href).href) {
+      iframe.src = webBuildUrl
+      // 연결 표시는 iframe load에서 갱신. 로딩 동안엔 연결 중으로 둔다.
+      connectionDot.className = 'w-2 h-2 rounded-full bg-amber-400'
+      connectionLabel.textContent = '게임 로딩…'
+    } else if (loadedIframeSrc === iframe.src) {
+      // 이미 로드돼 플레이 중인 게임 — 로딩 표시로 되돌리지 않는다(영영 amber로 남는 버그 방지).
+      connectionDot.className = 'w-2 h-2 rounded-full bg-emerald-400'
+      connectionLabel.textContent = '게임 연결됨'
+    }
+    previewTitle.textContent = `🎮 라이브 게임 (love.js) — ${game.adapter.name}`
+    renderMapSwitcher()
+  }
+
+  // 브리지 게임은 헤더 연결 표시를 브리지 상태가 소유한다 — 맵 프리뷰가 그걸 덮지 않게 한다.
+  const markMapPreviewConnection = (ok: boolean): void => {
+    if (game.adapter.applyMode === 'bridge') {
+      return
+    }
+
+    connectionDot.className = ok
+      ? 'w-2 h-2 rounded-full bg-emerald-400'
+      : 'w-2 h-2 rounded-full bg-amber-400'
+    connectionLabel.textContent = ok ? '맵 미리보기' : '맵 미리보기 불가'
+  }
+
+  const renderMapPreview = async (mapId: string): Promise<void> => {
+    const targetMap = game.maps.find((map) => map.id === mapId)
+
+    if (!targetMap) {
+      return
+    }
+
+    selectedPreviewMapId = mapId
+    iframe.style.display = 'none'
+    popoutButton.style.display = 'none'
+    mapPreviewHost.style.display = 'block'
+    previewTitle.textContent = `🗺 맵 미리보기 — ${targetMap.name}`
+    // 스위처는 syncPreviewToGame에서 한 번 그려둔다. 여기선 활성 표시만 갱신(스크롤 보존).
+    updateMapSwitcherActive()
+
+    const inputs = buildMapPreviewInputs(currentFiles, targetMap.file)
+
+    if (!inputs.ok) {
+      destroyMapPreview()
+      setPreviewMessage(inputs.error)
+      markMapPreviewConnection(false)
+      return
+    }
+
+    const token = (mapPreviewToken += 1)
+    setPreviewMessage('맵 렌더링 중...')
+    destroyMapPreview()
+
+    try {
+      const instance = await createTiledMapPreview({
+        mountElement: mapPreviewHost,
+        map: inputs.inputs.map,
+        imageUrls: inputs.inputs.imageUrls
+      })
+
+      // 렌더 중에 더 최근 요청(맵 전환/리셋)이 들어왔으면 이 결과는 버린다.
+      if (token !== mapPreviewToken) {
+        instance.destroy()
+        return
+      }
+
+      activeMapPreview = instance
+      setPreviewMessage(undefined)
+      markMapPreviewConnection(true)
+    } catch (error) {
+      if (token !== mapPreviewToken) {
+        return
+      }
+
+      setPreviewMessage(
+        `맵을 렌더링하지 못했습니다: ${error instanceof Error ? error.message : String(error)}`
+      )
+      markMapPreviewConnection(false)
+    }
+  }
+
+  // 게임이 바뀔 때(열기/복귀) 프리뷰를 그 게임에 맞게 동기화한다.
+  const syncPreviewToGame = (): void => {
+    if (isRpgPreviewMode()) {
+      showRpgPreview()
+      return
+    }
+
+    // love.js 웹 빌드가 설정돼 있으면 그 게임을 패널에서 직접 플레이한다.
+    if (isWebBuildMode()) {
+      showWebGamePreview()
+      return
+    }
+
+    // 맵 미리보기 모드: 숨겨질 iframe 속 게임(rpg/love.js)을 내려 CPU·사운드를 멈추고,
+    // 숨은 게임이 보내는 늦은 메시지도 원천 차단한다(rpg 복귀 시 showRpgPreview가 다시 로드).
+    if (iframe.src !== 'about:blank') {
+      iframe.src = 'about:blank'
+    }
+
+    // 웹 빌드가 없으면 맵을 Pixi로 렌더(정적 미리보기). 엔티티가 있는 맵을 우선(없으면 첫 맵).
+    const firstMap =
+      game.maps.find((map) => map.entities.length > 0) ?? game.maps[0]
+
+    if (!firstMap) {
+      destroyMapPreview()
+      setPreviewMessage('이 게임에서 렌더할 맵을 찾지 못했습니다.')
+      return
+    }
+
+    // 미리보기 모드에선 보이는 맵이 곧 "현재 맵" — 트리도 그 맵으로 집중시킨다.
+    currentMapId = firstMap.id
+    renderTree()
+    renderMapSwitcher() // 스위처를 이 게임의 맵으로 한 번 그린다(이후 클릭은 활성 표시만 갱신).
+    void renderMapPreview(firstMap.id)
+  }
+
+  // ---------- live game bridge (별도 프로세스 게임용) ----------
+  // my-sample-rpg는 같은 origin localStorage로 적용하지만, Love2D 같은 외부 프로세스 게임은
+  // 실행 중인 게임의 로컬 HTTP 브리지로 생성물을 보낸다. 연결 상태는 헤더 표시등이 보여준다.
+  let bridgeStatus: BridgeStatus = 'disconnected'
+
+  const applyBridgeStatusToIndicator = (): void => {
+    if (bridgeStatus === 'connected') {
+      connectionDot.className = 'w-2 h-2 rounded-full bg-emerald-400'
+      connectionLabel.textContent = '게임 연결됨'
+    } else if (bridgeStatus === 'connecting') {
+      connectionDot.className = 'w-2 h-2 rounded-full bg-amber-400'
+      connectionLabel.textContent = '게임 연결 중…'
+    } else {
+      connectionDot.className = 'w-2 h-2 rounded-full bg-zinc-600'
+      connectionLabel.textContent = '게임 미연결'
+    }
+  }
+
+  const bridge = createGameBridge({
+    baseUrl: readLocalStorage(BRIDGE_URL_STORAGE_KEY) ?? DEFAULT_BRIDGE_URL,
+    onStatusChange: (next) => {
+      bridgeStatus = next
+      // 브리지 게임이고 웹빌드 모드가 아닐 때만 헤더 표시등을 브리지 상태로 갱신한다.
+      if (game.adapter.applyMode === 'bridge' && !isWebBuildMode()) {
+        applyBridgeStatusToIndicator()
+      }
+      // 적용 버튼 활성/지원 안내가 연결 상태에 의존하므로 다시 그린다.
+      render()
+    }
+  })
+
+  // 브리지 적용 게임이고 웹빌드(love.js)로 패널에서 직접 플레이하는 게 아니면 폴링을 켠다.
+  // love.js 모드에선 게임이 iframe 안에 있으므로 HTTP 브리지(별도 프로세스용)는 끈다.
+  const syncBridgeForGame = (): void => {
+    if (game.adapter.applyMode === 'bridge' && !isWebBuildMode()) {
+      bridge.start()
+      applyBridgeStatusToIndicator()
+    } else {
+      bridge.stop()
+    }
+  }
+
   // ---------- settings modal (헤더 ⚙) ----------
   // API 키·폴더 열기·분석·복귀는 상시 노출 대신 여기로 모은다. 메인은 편집에 집중.
   const settingsBackdrop = el('div', 'fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4')
@@ -439,7 +789,42 @@ export const createEditorApp = ({
   settingsTop.append(settingsClose)
   const projectControls = el('div', 'flex flex-col gap-2')
   projectControls.append(el('div', LABEL, '프로젝트'), openButton, analyzeButton, resetButton)
-  settingsPanel.append(settingsTop, apiKeyField, modelField, el('div', 'h-px bg-white/10'), projectControls)
+
+  // 외부 게임(Love2D 등)의 라이브 브리지 주소. 게임이 띄운 로컬 HTTP 서버를 가리킨다.
+  const bridgeField = el('label', 'flex flex-col gap-1.5')
+  bridgeField.append(el('span', LABEL, '게임 브리지 URL — 외부 게임(Love2D 등) 라이브 적용'))
+  const bridgeInput = el('input', FIELD_INPUT) as HTMLInputElement
+  bridgeInput.type = 'text'
+  bridgeInput.placeholder = DEFAULT_BRIDGE_URL
+  bridgeInput.value = bridge.getBaseUrl()
+  bridgeInput.spellcheck = false
+  bridgeField.append(bridgeInput)
+  bridgeInput.addEventListener('change', () => {
+    const url = bridgeInput.value.trim() || DEFAULT_BRIDGE_URL
+    bridge.setBaseUrl(url)
+    writeLocalStorage(BRIDGE_URL_STORAGE_KEY, url)
+    bridgeInput.value = bridge.getBaseUrl()
+  })
+
+  // love.js로 빌드한 게임의 웹 URL. 넣으면 그 게임을 패널에서 직접 플레이한다(비우면 맵 미리보기).
+  const webBuildField = el('label', 'flex flex-col gap-1.5')
+  webBuildField.append(el('span', LABEL, 'love.js 웹 빌드 URL — 패널에서 게임 직접 플레이(예: /legend-of-lua/)'))
+  const webBuildInput = el('input', FIELD_INPUT) as HTMLInputElement
+  webBuildInput.type = 'text'
+  webBuildInput.placeholder = '/legend-of-lua/'
+  webBuildInput.value = webBuildUrl
+  webBuildInput.spellcheck = false
+  webBuildField.append(webBuildInput)
+  webBuildInput.addEventListener('change', () => {
+    webBuildUrl = webBuildInput.value.trim()
+    writeLocalStorage(WEB_BUILD_URL_STORAGE_KEY, webBuildUrl)
+    // 현재 보고 있는 게임이 외부 게임이면 즉시 모드를 다시 맞춘다(미리보기 ↔ 플레이).
+    syncPreviewToGame()
+    syncBridgeForGame()
+    render()
+  })
+
+  settingsPanel.append(settingsTop, apiKeyField, modelField, bridgeField, webBuildField, el('div', 'h-px bg-white/10'), projectControls)
   settingsBackdrop.append(settingsPanel)
 
   const closeSettings = (): void => {
@@ -818,11 +1203,19 @@ export const createEditorApp = ({
   function render(): void {
     gameLabel.textContent = game.adapter.name
 
-    if (game.adapter.supportsApply) {
+    // 적용 안내: 같은 origin 웹게임/love.js 패널게임은 안내 불필요, 브리지 게임은 연결 상태를
+    // 알려주고, 그 외는 미지원.
+    if (game.adapter.applyMode === 'local-storage' || isWebBuildMode()) {
       supportNote.hidden = true
+    } else if (game.adapter.applyMode === 'bridge') {
+      supportNote.hidden = false
+      supportNote.textContent =
+        bridgeStatus === 'connected'
+          ? `${game.adapter.name}: 게임 브리지 연결됨 — '게임에 적용'하면 실행 중인 게임에 라이브 반영됩니다.`
+          : `${game.adapter.name}: 게임을 실행하고 브리지를 켜세요(기본 ${bridge.getBaseUrl()}). 연결되면 '게임에 적용'이 활성화됩니다. (또는 설정에서 love.js 웹 빌드 URL을 넣으면 패널에서 바로 플레이됩니다.)`
     } else {
       supportNote.hidden = false
-      supportNote.textContent = `${game.adapter.name}: 생성은 되지만 라이브 적용은 아직 지원되지 않습니다 (Stage 3). 결과는 미리보기로 확인하세요.`
+      supportNote.textContent = `${game.adapter.name}: 생성은 되지만 라이브 적용은 아직 지원되지 않습니다. 결과는 미리보기로 확인하세요.`
     }
 
     // 엔티티 이름/맵은 열린 TMX에서 온 임의 값이므로 textContent로만 넣는다(주입/깨짐 방지).
@@ -867,7 +1260,17 @@ export const createEditorApp = ({
     generateButton.disabled =
       isGenerating || apiKey.trim().length === 0 || promptInput.value.trim().length === 0
     // 검증(issues)이 적용을 막지 않는다 — 사용자 요청대로 검증과 무관하게 바로 적용 가능.
-    applyButton.disabled = isGenerating || !currentResult?.apply
+    // 같은 origin 웹게임은 apply()로, love.js 패널게임은 iframe postMessage로, 브리지 게임은
+    // 연결돼 있을 때 bridgePayload로 적용한다.
+    const canApplyLocal = currentResult?.apply != null
+    const canApplyWeb = isWebBuildMode() && currentResult?.bridgePayload != null
+    const canApplyBridge =
+      game.adapter.applyMode === 'bridge' &&
+      !isWebBuildMode() &&
+      bridgeStatus === 'connected' &&
+      currentResult?.bridgePayload != null
+    applyButton.disabled =
+      isGenerating || (!canApplyLocal && !canApplyWeb && !canApplyBridge)
     copyButton.disabled = !currentResult || isGenerating
     exportButton.disabled = !currentResult || isGenerating
     result.textContent = currentResult ? currentResult.preview : '생성 결과가 여기에 표시됩니다.'
@@ -936,17 +1339,49 @@ export const createEditorApp = ({
     }
   }
 
-  const runApply = (): void => {
-    if (!currentResult?.apply) {
+  const runApply = async (): Promise<void> => {
+    if (!currentResult) {
       return
     }
 
-    // apply()는 localStorage 저장을 동반해 실패할 수 있다. 조용히 죽지 않고 상태로 알린다.
-    try {
-      currentResult.apply()
-      setStatus('게임에 적용됨 — 오른쪽 라이브 프리뷰에 즉시 반영됩니다.')
-    } catch (error) {
-      setStatus(`적용 실패: ${error instanceof Error ? error.message : String(error)}`)
+    // 같은 origin 웹게임(my-sample-rpg): localStorage로 적용. 저장 실패할 수 있어 상태로 알린다.
+    if (currentResult.apply) {
+      try {
+        currentResult.apply()
+        setStatus('게임에 적용됨 — 라이브 프리뷰에 즉시 반영됩니다.')
+      } catch (error) {
+        setStatus(`적용 실패: ${error instanceof Error ? error.message : String(error)}`)
+      }
+      return
+    }
+
+    // love.js로 패널에서 플레이 중인 게임: 같은 페이지 iframe이므로 postMessage로 보낸다.
+    // 게임-쪽 love.js 빌드가 'editor:apply' 메시지를 받아 적용한다(docs/legend-of-lua-love-js.md).
+    if (isWebBuildMode() && currentResult.bridgePayload) {
+      iframe.contentWindow?.postMessage(
+        { type: 'editor:apply', payload: currentResult.bridgePayload },
+        '*'
+      )
+      setStatus('패널의 게임에 적용을 보냈습니다 (love.js).')
+      return
+    }
+
+    // 브리지 게임(Love2D 등): 실행 중인 게임의 HTTP 브리지로 전송한다.
+    if (game.adapter.applyMode === 'bridge' && currentResult.bridgePayload) {
+      if (bridgeStatus !== 'connected') {
+        setStatus(
+          `게임 브리지가 연결되지 않았습니다. 게임을 실행하고 브리지(${bridge.getBaseUrl()})를 켜세요.`
+        )
+        return
+      }
+
+      setStatus('실행 중인 게임에 적용 중…')
+      const applyResult = await bridge.apply(currentResult.bridgePayload)
+      setStatus(
+        applyResult.ok
+          ? '게임에 적용됨 — 실행 중인 게임에 라이브 반영되었습니다.'
+          : `적용 실패: ${applyResult.error ?? '게임이 적용을 거부했습니다.'}`
+      )
     }
   }
 
@@ -997,11 +1432,17 @@ export const createEditorApp = ({
         return
       }
 
+      const previousFiles = currentFiles
       game = loaded
       currentFiles = files
       selectedEntity = undefined
       currentResult = undefined
       currentAnalysis = undefined
+      // 맵 집중·프리뷰 상태도 프로젝트 단위 — 이전 게임의 맵 id가 새 게임에 묻어 나오지 않게 한다.
+      // (rpg는 게임이 'game:scene-changed'로 다시 보고하고, 미리보기 게임은 syncPreviewToGame이 채운다.)
+      currentMapId = undefined
+      showAllMaps = false
+      selectedPreviewMapId = undefined
       history = []
       historyCounter = 0
       sessionTally = { generations: 0, validatorPasses: 0 }
@@ -1011,6 +1452,9 @@ export const createEditorApp = ({
       renderTree()
       renderAnalysis()
       render()
+      syncPreviewToGame()
+      syncBridgeForGame()
+      revokePreviewObjectUrls(previousFiles)
       // 엔티티(어댑터가 찾은 개체)와 타일 구조물(보기 전용)을 나눠 세서, 수치가 부풀어 보이지 않게 한다.
       const allEntities = game.maps.flatMap((map) => map.entities)
       const tileCount = allEntities.filter(isTileClusterEntity).length
@@ -1032,11 +1476,15 @@ export const createEditorApp = ({
   }
 
   const runReset = (): void => {
+    const previousFiles = currentFiles
     game = loadGame(initialFiles)
     currentFiles = initialFiles
     selectedEntity = undefined
     currentResult = undefined
     currentAnalysis = undefined
+    currentMapId = undefined
+    showAllMaps = false
+    selectedPreviewMapId = undefined
     history = []
     historyCounter = 0
     sessionTally = { generations: 0, validatorPasses: 0 }
@@ -1044,6 +1492,9 @@ export const createEditorApp = ({
     renderTree()
     renderAnalysis()
     render()
+    syncPreviewToGame()
+    syncBridgeForGame()
+    revokePreviewObjectUrls(previousFiles)
     setStatus(`내 게임으로 복귀했습니다.${parseErrorNote()}`)
   }
 
@@ -1153,7 +1604,9 @@ export const createEditorApp = ({
       void runGenerate()
     }
   })
-  applyButton.addEventListener('click', runApply)
+  applyButton.addEventListener('click', () => {
+    void runApply()
+  })
   copyButton.addEventListener('click', () => {
     void runCopy()
   })
@@ -1176,31 +1629,58 @@ export const createEditorApp = ({
     void runAnalyze()
   })
   popoutButton.addEventListener('click', () => {
-    window.open(gamePreviewUrl, 'game-window', 'width=1280,height=720')
+    // 별도 창으로 띄울 때도 현재 패널이 보여주는 게임(rpg면 내 게임, 웹빌드면 love.js 게임)을 연다.
+    window.open(
+      isWebBuildMode() ? webBuildUrl : gamePreviewUrl,
+      'game-window',
+      'width=1280,height=720'
+    )
   })
   reloadButton.addEventListener('click', () => {
-    iframe.src = gamePreviewUrl
+    if (isRpgPreviewMode()) {
+      iframe.src = gamePreviewUrl
+      return
+    }
+
+    // love.js 플레이 모드: iframe 게임을 다시 로드한다.
+    if (isWebBuildMode()) {
+      iframe.src = webBuildUrl
+      return
+    }
+
+    // 맵 프리뷰 모드: 현재 맵을 다시 렌더한다.
+    if (selectedPreviewMapId) {
+      void renderMapPreview(selectedPreviewMapId)
+    }
   })
-  // 현재 맵만 ↔ 전체 맵 토글. 트리만 다시 그리되, 보이는 버튼의 선택 강조는 render()가 다시 입힌다.
+  // 현재 맵만 ↔ 전체 맵 토글. 엔티티 버튼 강조는 render()가, 프리뷰 바의 맵 버튼 강조는
+  // updateMapSwitcherActive가 다시 입힌다('전체' 버튼과 같은 상태를 공유하므로 함께 갱신).
   mapFilterToggle.addEventListener('click', () => {
     showAllMaps = !showAllMaps
     renderTree()
     render()
+    updateMapSwitcherActive()
   })
   // 라이브 게임(iframe)이 맵을 바꾸면 그 맵의 요소만 트리에 보여준다. 게임은 bootstrapScene에서
   // 부모(에디터)로 'game:scene-changed'를 쏜다(초기 로드·포털 이동·맵 버튼 모두 포함).
   window.addEventListener('message', (event) => {
-    // 게임 iframe에서 온 메시지만 신뢰한다(브라우저 확장 등 다른 출처 무시).
-    if (event.source !== iframe.contentWindow) {
+    // 게임 iframe에서 온 메시지만 신뢰한다(브라우저 확장 등 다른 출처 무시). rpg가 아닌 모드에선
+    // 이전/숨은 rpg 게임의 늦은 보고가 외부 게임의 맵 집중(currentMapId)을 가로채지 못하게 무시한다
+    // (외부 게임에선 맵 버튼이 currentMapId의 소유자다).
+    if (!isRpgPreviewMode() || event.source !== iframe.contentWindow) {
       return
     }
     const data = event.data as { type?: unknown; sceneId?: unknown } | null
     if (
       !data ||
       data.type !== 'game:scene-changed' ||
-      typeof data.sceneId !== 'string' ||
-      data.sceneId === currentMapId
+      typeof data.sceneId !== 'string'
     ) {
+      return
+    }
+    // 복귀(리로드 없음) 시 트리 집중을 복원할 수 있게, 중복 보고라도 마지막 씬은 기억해 둔다.
+    lastRpgSceneId = data.sceneId
+    if (data.sceneId === currentMapId) {
       return
     }
     currentMapId = data.sceneId
@@ -1208,11 +1688,15 @@ export const createEditorApp = ({
     showAllMaps = false
     renderTree()
     render()
+    // 프리뷰 바의 씬 버튼 강조도 게임이 보고한 현재 맵을 따라간다.
+    updateMapSwitcherActive()
   })
 
   renderTree()
   renderAnalysis()
   render()
+  syncPreviewToGame()
+  syncBridgeForGame()
   if (game.parseErrors.length > 0) {
     setStatus(`기본 맵 일부를 읽지 못했습니다${parseErrorNote()}`)
   }

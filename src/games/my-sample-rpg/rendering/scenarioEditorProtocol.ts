@@ -18,6 +18,9 @@ export type ScenarioEditorResult = {
   npcDialogues: ScenarioEditorNpcDialogueDraft[]
 }
 
+const MIN_SCENARIO_EDITOR_QUESTS = 2
+const MIN_SCENARIO_EDITOR_NPC_DIALOGUES = 2
+
 export const SCENARIO_EDITOR_SYSTEM_PROMPT = [
   'You design quest content for a 2D web RPG.',
   'Return one valid JSON object only. Do not use markdown or code fences.',
@@ -190,7 +193,11 @@ export const normalizeScenarioEditorResult = (
     return dialogue ? [dialogue] : []
   })
 
-  if (summary.length === 0 && quests.length === 0 && npcDialogues.length === 0) {
+  if (
+    summary.length === 0 ||
+    quests.length < MIN_SCENARIO_EDITOR_QUESTS ||
+    npcDialogues.length < MIN_SCENARIO_EDITOR_NPC_DIALOGUES
+  ) {
     return undefined
   }
 

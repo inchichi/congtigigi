@@ -7,7 +7,10 @@ import type { GameStructureProfile } from './gameStructureProfile'
 export type GameFile = {
   name: string
   path: string
+  // 텍스트 자산(.tmx/.tsx/.lua)의 원문. 바이너리(이미지)면 빈 문자열.
   text: string
+  // 바이너리 자산(타일셋 이미지)의 로드 가능한 URL(blob/object URL). 텍스트 자산이면 undefined.
+  url?: string
 }
 
 export type LoadedGameMap = {

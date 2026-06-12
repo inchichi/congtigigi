@@ -6,6 +6,13 @@ import { createHolidayDialogueEventSpecFromGeneratedEventJson } from './eventCod
 import { savePendingEvent } from './pendingEvents'
 import { generateJson } from './llmProvider'
 import { createEntityLinesValidationIssues } from './entityLinesValidator'
+import type { BridgeApplyMessage } from './gameBridge'
+
+// 게임에 적용하는 방식:
+// - 'local-storage': 에디터와 같은 origin 웹게임(my-sample-rpg). apply()가 localStorage로 전달.
+// - 'bridge': 별도 프로세스 게임(Love2D legend-of-lua). 실행 중인 게임에 HTTP 브리지로 전송.
+// - 'none': 아직 적용 경로가 없는 게임. 생성 미리보기까지만.
+export type GameApplyMode = 'local-storage' | 'bridge' | 'none'
 
 // 게임마다 맵/엔티티 규칙·생성·적용이 달라서, 그걸 어댑터로 분리한다. 새 게임 지원 = 새 어댑터 추가.
 export type GameEntity = {
@@ -29,8 +36,10 @@ export type GenerationResult = {
   preview: string
   // 생성과 분리된 결정적 검증(Validator) 결과. 빈 배열이면 통과(이사님 #1: 생성/검증 분리).
   issues: string[]
-  // 게임에 적용하는 방법. null이면 이 게임은 아직 적용 미지원(생성 미리보기까지).
+  // 같은 origin 웹게임(local-storage 적용)용. null이면 이 경로로는 적용하지 않는다.
   apply: (() => void) | null
+  // 브리지(별도 프로세스 게임) 적용용 구조화 페이로드. applyMode가 'bridge'인 게임에서 채운다.
+  bridgePayload: BridgeApplyMessage | null
 }
 
 export type GameAdapter = {
@@ -40,9 +49,9 @@ export type GameAdapter = {
   detect: (fileNames: string[]) => boolean
   // 한 맵의 TMX 객체들을 이 게임의 엔티티로 변환한다.
   extractEntities: (mapId: string, objects: TmxObject[]) => GameEntity[]
-  // 이 게임에 대해 에디터가 생성→적용까지 지원하는지(UI 힌트용).
-  supportsApply: boolean
-  // 이 게임의 콘텐츠를 LLM으로 생성한다. 결과의 apply()로 게임에 반영한다.
+  // 이 게임에 생성물을 어떻게 적용하는지(UI/적용 라우팅용).
+  applyMode: GameApplyMode
+  // 이 게임의 콘텐츠를 LLM으로 생성한다. 결과를 applyMode에 맞는 경로로 게임에 반영한다.
   generate: (request: GenerationRequest) => Promise<GenerationResult>
 }
 
@@ -86,7 +95,7 @@ export const rpgAdapter: GameAdapter = {
         mapId
       }
     }),
-  supportsApply: true,
+  applyMode: 'local-storage',
   generate: async ({ apiKey, userPrompt, entity, profile }) => {
     if (!profile) {
       throw new Error('이 게임의 구조 프로필이 없습니다.')
@@ -115,20 +124,49 @@ export const rpgAdapter: GameAdapter = {
         if (spec) {
           savePendingEvent(spec)
         }
-      }
+      },
+      bridgePayload: null
     }
   }
 }
 
+// 그룹 이름 → 엔티티 종류. 맵마다 그룹 이름의 대소문자·단복수가 제각각(NPCs/npc/Npc...)이라
+// 소문자로 정규화해 매칭하고, 모르는 그룹은 그룹 이름 자체를 종류로 쓴다(트리에서 카테고리로 묶임).
 const LEGEND_KIND_BY_GROUP: Record<string, string> = {
-  Enemies: 'enemy',
-  NPCs: 'npc',
-  Chests: 'chest',
-  Loot: 'loot'
+  enemies: 'enemy',
+  enemy: 'enemy',
+  npcs: 'npc',
+  npc: 'npc',
+  characters: 'npc',
+  chests: 'chest',
+  chest: 'chest',
+  loot: 'loot'
 }
 
+// 엔티티가 아니라 충돌·경계 같은 구조용 도형이 든 그룹은 트리에서 제외한다(NPC는 보이게 하되
+// 벽/콜라이더는 빼려는 목적). 그 외 그룹은 이름이 뭐든 엔티티 후보로 본다.
+const LEGEND_NON_ENTITY_GROUPS = new Set([
+  'walls',
+  'wall',
+  'collision',
+  'collisions',
+  'collider',
+  'colliders',
+  'bounds',
+  'boundaries',
+  'bound'
+])
+
+const legendKindForGroup = (group: string): string => {
+  const normalized = group.trim().toLowerCase()
+  return LEGEND_KIND_BY_GROUP[normalized] ?? (normalized || 'entity')
+}
+
+const isLegendEntityObject = (group: string): boolean =>
+  !LEGEND_NON_ENTITY_GROUPS.has(group.trim().toLowerCase())
+
 // 전용 콘텐츠 모델이 없는 게임(legend-of-lua, 미지의 게임)의 공용 생성: 엔티티용 대사/설명.
-// 적용은 게임 런타임 연결이 필요해 아직 null(미리보기까지).
+// 결과의 bridgePayload는 'bridge' 게임에서 실행 중인 게임으로 전송하는 데 쓰인다('none' 게임은 무시).
 const generateEntityLines = async (
   gameName: string,
   { apiKey, userPrompt, entity, gameContext }: GenerationRequest
@@ -160,7 +198,21 @@ const generateEntityLines = async (
     label: generated.entity || (entity?.name ?? '생성 결과'),
     preview: JSON.stringify(generated, null, 2),
     issues,
-    apply: null
+    apply: null,
+    bridgePayload: {
+      id: `entity_lines-${Date.now()}`,
+      kind: 'entity_lines',
+      target: entity
+        ? {
+            id: entity.id,
+            name: entity.name,
+            kind: entity.kind,
+            mapId: entity.mapId
+          }
+        : null,
+      lines: generated.lines,
+      generatedAt: Date.now()
+    }
   }
 }
 
@@ -169,20 +221,26 @@ export const legendOfLuaAdapter: GameAdapter = {
   name: 'Legend of Lua (Love2D)',
   detect: (fileNames) =>
     fileNames.includes('conf.lua') || fileNames.includes('main.lua'),
+  // 이름이나 타입이 있는 object layer 요소를 엔티티로 본다(NPC가 특정 그룹/대문자에 묶여 있지
+  // 않아도, 이름 대신 type만 있어도 보이게). 벽·콜라이더 같은 구조용 그룹과 무명·무타입은 거른다.
   extractEntities: (mapId, objects) =>
     objects
       .filter(
         (object) =>
-          LEGEND_KIND_BY_GROUP[object.group] !== undefined && object.name.length > 0
+          isLegendEntityObject(object.group) &&
+          (object.name.length > 0 || object.type.length > 0)
       )
-      .map((object) => ({
-        id: `${object.group}-${object.id}`,
-        name: object.name,
-        kind: LEGEND_KIND_BY_GROUP[object.group],
-        mapId
-      })),
-  // Love2D 런타임에 라이브 적용은 아직 미구현(Stage 3). 지금은 엔티티 브라우징·생성까지.
-  supportsApply: false,
+      .map((object) => {
+        const kind = legendKindForGroup(object.group)
+        return {
+          id: `${object.group}-${object.id}`,
+          name: object.name || object.type || `${kind}-${object.id}`,
+          kind,
+          mapId
+        }
+      }),
+  // 실행 중인 Love2D 게임에 HTTP 브리지로 라이브 적용한다(docs/legend-of-lua-bridge-protocol.md).
+  applyMode: 'bridge',
   generate: (request) =>
     generateEntityLines('legend-of-lua (Love2D 2D 액션 RPG)', request)
 }
@@ -194,7 +252,7 @@ export const genericAdapter: GameAdapter = {
   name: 'Unknown game (LLM-analyzed)',
   detect: () => true,
   extractEntities: () => [],
-  supportsApply: false,
+  applyMode: 'none',
   generate: (request) => generateEntityLines('이 게임', request)
 }
 

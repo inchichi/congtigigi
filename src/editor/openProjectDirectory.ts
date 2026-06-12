@@ -17,33 +17,60 @@ export const isDirectoryPickerSupported = (): boolean =>
 
 const SKIP_DIRS = new Set(['node_modules', '.git', 'dist', '.vite', 'coverage'])
 
-// 엔티티 추출용 맵(.tmx)·타일 분류용 타일셋(.tsx)과 게임 판별용 시그니처(conf.lua/main.lua)만 모은다.
+const IMAGE_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp']
+
+const isImageFile = (name: string): boolean =>
+  IMAGE_EXTENSIONS.some((extension) => name.toLowerCase().endsWith(extension))
+
+// 타일 분류(타일 군집 인식)와 라이브 맵 프리뷰에 타일셋 정의(.tsx)·그 이미지(.png 등)가 필요하다.
+const isAssetFile = (name: string): boolean =>
+  name.endsWith('.tsx') || isImageFile(name)
+
+// 엔티티 추출용 맵(.tmx)·게임 판별용 시그니처(conf.lua/main.lua) + 프리뷰용 타일셋 자산.
 const isRelevantFile = (name: string): boolean =>
   name.endsWith('.tmx') ||
-  name.endsWith('.tsx') ||
   name === 'conf.lua' ||
-  name === 'main.lua'
+  name === 'main.lua' ||
+  isAssetFile(name)
+
+const readGameFile = async (
+  name: string,
+  path: string,
+  handle: FileSystemFileHandle
+): Promise<GameFile> => {
+  const file = await handle.getFile()
+
+  // 이미지는 텍스트로 못 읽으므로 object URL로 들고 다닌다(Pixi가 이걸로 텍스처를 만든다).
+  if (isImageFile(name)) {
+    return { name, path, text: '', url: URL.createObjectURL(file) }
+  }
+
+  return { name, path, text: await file.text() }
+}
 
 const collectFiles = async (
   dir: FileSystemDirectoryHandle,
   prefix: string,
-  out: GameFile[]
+  out: GameFile[],
+  // _old 같은 백업 폴더에 든 옛 .tmx가 엔티티 트리를 오염시키지 않게, _ 폴더는 자산만 수집한다.
+  assetsOnly: boolean
 ): Promise<void> => {
   for await (const [name, handle] of dir.entries()) {
     const path = prefix ? `${prefix}/${name}` : name
 
     if (handle.kind === 'file') {
-      if (isRelevantFile(name)) {
-        const file = await (handle as FileSystemFileHandle).getFile()
-        out.push({ name, path, text: await file.text() })
+      const include = assetsOnly ? isAssetFile(name) : isRelevantFile(name)
+
+      if (include) {
+        out.push(await readGameFile(name, path, handle as FileSystemFileHandle))
       }
-    } else if (
-      handle.kind === 'directory' &&
-      !SKIP_DIRS.has(name) &&
-      // legend-of-lua의 _old/_tilesets 같은 백업·픽스처 폴더는 건너뛴다.
-      !name.startsWith('_')
-    ) {
-      await collectFiles(handle as FileSystemDirectoryHandle, path, out)
+    } else if (handle.kind === 'directory' && !SKIP_DIRS.has(name)) {
+      await collectFiles(
+        handle as FileSystemDirectoryHandle,
+        path,
+        out,
+        assetsOnly || name.startsWith('_')
+      )
     }
   }
 }
@@ -57,6 +84,6 @@ export const openProjectDirectory = async (): Promise<GameFile[]> => {
 
   const directoryHandle = await window.showDirectoryPicker()
   const files: GameFile[] = []
-  await collectFiles(directoryHandle, '', files)
+  await collectFiles(directoryHandle, '', files, false)
   return files
 }
