@@ -143,6 +143,12 @@ import type {
   ParsedTiledTileset
 } from '../game/tiled/parseTiledMap'
 import {
+  createTileTexture,
+  resolveTilesetForTile,
+  type TileTextureFrameSource,
+  type TilesetRenderResources
+} from './tiledMapRenderResources'
+import {
   getSpriteTransformForTile,
   hasTileTransform
 } from './tiledSpriteTransform'
@@ -154,7 +160,6 @@ import { createPlayerHudOverlay } from './createPlayerHudOverlay'
 import { createPlayerInventoryOverlay } from './createPlayerInventoryOverlay'
 import { createPlayerStatOverlay } from './createPlayerStatOverlay'
 import { createPlayerSkillOverlay } from './createPlayerSkillOverlay'
-import { createScenarioEditorOverlay } from './createScenarioEditorOverlay'
 import type { MonsterAnimationTextures } from './monsterAnimationTextures'
 import { loadMonsterPigAnimationTextures } from './loadMonsterPigAnimationTextures'
 import { loadMonsterSlimeAnimationTextures } from './loadMonsterSlimeAnimationTextures'
@@ -212,9 +217,9 @@ export type SceneTransitionRequest = {
   facing?: CharacterMoveDirection
 }
 
-type TilesetRenderResources = {
-  imageTexture: Texture
-  tileTextures: Texture[]
+export type ApplyEventDraftResult = {
+  didApply: boolean
+  targetCharacterId?: string
 }
 
 type SlashVfxRenderResources = {
@@ -229,14 +234,6 @@ type ProtectVfxRenderResources = {
 type ResolvedCharacterAppearanceTexture = {
   texture: Texture
   renderScale: number
-}
-
-type TileTextureFrameSource = {
-  columns: number
-  margin: number
-  spacing: number
-  tileWidth: number
-  tileHeight: number
 }
 
 type CollisionRect = {
@@ -1216,13 +1213,6 @@ export const createPixiTiledMapView = async ({
     destroy: () => {}
   }
   let questTrackerOverlay: {
-    syncFrame: () => void
-    destroy: () => void
-  } = {
-    syncFrame: () => {},
-    destroy: () => {}
-  }
-  let scenarioEditorOverlay: {
     syncFrame: () => void
     destroy: () => void
   } = {
@@ -2436,9 +2426,6 @@ export const createPixiTiledMapView = async ({
     mountElement,
     getQuestLog: () => currentQuestLog,
     onQuestLogChange: setQuestLog
-  })
-  scenarioEditorOverlay = createScenarioEditorOverlay({
-    mountElement
   })
 
   const syncRuntimeWarningBanner = () => {
@@ -5839,11 +5826,6 @@ export const createPixiTiledMapView = async ({
   app.ticker.add(playerShopOverlay.syncFrame, undefined, UPDATE_PRIORITY.UTILITY)
   app.ticker.add(pauseMenuOverlay.syncFrame, undefined, UPDATE_PRIORITY.UTILITY)
   app.ticker.add(questTrackerOverlay.syncFrame, undefined, UPDATE_PRIORITY.UTILITY)
-  app.ticker.add(
-    scenarioEditorOverlay.syncFrame,
-    undefined,
-    UPDATE_PRIORITY.UTILITY
-  )
   syncAllCharacterSprites()
   syncQuestNpcBadges()
   syncViewportDisplayScale()
@@ -5859,7 +5841,6 @@ export const createPixiTiledMapView = async ({
   playerShopOverlay.syncFrame()
   pauseMenuOverlay.syncFrame()
   questTrackerOverlay.syncFrame()
-  scenarioEditorOverlay.syncFrame()
   handleVisibilityChange()
 
   const destroy = () => {
@@ -5885,7 +5866,6 @@ export const createPixiTiledMapView = async ({
     app.ticker.remove(playerShopOverlay.syncFrame)
     app.ticker.remove(pauseMenuOverlay.syncFrame)
     app.ticker.remove(questTrackerOverlay.syncFrame)
-    app.ticker.remove(scenarioEditorOverlay.syncFrame)
     gameEventQueue.clear()
     monsterPatrolStates.clear()
     monsterSpawnStates.clear()
@@ -5926,7 +5906,6 @@ export const createPixiTiledMapView = async ({
     potionShopOverlay.destroy()
     pauseMenuOverlay.destroy()
     questTrackerOverlay.destroy()
-    scenarioEditorOverlay.destroy()
     gameSoundEffects.destroy()
     controllerRuntime.destroy()
     app.destroy({ removeView: true }, { children: true })
@@ -6096,45 +6075,6 @@ const loadTilesetRenderResources = async (
     imageTexture,
     tileTextures
   }
-}
-
-const createTileTexture = (
-  imageTexture: Texture,
-  tileset: TileTextureFrameSource,
-  localId: number
-): Texture => {
-  const columnIndex = localId % tileset.columns
-  const rowIndex = Math.floor(localId / tileset.columns)
-  const frameX =
-    tileset.margin + columnIndex * (tileset.tileWidth + tileset.spacing)
-  const frameY =
-    tileset.margin + rowIndex * (tileset.tileHeight + tileset.spacing)
-
-  return new Texture({
-    source: imageTexture.source,
-    frame: new Rectangle(
-      frameX,
-      frameY,
-      tileset.tileWidth,
-      tileset.tileHeight
-    ),
-    orig: new Rectangle(0, 0, tileset.tileWidth, tileset.tileHeight)
-  })
-}
-
-const resolveTilesetForTile = (
-  tile: ParsedTiledTile,
-  tilesets: ParsedTiledTileset[]
-): ParsedTiledTileset => {
-  for (let index = tilesets.length - 1; index >= 0; index -= 1) {
-    const tileset = tilesets[index]
-
-    if (tileset.firstGid <= tile.gid) {
-      return tileset
-    }
-  }
-
-  throw new Error(`Could not resolve tileset for gid ${tile.gid}`)
 }
 
 const clampScrollOffset = (value: number, max: number): number =>
