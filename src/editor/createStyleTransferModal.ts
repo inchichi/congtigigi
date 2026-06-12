@@ -1,8 +1,8 @@
 // AdaIN 스타일 트랜스퍼 모달 (헤더 🎨 버튼).
-// 콘텐츠는 세 가지로 고를 수 있다 — ① 파일 업로드 ② 게임 에셋(src/assets의 PNG)
+// 콘텐츠는 세 가지로 고를 수 있다 — ① 파일 업로드 ② 게임 에셋(src/games/my-sample-rpg/assets의 PNG)
 // ③ 맵 오브젝트(엔티티 트리에서 클릭한 타일 군집 — openForMapObject로 진입).
 // 변환은 로컬 Python 서비스(style-service, /api/style 프록시)가 수행하고, ②③은 결과를
-// '게임에 적용'으로 src/assets에 백업 후 덮어써 게임(iframe)이 Vite 리로드로 즉시 반영된다.
+// '게임에 적용'으로 src/games/my-sample-rpg/assets에 백업 후 덮어써 게임(iframe)이 Vite 리로드로 즉시 반영된다.
 // fetch가 비동기라 추론 중에도 에디터 UI는 멈추지 않는다.
 // 모달 패턴(인라인 display 토글·백드롭 클릭·Escape 닫기)은 createEditorApp의 설정 모달과 동일.
 
@@ -383,7 +383,7 @@ export const createStyleTransferModal = (): StyleTransferModal => {
       placeholder.value = ''
       assetSelect.append(placeholder)
       for (const asset of data.assets) {
-        const option = el('option', '', asset.path.replace(/^src\/assets\//, ''))
+        const option = el('option', '', asset.path.replace(/^src\/games\/my-sample-rpg\/assets\//, ''))
         option.value = asset.path
         assetSelect.append(option)
       }
@@ -628,7 +628,7 @@ export const createStyleTransferModal = (): StyleTransferModal => {
     void runTransfer()
   })
 
-  // ---------- 게임에 적용: src/assets의 원본을 백업 후 덮어쓰기 → Vite가 게임을 자동 리로드 ----------
+  // ---------- 게임에 적용: src/games/my-sample-rpg/assets의 원본을 백업 후 덮어쓰기 → Vite가 게임을 자동 리로드 ----------
   const runApply = async (): Promise<void> => {
     if (isApplying || !applyTarget) {
       return

@@ -8,7 +8,7 @@ import {
 } from './loadMonsterSheetTextures'
 
 const MONSTER_SLIME_MOTION_SHEET_URL = new URL(
-  '../../../assets/monsters/몬스터-말캉이.png',
+  '../assets/monsters/몬스터-말캉이.png',
   import.meta.url
 ).href
 const MONSTER_SLIME_IDLE_BAND: FrameBand = {

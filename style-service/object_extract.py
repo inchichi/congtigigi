@@ -4,7 +4,7 @@
 타일셋에서 타일을 조립해 투명 배경 RGBA PNG로 저장한다. 타일 원본이 알파를 갖고
 있어 별도 배경 제거는 필요 없다.
 
-저장 위치가 Vite 감시 밖(style-service/extracted-objects/)인 이유: src/assets에 쓰면
+저장 위치가 Vite 감시 밖(style-service/extracted-objects/)인 이유: src/games/my-sample-rpg/assets에 쓰면
 Vite가 에디터·게임 페이지를 전체 리로드해 "인식 → 추출 → 리로드 → 재인식" 루프가 된다.
 
 PNG 옆에 사이드카 JSON({key}.json)을 함께 저장한다 — 셀·타일셋 정보가 있어야

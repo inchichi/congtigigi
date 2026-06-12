@@ -7,17 +7,17 @@ export const CURRENT_GAME_PROJECT_PROFILE: GameStructureProfile = {
     {
       id: 'town',
       name: 'Town',
-      file: 'src/assets/maps/town.tmx'
+      file: 'src/games/my-sample-rpg/assets/maps/town.tmx'
     },
     {
       id: 'hunting-ground',
       name: 'Hunting Ground',
-      file: 'src/assets/maps/hunting-ground.tmx'
+      file: 'src/games/my-sample-rpg/assets/maps/hunting-ground.tmx'
     },
     {
       id: 'cave',
       name: 'Cave',
-      file: 'src/assets/maps/cave.tmx'
+      file: 'src/games/my-sample-rpg/assets/maps/cave.tmx'
     }
   ],
   npcs: [
@@ -25,31 +25,31 @@ export const CURRENT_GAME_PROJECT_PROFILE: GameStructureProfile = {
       id: 'blacksmith',
       name: '대장장이',
       map: 'town',
-      file: 'src/assets/maps/town.tmx'
+      file: 'src/games/my-sample-rpg/assets/maps/town.tmx'
     },
     {
       id: 'potion_merchant',
       name: '물약상인',
       map: 'town',
-      file: 'src/assets/maps/town.tmx'
+      file: 'src/games/my-sample-rpg/assets/maps/town.tmx'
     },
     {
       id: 'wizard',
       name: '마법사',
       map: 'town',
-      file: 'src/assets/maps/town.tmx'
+      file: 'src/games/my-sample-rpg/assets/maps/town.tmx'
     },
     {
       id: 'santa',
       name: '산타',
       map: 'town',
-      file: 'src/assets/maps/town.tmx'
+      file: 'src/games/my-sample-rpg/assets/maps/town.tmx'
     },
     {
       id: 'villager_1',
       name: '마을 주민',
       map: 'town',
-      file: 'src/assets/maps/town.tmx'
+      file: 'src/games/my-sample-rpg/assets/maps/town.tmx'
     }
   ],
   items: [
@@ -93,7 +93,7 @@ export const CURRENT_GAME_PROJECT_PROFILE: GameStructureProfile = {
     }
   ],
   dialogue_system: {
-    file: 'src/assets/lua/reply-with-message.lua',
+    file: 'src/games/my-sample-rpg/assets/lua/reply-with-message.lua',
     format: 'speaker, text, next'
   },
   event_system: {
@@ -101,8 +101,8 @@ export const CURRENT_GAME_PROJECT_PROFILE: GameStructureProfile = {
     register_function: 'registerDynamicEventDefinition'
   },
   modifiable_files: [
-    'src/assets/maps/town.tmx',
-    'src/assets/lua/reply-with-message.lua',
+    'src/games/my-sample-rpg/assets/maps/town.tmx',
+    'src/games/my-sample-rpg/assets/lua/reply-with-message.lua',
     'src/game/questLog.ts',
     'src/game/lua/createLuaCharacterControllerRuntime.ts',
     'src/rendering/createPixiTiledMapView.ts',

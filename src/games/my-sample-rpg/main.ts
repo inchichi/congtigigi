@@ -1,17 +1,17 @@
-import huntingGroundMapXml from '../../assets/maps/hunting-ground.tmx?raw'
-import caveMapXml from '../../assets/maps/cave.tmx?raw'
-import townMapXml from '../../assets/maps/town.tmx?raw'
-import replyWithMessageControllerLua from '../../assets/lua/reply-with-message.lua?raw'
-import wanderNearHomeControllerLua from '../../assets/lua/wander-near-home.lua?raw'
-import huntingGroundMusicUrl from '../../assets/sounds/전투브금.mp3'
-import townMusicUrl from '../../assets/sounds/브금5.mp3'
-import questFinUrl from '../../assets/tilesets/quest_fin.png'
-import questNewUrl from '../../assets/tilesets/quest_new.png'
-import caveEntranceVisibleUrl from '../../assets/tilesets/cave1-visible.png'
-import townTilesetXml from '../../assets/tilesets/town-32.tsx?raw'
-import townTilesetUrl from '../../assets/tilesets/town-32.png'
-import tinyDungeonTilesetXml from '../../assets/tilesets/tiny-dungeon-16.tsx?raw'
-import tinyDungeonTilesetUrl from '../../assets/tilesets/tiny-dungeon-16.png'
+import huntingGroundMapXml from './assets/maps/hunting-ground.tmx?raw'
+import caveMapXml from './assets/maps/cave.tmx?raw'
+import townMapXml from './assets/maps/town.tmx?raw'
+import replyWithMessageControllerLua from './assets/lua/reply-with-message.lua?raw'
+import wanderNearHomeControllerLua from './assets/lua/wander-near-home.lua?raw'
+import huntingGroundMusicUrl from './assets/sounds/전투브금.mp3'
+import townMusicUrl from './assets/sounds/브금5.mp3'
+import questFinUrl from './assets/tilesets/quest_fin.png'
+import questNewUrl from './assets/tilesets/quest_new.png'
+import caveEntranceVisibleUrl from './assets/tilesets/cave1-visible.png'
+import townTilesetXml from './assets/tilesets/town-32.tsx?raw'
+import townTilesetUrl from './assets/tilesets/town-32.png'
+import tinyDungeonTilesetXml from './assets/tilesets/tiny-dungeon-16.tsx?raw'
+import tinyDungeonTilesetUrl from './assets/tilesets/tiny-dungeon-16.png'
 
 import {
   PLAYER_CHARACTER_ID,
@@ -853,7 +853,7 @@ const renderFatalError = (error: unknown) => {
 
 
 if (import.meta.hot) {
-  import.meta.hot.accept('../../assets/lua/reply-with-message.lua?raw', (nextModule) => {
+  import.meta.hot.accept('./assets/lua/reply-with-message.lua?raw', (nextModule) => {
     if (!nextModule || !activeControllerRuntime) {
       return
     }
@@ -863,7 +863,7 @@ if (import.meta.hot) {
     })
   })
 
-  import.meta.hot.accept('../../assets/lua/wander-near-home.lua?raw', (nextModule) => {
+  import.meta.hot.accept('./assets/lua/wander-near-home.lua?raw', (nextModule) => {
     if (!nextModule || !activeControllerRuntime) {
       return
     }

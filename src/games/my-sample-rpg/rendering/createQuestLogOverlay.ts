@@ -29,7 +29,7 @@ export type QuestLogOverlay = {
 }
 
 const TINY_DUNGEON_TILESET_IMAGE_URL = new URL(
-  '../../../assets/tilesets/tiny-dungeon-16.png',
+  '../assets/tilesets/tiny-dungeon-16.png',
   import.meta.url
 ).href
 const TINY_DUNGEON_TILESET_WIDTH = 192

@@ -1,4 +1,4 @@
-"""게임 에셋(src/assets) 읽기·쓰기 게이트.
+"""게임 에셋(src/games/my-sample-rpg/assets) 읽기·쓰기 게이트.
 
 이 서비스가 디스크에 쓰는 모든 경로는 여기를 거친다 — 프로젝트의 에셋 폴더 밖으로는
 절대 쓰지 않고(경로 탈출 차단), 덮어쓰기 전에는 반드시 backups/에 원본을 복사한다.
@@ -36,7 +36,7 @@ def assets_root() -> Path:
 
 
 def resolve_asset_path(relative: str) -> Path:
-    """프로젝트 상대 경로('src/assets/...')를 검증해 절대 경로로 푼다. 탈출 시 ValueError."""
+    """프로젝트 상대 경로('src/games/my-sample-rpg/assets/...')를 검증해 절대 경로로 푼다. 탈출 시 ValueError."""
     config = adain_service.get_config()
     target = (config["project_dir"] / relative).resolve()
     root = assets_root()

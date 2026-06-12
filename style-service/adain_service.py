@@ -58,7 +58,7 @@ def get_config() -> dict:
         "vgg_path": _resolve_weight("ADAIN_VGG_PATH", "vggPath"),
         "decoder_path": _resolve_weight("ADAIN_DECODER_PATH", "decoderPath"),
         "project_dir": project_dir,
-        "assets_subdir": raw.get("assetsSubdir", "src/assets"),
+        "assets_subdir": raw.get("assetsSubdir", "src/games/my-sample-rpg/assets"),
         "host": os.environ.get("STYLE_SERVICE_HOST", raw["host"]),
         "port": int(os.environ.get("STYLE_SERVICE_PORT", raw["port"])),
     }

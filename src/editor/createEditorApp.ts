@@ -750,7 +750,7 @@ export const createEditorApp = ({
   // 게임이 바뀔 때(열기/복귀) 프리뷰를 그 게임에 맞게 동기화한다.
   const syncPreviewToGame = (): void => {
     // 음소거·스타일 변환은 내 게임(rpg)에만 배선돼 있다 — 'editor:set-mute' 핸들러도, 스타일
-    // 서비스의 대상(src/assets)도 my-sample-rpg뿐이라, 다른 게임을 보는 동안 누르면 화면의
+    // 서비스의 대상(src/games/my-sample-rpg/assets)도 my-sample-rpg뿐이라, 다른 게임을 보는 동안 누르면 화면의
     // 게임이 아니라 안 보이는 rpg의 설정/에셋만 바뀐다. 그 모드에선 헤더에서 숨긴다.
     // (hidden 속성 대신 인라인 display — 유틸리티 클래스가 [hidden]을 덮어쓰는 사고 방지 관례.)
     muteButton.style.display = isRpgPreviewMode() ? '' : 'none'
@@ -1065,7 +1065,7 @@ export const createEditorApp = ({
 
   // 트리에서 클릭한 타일 군집(나무·분수·가로등 등)을 부분 스타일 변환 대상으로 변환한다.
   // 셀·타일 id를 되찾고, 타일셋 .tsx에서 이미지 경로·격자 정보를 읽는다. 실패하면 undefined —
-  // 호출부가 상태줄로 알린다. 서비스는 src/assets 안만 다루므로 다른 폴더로 연 게임은 대상 외.
+  // 호출부가 상태줄로 알린다. 서비스는 src/games/my-sample-rpg/assets 안만 다루므로 다른 폴더로 연 게임은 대상 외.
   const buildStyleObjectTarget = (
     map: LoadedGameMap,
     entity: GameEntity
@@ -1094,7 +1094,7 @@ export const createEditorApp = ({
       return undefined
     }
     const imagePath = resolveRelativePath(tsxFile.path, info.imageSource)
-    if (!imagePath.startsWith('src/assets/')) {
+    if (!imagePath.startsWith('src/games/my-sample-rpg/assets/')) {
       return undefined
     }
     const kind = groupKindOf(entity.kind)
@@ -1150,7 +1150,7 @@ export const createEditorApp = ({
           const imagePath = tsxFile && info ? resolveRelativePath(tsxFile.path, info.imageSource) : undefined
           tilesetBySource.set(
             source,
-            info && imagePath && imagePath.startsWith('src/assets/')
+            info && imagePath && imagePath.startsWith('src/games/my-sample-rpg/assets/')
               ? { imagePath, tileWidth: info.tileWidth, tileHeight: info.tileHeight, columns: info.columns }
               : undefined
           )

@@ -3,7 +3,7 @@
   "vggPath": "models/vgg_normalised.pth",
   "decoderPath": "models/decoder.pth",
   "projectDir": "..",
-  "assetsSubdir": "src/assets",
+  "assetsSubdir": "src/games/my-sample-rpg/assets",
   "host": "127.0.0.1",
   "port": 8765
 }

@@ -7,9 +7,9 @@
   GET  /health          서비스 상태 + 디바이스 정보
   POST /style-transfer  multipart(content, style 이미지 + alpha, content_size, style_size)
                         → 결과 PNG 바이트
-  GET  /assets          프로젝트 src/assets의 PNG 목록 (에디터 '게임 에셋' 선택용)
+  GET  /assets          프로젝트 src/games/my-sample-rpg/assets의 PNG 목록 (에디터 '게임 에셋' 선택용)
   POST /stylize-object  맵 오브젝트(타일 군집) 부분 변환 → 오브젝트 미리보기 + 패치된 타일셋
-  POST /apply-asset     결과 PNG를 src/assets의 기존 파일에 백업 후 덮어쓰기 (게임 즉시 반영)
+  POST /apply-asset     결과 PNG를 src/games/my-sample-rpg/assets의 기존 파일에 백업 후 덮어쓰기 (게임 즉시 반영)
 
 동기 엔드포인트는 FastAPI가 스레드풀에서 실행하므로 추론 중에도
 서버(및 health 체크)는 블로킹되지 않는다.
