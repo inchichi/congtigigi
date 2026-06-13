@@ -612,9 +612,10 @@ export const createPlayerEquipmentOverlay = ({
     element.style.backgroundRepeat = 'no-repeat'
     element.style.backgroundPosition = '0 0'
     element.style.backgroundSize = '100% 100%'
-    element.style.backgroundColor = '#fff9ee'
-    element.style.border = '1px solid rgba(111, 89, 58, 0.42)'
-    element.style.boxShadow = '0 0 0 1px rgba(255, 255, 255, 0.12)'
+    // 에디터 다크 테마와 통일된 차콜 카드 + 브론즈 테두리(색상만 변경, 로직 동일).
+    element.style.backgroundColor = '#1a1a1a'
+    element.style.border = '1px solid rgba(217, 168, 92, 0.28)'
+    element.style.boxShadow = 'inset 0 0 0 1px rgba(255, 255, 255, 0.04)'
   }
 
   const hasInventoryDragData = (dataTransfer: DataTransfer): boolean =>

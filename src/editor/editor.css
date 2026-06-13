@@ -1,11 +1,140 @@
 /* 에디터 전용 스타일 — 게임의 styles.css를 가져오지 않으므로 게임 폰트/색이 새어들지 않는다.
-   독립 도구처럼 보이도록 모던 sans-serif + 중립 다크 배경을 쓴다. (게임은 iframe 안에서 자기 스타일대로 렌더된다.) */
+   게임 화면이 주인공이 되도록 UI는 어두운 저채도 갈색/회색으로 가라앉힌다.
+   (게임은 iframe 안에서 자기 스타일대로 렌더된다.) */
 @layer theme, base, components, utilities;
 @import 'tailwindcss/theme.css' layer(theme);
 @import 'tailwindcss/utilities.css' layer(utilities);
+/* 에디터(제작 도구)는 게임 픽셀 폰트가 아니라 전문 UI 폰트(Pretendard)를 쓴다.
+   발표 환경에 미설치돼 있어도 보장되도록 CDN으로 불러온다(없으면 SUIT/system-ui로 폴백). */
+@import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css');
 
 * {
   box-sizing: border-box;
+}
+
+/* 에디터 표준 폰트 클래스 — 전문 툴 UI 폰트(본문 상속과 동일). 게임 픽셀 폰트는 쓰지 않는다. */
+.settings-game-font {
+  font-family: 'Pretendard', 'SUIT', system-ui, 'Apple SD Gothic Neo',
+    'Noto Sans KR', sans-serif;
+}
+
+/* 드래그 선택 색 — 브라우저 기본 파란 하이라이트가 UI 오류처럼 보여 따뜻한 금색으로 바꾼다.
+   (생성 결과·프롬프트처럼 복사할 텍스트에서만 보이게 되고, 왼쪽 패널은 select-none으로 아예 선택 불가.) */
+::selection {
+  background: rgba(216, 161, 90, 0.35);
+}
+
+/* 은은한 그라데이션 테두리 — 위쪽은 옅은 금색, 아래로 갈수록 어두운 갈색으로 가라앉는다.
+   border-color는 그라데이션이 안 되므로 투명 테두리 + 이중 배경(안쪽 채움/테두리 띠)으로 구현.
+   안쪽 채움색은 --bgb 변수로 요소마다 지정한다(hover 시 변수만 바꾸면 밝아진다). */
+.box-grad-border {
+  --bgb: #252526;
+  border: 1px solid transparent;
+  /* 일반 패널 테두리는 VSCode 중립 그레이 — 금색 그라데이션은 강조 패널(--strong)에만 남긴다. */
+  background-image:
+    linear-gradient(var(--bgb), var(--bgb)),
+    linear-gradient(180deg, rgba(217, 168, 92, 0.35), rgba(217, 168, 92, 0.12));
+  background-origin: border-box;
+  background-clip: padding-box, border-box;
+}
+
+/* 선택 상태용 — 테두리 그라데이션만 조금 더 또렷한 금색. */
+.box-grad-border--strong {
+  background-image:
+    linear-gradient(var(--bgb), var(--bgb)),
+    linear-gradient(180deg, rgba(244, 216, 141, 0.8), rgba(160, 116, 60, 0.38));
+}
+
+/* 주인공 패널용 — 테두리를 2px로 두껍게. */
+.box-grad-border--thick {
+  border-width: 2px;
+}
+
+/* 진행 중 단계의 약한 펄스 — 금색이 숨쉬듯 깜빡인다. */
+@keyframes step-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 6px rgba(231, 177, 90, 0.18);
+  }
+  50% {
+    box-shadow: 0 0 12px rgba(231, 177, 90, 0.3);
+  }
+}
+.step-pulse {
+  animation: step-pulse 1.6s ease-in-out infinite;
+}
+
+/* 의뢰가 적히는 순간 — 입력창 테두리가 금색으로 한 번 반짝이고 사라진다. */
+@keyframes input-flash {
+  0% {
+    border-color: #f3d7a2;
+    box-shadow: 0 0 18px rgba(231, 177, 90, 0.45);
+  }
+  100% {
+    border-color: rgba(220, 161, 75, 0.45);
+    box-shadow: 0 0 0 rgba(231, 177, 90, 0);
+  }
+}
+.input-flash {
+  animation: input-flash 600ms ease-out;
+}
+
+/* 이야기가 도착한 순간 — 결과 보드 상세 창이 금색으로 한 번 빛난다(시선 유도). */
+@keyframes board-flash {
+  0% {
+    border-color: #f3d7a2;
+    box-shadow: 0 0 22px rgba(231, 177, 90, 0.5);
+  }
+  100% {
+    border-color: rgba(217, 168, 92, 0.28);
+    box-shadow: 0 0 0 rgba(231, 177, 90, 0);
+  }
+}
+.board-flash {
+  animation: board-flash 1s ease-out;
+}
+
+/* 에셋 카드 hover 정보 카드 — 이름이 잘릴 때도 전체 이름·타입을 보여준다. */
+[data-tip] {
+  position: relative;
+}
+[data-tip]:hover::after {
+  content: attr(data-tip);
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 6px);
+  transform: translateX(-50%);
+  z-index: 30;
+  white-space: nowrap;
+  padding: 4px 8px;
+  border-radius: 8px;
+  background: #252526;
+  border: 1px solid #d09a4c;
+  color: #d4d4d4;
+  font-size: 11px;
+  line-height: 1.2;
+  pointer-events: none;
+}
+
+/* '✓ 선택됨' 배지는 선택된 에셋 카드에서만 보인다(클래스 교체만으로 토글). */
+.entity-check {
+  display: none;
+}
+.entity-card--selected .entity-check {
+  display: inline-flex;
+}
+
+/* 상태 배지 전환용 짧은 페이드 — 선택/해제가 즉시 눈에 들어온다. */
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.fade-in {
+  animation: fade-in 200ms ease-out;
 }
 
 /* preflight를 불러오지 않으므로 [hidden]이 flex/grid 요소에 안 먹힌다(브라우저 UA 규칙을 .flex가 덮어씀).
@@ -47,10 +176,13 @@ body {
   height: 100%;
   /* select 팝업·스크롤바 같은 UA 위젯도 다크로 — 흰 팝업이 튀지 않게 한다. */
   color-scheme: dark;
-  background: #09090b;
-  color: #e4e4e7;
-  font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto,
-    'Apple SD Gothic Neo', 'Noto Sans KR', sans-serif;
+  /* VSCode Dark+ 계층: 최상위 배경. 게임(iframe) 내부는 자체 스타일이라 영향 없다. */
+  background: #1e1e1e;
+  color: #d4d4d4;
+  /* 에디터는 제작 도구이므로 게임 픽셀 폰트가 아니라 전문 UI 폰트(Pretendard)를 쓴다.
+     게임 화면/오버레이는 game styles.css의 픽셀 폰트를 그대로 유지한다(폰트 시스템 분리). */
+  font-family: 'Pretendard', 'SUIT', system-ui, 'Apple SD Gothic Neo',
+    'Noto Sans KR', sans-serif;
   /* 에디터 컨트롤은 전부 rem 기반(Tailwind)이라, 루트 폰트만 창 폭에 비례시키면
      엔티티 목록·프롬프트·버튼이 작은 화면에서 함께 작아진다. 폭 1000px 이상에선 14px,
      그 아래로는 폭에 따라 11.5px까지 완만하게 줄어든다. */
@@ -61,19 +193,31 @@ body {
   text-rendering: optimizeLegibility;
 }
 
-/* 다크 툴에 어울리는 얇은 스크롤바 — 기본 두꺼운 회색 스크롤바가 "구린" 인상을 준다. */
+/* 다크 브론즈 스크롤바 — 4px 초슬림, 완전 둥근 형태, 기본은 흐리고 hover/스크롤 영역에서만 또렷.
+   에셋 패널·결과 보드 등 에디터의 모든 스크롤 영역에 공통 적용된다. */
 * {
   scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.15) transparent;
+  scrollbar-color: rgba(201, 138, 58, 0.45) #1e1e1e;
 }
 *::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 4px;
+  height: 4px;
 }
-*::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.12);
+*::-webkit-scrollbar-track {
+  background: #1e1e1e;
   border-radius: 9999px;
 }
+*::-webkit-scrollbar-thumb {
+  background: rgba(201, 138, 58, 0.45);
+  border-radius: 9999px;
+  /* 목록이 아주 길어도 썸이 잡기 쉬운 길이를 유지한다(사용성 보정). */
+  min-height: 40px;
+  min-width: 40px;
+}
+/* 스크롤 영역 위에 마우스가 있으면 한 단계 밝게, 썸을 직접 잡으면 가장 밝게. */
+*:hover::-webkit-scrollbar-thumb {
+  background: rgba(217, 168, 92, 0.8);
+}
 *::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.22);
+  background: rgba(232, 185, 106, 1);
 }

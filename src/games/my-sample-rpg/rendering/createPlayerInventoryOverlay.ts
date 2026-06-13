@@ -563,9 +563,10 @@ export const createPlayerInventoryOverlay = ({
     element.style.backgroundRepeat = 'no-repeat'
     element.style.backgroundPosition = '0 0'
     element.style.backgroundSize = '100% 100%'
-    element.style.backgroundColor = '#fff9ee'
-    element.style.border = '1px solid rgba(111, 89, 58, 0.42)'
-    element.style.boxShadow = '0 0 0 1px rgba(255, 255, 255, 0.12)'
+    // 에디터 다크 테마와 통일된 차콜 슬롯(색상만 변경, 슬롯/드래그 로직 동일).
+    element.style.backgroundColor = '#1e1e1e'
+    element.style.border = '1px solid #444444'
+    element.style.boxShadow = 'inset 0 0 0 1px rgba(255, 255, 255, 0.03)'
   }
 
   const setCardDimensions = (
