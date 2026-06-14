@@ -45,6 +45,7 @@ import {
   type StyleTransferMapObject
 } from './createStyleTransferModal'
 import { createStyleRevertControl } from './createStyleRevertControl'
+import { createExternalSpriteStyler } from './createExternalSpriteStyler'
 import type {
   GameEntity,
   GenerationFeedback,
@@ -316,8 +317,10 @@ export const createEditorApp = ({
   // 되돌리기 버튼의 활성 카운트가 즉시 갱신되도록 콜백을 연결한다.
   const styleRevert = createStyleRevertControl()
   const styleTransfer = createStyleTransferModal({ onAssetChanged: styleRevert.refresh })
+  // 외부 게임(Love2D 등) 스프라이트 직접 스타일 — my-sample-rpg 에셋과 분리된 /ext/* 경로.
+  const externalStyler = createExternalSpriteStyler()
   const headerRight = el('div', 'flex items-center gap-3')
-  headerRight.append(muteButton, styleTransfer.openButton, styleRevert.button, settingsButton, connection)
+  headerRight.append(muteButton, styleTransfer.openButton, styleRevert.button, externalStyler.button, settingsButton, connection)
   header.append(brand, headerRight)
 
   // LLM 챗 스타일 배치: 가운데가 라이브 게임(위 가득) + 프롬프트(아래), 오른쪽이 생성 결과.
@@ -1020,7 +1023,7 @@ export const createEditorApp = ({
     })()
   })
 
-  root.append(header, body, settingsBackdrop, styleTransfer.backdrop, styleRevert.backdrop, landingBackdrop)
+  root.append(header, body, settingsBackdrop, styleTransfer.backdrop, styleRevert.backdrop, externalStyler.backdrop, landingBackdrop)
   mountElement.append(root)
 
   // ---------- behavior ----------

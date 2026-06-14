@@ -27,6 +27,7 @@ from PIL import Image
 
 import adain_service
 import asset_store
+import external_assets
 import monster_stylize
 import object_extract
 import tile_stylize
@@ -494,6 +495,180 @@ def apply_asset(file: UploadFile = File(...), path: str = Form(...)):
     except FileNotFoundError as error:
         return JSONResponse(status_code=404, content={"error": str(error)})
     return {"ok": True, "backup": backup}
+
+
+# ── 외부 게임 프로젝트(예: Love2D Legend of Lua) 스프라이트 직접 스타일 적용 ──
+# my-sample-rpg 에셋과 분리된 external_assets 게이트(originals-ext/, backups-ext/)를 쓴다.
+# 외부 폴더는 Vite 감시 밖이라 적용해도 에디터/게임 자동 리로드가 없다 — 게임을 다시
+# 실행하면 반영된다(스프라이트는 시작 시 1회 로드).
+
+
+def _ext_area_ok(image: Image.Image, content_size: int = 512) -> bool:
+    short_edge = min(image.width, image.height)
+    if short_edge == 0:
+        return False
+    scale = content_size / short_edge
+    return image.width * scale * image.height * scale <= 4096 * 4096
+
+
+@app.get("/ext/projects")
+def ext_projects() -> dict:
+    return {"projects": external_assets.get_projects()}
+
+
+@app.get("/ext/assets")
+def ext_assets(project: str):
+    try:
+        return {"assets": external_assets.list_assets(project)}
+    except ValueError as error:
+        return JSONResponse(status_code=404, content={"error": str(error)})
+
+
+@app.get("/ext/asset")
+def ext_asset(project: str, path: str):
+    """외부 스프라이트 원시 PNG(썸네일/미리보기용). 외부 폴더는 Vite가 서빙하지 않으므로
+    에디터는 이 엔드포인트로 이미지를 받는다."""
+    try:
+        return Response(content=external_assets.read_png(project, path), media_type="image/png")
+    except ValueError as error:
+        return JSONResponse(status_code=422, content={"error": str(error)})
+    except FileNotFoundError as error:
+        return JSONResponse(status_code=404, content={"error": str(error)})
+
+
+@app.get("/ext/asset-status")
+def ext_asset_status(project: str, path: str):
+    try:
+        return external_assets.asset_status(project, path)
+    except ValueError as error:
+        return JSONResponse(status_code=422, content={"error": str(error)})
+
+
+@app.get("/ext/styled")
+def ext_styled(project: str):
+    try:
+        return {"assets": external_assets.list_styled_assets(project)}
+    except ValueError as error:
+        return JSONResponse(status_code=404, content={"error": str(error)})
+
+
+@app.post("/ext/apply")
+def ext_apply(
+    style: UploadFile = File(...),
+    project: str = Form(...),
+    path: str = Form(...),
+    alpha: float = Form(1.0),
+    alpha_erode: int = Form(0),
+):
+    """외부 스프라이트 1장에 스타일을 적용해 백업 후 덮어쓴다. 항상 최초 원본에서 변환한다."""
+    if not 0.0 <= alpha <= 1.0:
+        return JSONResponse(status_code=422, content={"error": "alpha는 0.0~1.0 사이여야 합니다."})
+    if not 0 <= alpha_erode <= 3:
+        return JSONResponse(status_code=422, content={"error": "alpha_erode는 0~3 사이여야 합니다."})
+
+    try:
+        source_bytes = external_assets.read_original_or_current(project, path)
+    except ValueError as error:
+        return JSONResponse(status_code=422, content={"error": str(error)})
+    except FileNotFoundError as error:
+        return JSONResponse(status_code=404, content={"error": str(error)})
+
+    try:
+        source = Image.open(io.BytesIO(source_bytes))
+        source.load()
+        style_image = Image.open(io.BytesIO(style.file.read()))
+        style_image.load()
+    except OSError:
+        return JSONResponse(status_code=422, content={"error": "이미지 파일을 해석할 수 없습니다."})
+
+    if not _ext_area_ok(source) or not _ext_area_ok(style_image):
+        return JSONResponse(status_code=422, content={"error": "이미지의 추론 해상도가 한도(4096×4096 상당)를 초과합니다."})
+
+    try:
+        # preserve_size=True: 시트 프레임 좌표가 어긋나지 않게 원본 해상도 유지.
+        result = adain_service.style_transfer_image(
+            source, style_image, alpha=alpha, alpha_erode=alpha_erode, preserve_size=True
+        )
+    except FileNotFoundError as error:
+        return JSONResponse(status_code=503, content={"error": str(error)})
+
+    buffer = io.BytesIO()
+    result.save(buffer, format="PNG")
+    try:
+        backup = external_assets.backup_and_write(project, path, buffer.getvalue())
+    except ValueError as error:
+        return JSONResponse(status_code=422, content={"error": str(error)})
+    except FileNotFoundError as error:
+        return JSONResponse(status_code=404, content={"error": str(error)})
+    return {"ok": True, "backup": backup}
+
+
+@app.post("/ext/batch-apply")
+def ext_batch_apply(
+    style: UploadFile = File(...),
+    project: str = Form(...),
+    paths: str = Form(...),
+    alpha: float = Form(1.0),
+    alpha_erode: int = Form(0),
+):
+    """여러 외부 스프라이트에 한 스타일을 일괄 적용한다(스타일 1회 업로드)."""
+    if not 0.0 <= alpha <= 1.0:
+        return JSONResponse(status_code=422, content={"error": "alpha는 0.0~1.0 사이여야 합니다."})
+    if not 0 <= alpha_erode <= 3:
+        return JSONResponse(status_code=422, content={"error": "alpha_erode는 0~3 사이여야 합니다."})
+    try:
+        path_list = json.loads(paths)
+        assert isinstance(path_list, list) and 0 < len(path_list) <= 256
+    except (json.JSONDecodeError, AssertionError):
+        return JSONResponse(status_code=422, content={"error": "paths 형식이 올바르지 않습니다(1~256개)."})
+
+    try:
+        style_image = Image.open(io.BytesIO(style.file.read()))
+        style_image.load()
+    except OSError:
+        return JSONResponse(status_code=422, content={"error": "스타일 이미지를 해석할 수 없습니다."})
+    if not _ext_area_ok(style_image):
+        return JSONResponse(status_code=422, content={"error": "스타일 이미지의 추론 해상도가 한도를 초과합니다."})
+
+    applied: list[str] = []
+    failed: list[dict] = []
+    for path in path_list:
+        try:
+            source = Image.open(io.BytesIO(external_assets.read_original_or_current(project, path)))
+            source.load()
+            if not _ext_area_ok(source):
+                raise ValueError("추론 해상도 한도 초과")
+            result = adain_service.style_transfer_image(
+                source, style_image, alpha=alpha, alpha_erode=alpha_erode, preserve_size=True
+            )
+            buffer = io.BytesIO()
+            result.save(buffer, format="PNG")
+            external_assets.backup_and_write(project, path, buffer.getvalue())
+            applied.append(path)
+        except (ValueError, FileNotFoundError, OSError) as error:
+            failed.append({"path": str(path), "error": str(error)})
+    return {"applied": applied, "failed": failed}
+
+
+@app.post("/ext/revert")
+def ext_revert(payload: dict = Body(...)):
+    """외부 스프라이트를 최초 원본으로 일괄 복원한다(전체/선택 되돌리기)."""
+    project = payload.get("project")
+    paths = payload.get("paths")
+    if not isinstance(project, str) or not isinstance(paths, list) or not 0 < len(paths) <= 1024:
+        return JSONResponse(status_code=422, content={"error": "project/paths 형식이 올바르지 않습니다."})
+    reverted: list[str] = []
+    failed: list[dict] = []
+    for path in paths:
+        if not isinstance(path, str):
+            failed.append({"path": str(path), "error": "경로가 문자열이 아닙니다."})
+            continue
+        try:
+            external_assets.revert_asset(project, path)
+            reverted.append(path)
+        except (ValueError, FileNotFoundError) as error:
+            failed.append({"path": path, "error": str(error)})
+    return {"reverted": reverted, "failed": failed}
 
 
 if __name__ == "__main__":

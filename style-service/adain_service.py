@@ -53,12 +53,26 @@ def get_config() -> dict:
     if not project_dir.is_absolute():
         project_dir = (_SERVICE_DIR / project_dir).resolve()
 
+    # 외부 게임 프로젝트(예: Love2D LOL) — 스프라이트 직접 스타일 적용용 허용 루트.
+    # 루트는 서비스 폴더 기준 상대 경로를 절대 경로로 정규화한다(하드코딩 금지).
+    external_projects = {}
+    for pid, entry in raw.get("externalProjects", {}).items():
+        root = Path(os.environ.get(f"EXT_{pid.upper()}_ROOT", entry["root"]))
+        if not root.is_absolute():
+            root = (_SERVICE_DIR / root).resolve()
+        external_projects[pid] = {
+            "name": entry.get("name", pid),
+            "root": root,
+            "assets_subdir": entry.get("assetsSubdir"),
+        }
+
     _config = {
         "adain_dir": adain_dir,
         "vgg_path": _resolve_weight("ADAIN_VGG_PATH", "vggPath"),
         "decoder_path": _resolve_weight("ADAIN_DECODER_PATH", "decoderPath"),
         "project_dir": project_dir,
         "assets_subdir": raw.get("assetsSubdir", "src/games/my-sample-rpg/assets"),
+        "external_projects": external_projects,
         "host": os.environ.get("STYLE_SERVICE_HOST", raw["host"]),
         "port": int(os.environ.get("STYLE_SERVICE_PORT", raw["port"])),
     }
