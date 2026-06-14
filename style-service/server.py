@@ -287,6 +287,20 @@ def batch_apply(
         image.save(buffer, format="PNG")
         return buffer.getvalue()
 
+    # 변환을 모두 끝낸 뒤(아래 1단계) 파일 쓰기는 맨 마지막에 한 번에 한다(2단계). 쓰기를
+    # 변환 중간중간 하면 src/ 파일이 바뀔 때마다 Vite가 페이지를 새로고침해 N개면 N번
+    # 깜빡인다. 결과를 메모리(pending: 경로→이미지)에 모았다가 마지막에 몰아 쓰면, 쓰기들이
+    # 수 ms 안에 끝나 Vite 새로고침이 한 번으로 합쳐진다. 같은 타일셋을 쓰는 오브젝트들은
+    # 메모리에서 누적 패치해 그 타일셋도 한 번만 쓴다.
+    pending: dict[str, Image.Image] = {}
+
+    def _working(path: str) -> Image.Image:
+        if path not in pending:
+            image = Image.open(asset_store.resolve_asset_path(path))
+            image.load()
+            pending[path] = image
+        return pending[path]
+
     applied: list[str] = []
     failed: list[dict] = []
     for target in target_list:
@@ -296,35 +310,49 @@ def batch_apply(
                 path = target["path"]
                 source = Image.open(asset_store.resolve_asset_path(path))
                 source.load()
-                result = adain_service.style_transfer_image(
+                pending[path] = adain_service.style_transfer_image(
                     source, style_image, alpha=alpha, alpha_erode=alpha_erode, preserve_size=True
                 )
-                asset_store.backup_and_write(path, _png_bytes(result))
                 applied.append(path)
             elif kind == "object":
                 key = target["key"]
+                meta = object_extract.read_meta(key)
                 cutout = Image.open(io.BytesIO(object_extract.read_png(key)))
                 cutout.load()
                 # 누끼 컷아웃은 RGBA라 알파 경로가 원본 크기를 보존한다(역패치에 크기 정합 필요).
                 styled = adain_service.style_transfer_image(
                     cutout, style_image, alpha=alpha, alpha_erode=alpha_erode
                 )
-                object_extract.apply_styled_object(key, _png_bytes(styled))
+                # 같은 타일셋을 공유하는 오브젝트들은 메모리상 working 이미지에 누적 패치한다.
+                pending[meta["tilesetPath"]] = tile_stylize.patch_tileset_from_object(
+                    _working(meta["tilesetPath"]),
+                    styled,
+                    meta["cells"],
+                    columns=meta["columns"],
+                    tile_width=meta["tileWidth"],
+                    tile_height=meta["tileHeight"],
+                )
                 applied.append(key)
             elif kind == "monster":
-                sheet_bytes = asset_store.read_original_or_current(target["sheet_path"])
-                sheet = Image.open(io.BytesIO(sheet_bytes))
+                path = target["sheet_path"]
+                sheet = Image.open(io.BytesIO(asset_store.read_original_or_current(path)))
                 sheet.load()
-                result = monster_stylize.stylize_monster_sheet(
+                pending[path] = monster_stylize.stylize_monster_sheet(
                     sheet, style_image, target["monster_key"], alpha=alpha, alpha_erode=alpha_erode
                 )
-                asset_store.backup_and_write(target["sheet_path"], _png_bytes(result))
-                applied.append(target["sheet_path"])
+                applied.append(path)
             else:
                 failed.append({"target": str(target), "error": "알 수 없는 종류"})
         except (KeyError, TypeError, ValueError, FileNotFoundError, OSError) as error:
             failed.append({"target": str(target), "error": str(error)})
-    return {"applied": applied, "failed": failed}
+
+    # 2단계: 모아둔 결과를 한 번에 쓴다 — Vite 새로고침이 한 번으로 합쳐진다.
+    for path, image in pending.items():
+        try:
+            asset_store.backup_and_write(path, _png_bytes(image))
+        except (ValueError, FileNotFoundError, OSError) as error:
+            failed.append({"target": path, "error": str(error)})
+    return {"applied": applied, "failed": failed, "written": list(pending.keys())}
 
 
 @app.get("/asset-status")
