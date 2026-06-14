@@ -962,8 +962,29 @@ export const createEditorApp = ({
     ;(apiKey.trim().length > 0 ? promptInput : apiKeyInput).focus()
   }
 
+  // 선택한 프로젝트를 탭 세션에 기억한다 — 스타일 적용 등으로 Vite가 페이지를 새로고침해도
+  // 시작 화면으로 되돌아가지 않고 편집을 이어가게 한다. 샘플만 자동 복귀 대상이다(외부 폴더는
+  // FS 핸들이 새로고침 후 사라져 복원할 수 없다). 새 탭/새 방문에선 sessionStorage가 비어
+  // 정상적으로 시작 화면이 뜬다.
+  const ACTIVE_PROJECT_SESSION_KEY = 'my-sample-rpg:editor-active-project'
+  const rememberSampleProject = (): void => {
+    try {
+      sessionStorage.setItem(ACTIVE_PROJECT_SESSION_KEY, 'sample')
+    } catch {
+      // 저장 차단(프라이빗 모드 등)이면 자동 복귀만 안 될 뿐 동작엔 지장 없다.
+    }
+  }
+  const forgetActiveProject = (): void => {
+    try {
+      sessionStorage.removeItem(ACTIVE_PROJECT_SESSION_KEY)
+    } catch {
+      // 무시
+    }
+  }
+
   landingSampleButton.addEventListener('click', () => {
     // 샘플 게임 상태는 부팅 때 이미 로드돼 있다(트리·프로필) — 프리뷰 실행만 시작하면 된다.
+    rememberSampleProject()
     startEditing()
   })
   landingOpenButton.addEventListener('click', () => {
@@ -975,6 +996,8 @@ export const createEditorApp = ({
       landingOpenButton.disabled = false
       landingSampleButton.disabled = false
       if (opened) {
+        // 외부 폴더는 새로고침 후 복원 불가 — 샘플 자동 복귀 플래그를 끈다.
+        forgetActiveProject()
         // runOpenProject가 프리뷰·브리지 동기화까지 끝냈다 — 화면만 닫고 포커스를 준다.
         landingBackdrop.style.display = 'none'
         ;(apiKey.trim().length > 0 ? promptInput : apiKeyInput).focus()
@@ -2163,7 +2186,12 @@ export const createEditorApp = ({
   // 폴더 열기/분석은 결과가 중앙(분석 패널·상태줄)에 나오므로, 설정 모달을 닫아 그걸 가리지 않게 한다.
   openButton.addEventListener('click', () => {
     closeSettings()
-    void runOpenProject()
+    void (async () => {
+      if (await runOpenProject()) {
+        // 외부 폴더로 바꾸면 샘플 자동 복귀를 끈다(새로고침 시 폴더가 아니라 시작 화면으로).
+        forgetActiveProject()
+      }
+    })()
   })
   analyzeButton.addEventListener('click', () => {
     closeSettings()
@@ -2240,6 +2268,17 @@ export const createEditorApp = ({
   render()
   // 프리뷰·브리지 동기화와 포커스는 여기서 하지 않는다 — 시작 화면(프로젝트 선택)에서 선택한
   // 뒤에 startEditing/runOpenProject가 수행한다. 선택 전엔 게임이 자동 실행되지 않는다.
+  // 단, 같은 탭에서 이미 샘플로 시작했다면(스타일 적용 등으로 새로고침된 경우) 시작 화면을
+  // 건너뛰고 바로 편집을 이어간다 — 부팅 시 game은 항상 샘플이라 안전하다.
+  let resumeSample = false
+  try {
+    resumeSample = sessionStorage.getItem(ACTIVE_PROJECT_SESSION_KEY) === 'sample'
+  } catch {
+    resumeSample = false
+  }
+  if (resumeSample) {
+    startEditing()
+  }
   if (game.parseErrors.length > 0) {
     setStatus(`기본 맵 일부를 읽지 못했습니다${parseErrorNote()}`)
   }
