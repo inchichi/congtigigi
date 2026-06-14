@@ -108,6 +108,21 @@ def backup_and_transform(relative: str, transform: Callable[[bytes], bytes]) -> 
         return _backup_and_write_locked(target, relative, data)
 
 
+def read_original_or_current(relative: str) -> bytes:
+    """최초 원본이 시드돼 있으면 그 바이트를, 없으면 현재 파일 바이트를 돌려준다.
+
+    몬스터 시트처럼 "스타일은 매번 깨끗한 원본에서" 입혀야 하는 경우에 쓴다 — 이미 한 번
+    스타일이 입혀진(또는 깨진) 현재 파일을 다시 변환하면 색이 누적/오염되기 때문이다.
+    """
+    target = resolve_asset_path(relative)
+    original_path = _original_path(relative)
+    if original_path.is_file():
+        return original_path.read_bytes()
+    if target.is_file():
+        return target.read_bytes()
+    raise FileNotFoundError(f"에셋을 찾을 수 없습니다: {relative}")
+
+
 def asset_status(relative: str) -> dict:
     """원본 보유 여부와 "현재 스타일이 적용된 상태"(원본과 내용이 다름) 여부."""
     target = resolve_asset_path(relative)
@@ -129,3 +144,24 @@ def revert_asset(relative: str) -> None:
         raise FileNotFoundError(f"되돌릴 원본이 없습니다(스타일이 적용된 적 없음): {relative}")
     with _write_lock:
         shutil.copy2(original_path, target)
+
+
+def list_styled_assets() -> list[dict]:
+    """현재 스타일이 적용된(=원본과 내용이 다른) 에셋 목록.
+
+    originals/가 곧 "스타일이 적용된 적 있는 에셋"의 단일 진실 소스다. 파일명은
+    relative 경로의 '/'를 '__'로 치환한 것이라 역으로 풀어 검증한 뒤, 현재 파일과
+    바이트 비교로 styled만 남긴다(되돌린 뒤 그대로면 제외). 깨진 항목은 조용히 건너뛴다.
+    """
+    if not _ORIGINALS_DIR.is_dir():
+        return []
+    out = []
+    for original in sorted(_ORIGINALS_DIR.glob("*.png")):
+        relative = original.name.replace("__", "/")
+        try:
+            target = resolve_asset_path(relative)
+        except ValueError:
+            continue
+        if target.is_file() and original.read_bytes() != target.read_bytes():
+            out.append({"path": relative, "size": target.stat().st_size})
+    return out

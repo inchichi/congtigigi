@@ -12,7 +12,7 @@ import {
   type LoadedGame,
   type LoadedGameMap
 } from './loadGame'
-import { extractTmxTilesetImageInfo } from './tmxTileEntities'
+import { extractTilesetTileIdByType, extractTmxTilesetImageInfo } from './tmxTileEntities'
 import { analyzeGame, type GameAnalysis } from './analyzeGame'
 import { extractTmxLayerNames, extractTmxObjects, type TmxObject } from './tmxObjects'
 import { readLocalStorage, writeLocalStorage } from './safeStorage'
@@ -38,6 +38,7 @@ import {
   createStyleTransferModal,
   type StyleTransferMapObject
 } from './createStyleTransferModal'
+import { createStyleRevertControl } from './createStyleRevertControl'
 import type { GameEntity, GenerationResult } from './gameAdapter'
 
 // 하드코딩 어댑터가 엔티티를 못 찾은 미지의 게임을, LLM 분석이 찾은 editable 그룹으로 채운다.
@@ -280,9 +281,12 @@ export const createEditorApp = ({
   })
 
   // AdaIN 스타일 트랜스퍼 — 로컬 Python 서비스(/api/style 프록시)로 이미지를 변환하는 독립 모달.
-  const styleTransfer = createStyleTransferModal()
+  // 되돌리기 컨트롤(전체/선택 복원)과 같은 백엔드(originals/)를 공유하므로, 적용/되돌리기 후
+  // 되돌리기 버튼의 활성 카운트가 즉시 갱신되도록 콜백을 연결한다.
+  const styleRevert = createStyleRevertControl()
+  const styleTransfer = createStyleTransferModal({ onAssetChanged: styleRevert.refresh })
   const headerRight = el('div', 'flex items-center gap-3')
-  headerRight.append(muteButton, styleTransfer.openButton, settingsButton, connection)
+  headerRight.append(muteButton, styleTransfer.openButton, styleRevert.button, settingsButton, connection)
   header.append(brand, headerRight)
 
   // LLM 챗 스타일 배치: 가운데가 라이브 게임(위 가득) + 프롬프트(아래), 오른쪽이 생성 결과.
@@ -510,7 +514,7 @@ export const createEditorApp = ({
     }
   })
 
-  root.append(header, body, settingsBackdrop, styleTransfer.backdrop)
+  root.append(header, body, settingsBackdrop, styleTransfer.backdrop, styleRevert.backdrop)
   mountElement.append(root)
 
   // ---------- behavior ----------
@@ -646,6 +650,96 @@ export const createEditorApp = ({
       columns: info.columns,
       cells: detail.cells,
       sharedOutsideCells: detail.sharedOutsideCells
+    }
+  }
+
+  // 몬스터 appearanceType → 전용 애니메이션 스프라이트 시트 파일(게임 로더가 하드코딩으로 import).
+  // 이 두 종류는 타일이 아니라 통짜 시트라, 시트 전체를 변환·적용한다.
+  const MONSTER_SHEET_BY_APPEARANCE: Record<string, string> = {
+    monster_pig: 'src/assets/monsters/monster-pig-sheet.png',
+    monster_slime: 'src/assets/monsters/몬스터-말캉이.png'
+  }
+  const NPC_TILESET_TSX = 'tiny-dungeon-16.tsx'
+
+  // 클릭한 캐릭터 엔티티의 외형(appearanceType)을 TMX에서 복구한다(GameEntity엔 없음).
+  // rpgAdapter의 id 규칙(object.name, 없으면 `${kind}-${object.id}`)을 역으로 매칭한다.
+  const getEntityAppearanceType = (
+    map: LoadedGameMap,
+    entity: GameEntity
+  ): string | undefined => {
+    const mapFile = currentFiles.find((file) => file.path === map.file)
+    if (!mapFile) {
+      return undefined
+    }
+    let objects: TmxObject[] = []
+    try {
+      objects = extractTmxObjects(mapFile.text)
+    } catch {
+      return undefined
+    }
+    const object =
+      objects.find((candidate) => candidate.name === entity.id) ??
+      objects.find((candidate) => `${entity.kind}-${candidate.id}` === entity.id)
+    const appearance = object?.properties.type ?? object?.properties.appearanceType
+    return appearance || undefined
+  }
+
+  // NPC(및 tiny-dungeon-16에 타일로 존재하는 캐릭터/몬스터)를 단일 타일 패치 대상으로 만든다.
+  // appearanceType → tiny-dungeon-16.tsx의 타일 id → (col,row) 단일 셀. 같은 외형의 다른
+  // 캐릭터도 같은 타일을 공유하므로 함께 바뀐다(배너로 안내).
+  const buildStyleCharacterTileTarget = (
+    appearanceType: string,
+    displayName: string
+  ): StyleTransferMapObject | undefined => {
+    const tsxFile = currentFiles.find((file) => file.name === NPC_TILESET_TSX)
+    if (!tsxFile) {
+      return undefined
+    }
+    const info = extractTmxTilesetImageInfo(tsxFile.text)
+    const tileId = extractTilesetTileIdByType(tsxFile.text, appearanceType)
+    if (!info || tileId === undefined) {
+      return undefined
+    }
+    const imagePath = resolveRelativePath(tsxFile.path, info.imageSource)
+    if (!imagePath.startsWith('src/assets/')) {
+      return undefined
+    }
+    return {
+      label: displayName,
+      tilesetImagePath: imagePath,
+      tileWidth: info.tileWidth,
+      tileHeight: info.tileHeight,
+      columns: info.columns,
+      cells: [{ col: tileId % info.columns, row: Math.floor(tileId / info.columns), tileId }],
+      sharedOutsideCells: 0,
+      bannerText: `캐릭터: ${displayName} · ⚠ 같은 외형(${appearanceType})의 캐릭터가 모두 함께 바뀝니다`
+    }
+  }
+
+  // 캐릭터(NPC/몬스터) 엔티티 클릭 → 적절한 방식으로 스타일 변환 모달을 연다.
+  // 애니메이션 몬스터(pig/slime)는 시트 통째, 그 외(NPC·타일형 캐릭터)는 단일 타일 패치.
+  const openStyleForCharacter = (map: LoadedGameMap, entity: GameEntity): void => {
+    const appearanceType = getEntityAppearanceType(map, entity)
+    if (!appearanceType) {
+      setStatus('이 캐릭터의 외형 정보를 읽지 못해 스타일 변환을 열 수 없습니다.')
+      return
+    }
+    const monsterSheet = MONSTER_SHEET_BY_APPEARANCE[appearanceType]
+    if (monsterSheet) {
+      styleTransfer.openForAsset({
+        path: monsterSheet,
+        label: entity.name,
+        // 'monster_pig' → 'pig', 'monster_slime' → 'slime' — 배경 보존(전경만 스타일) 경로 선택.
+        monsterKey: appearanceType.replace('monster_', ''),
+        note: `몬스터 캐릭터(전경)만 스타일이 적용되고 배경은 보존됩니다 — 같은 종류(${entity.name}) 몬스터가 모두 바뀝니다.`
+      })
+      return
+    }
+    const target = buildStyleCharacterTileTarget(appearanceType, entity.name)
+    if (target) {
+      styleTransfer.openForMapObject(target)
+    } else {
+      setStatus('이 캐릭터의 타일 정보를 읽지 못해 스타일 변환을 열 수 없습니다.')
     }
   }
 
@@ -872,6 +966,46 @@ export const createEditorApp = ({
               render()
             })
             entityButtons.push({ entity, node })
+            // NPC는 행 클릭이 LLM 생성 선택에 쓰이므로, 스타일 변환은 별도 🎨 버튼으로 분리한다.
+            // 선택 버튼은 flex-1(인라인 스타일 — render()의 className 덮어쓰기에도 유지됨).
+            if (game.adapter.id === 'my-sample-rpg' && groupKindOf(entity.kind) === 'npc') {
+              node.style.flex = '1 1 0%'
+              node.style.minWidth = '0'
+              const styleButton = el(
+                'button',
+                'shrink-0 rounded-lg px-2 py-2 text-sm text-zinc-500 transition hover:bg-white/[0.06] hover:text-zinc-200',
+                '🎨'
+              ) as HTMLButtonElement
+              styleButton.type = 'button'
+              styleButton.title = '이 NPC를 스타일 변환합니다 (같은 외형의 NPC가 함께 바뀔 수 있습니다)'
+              styleButton.addEventListener('click', (event) => {
+                event.stopPropagation()
+                openStyleForCharacter(map, entity)
+              })
+              const row = el('div', 'flex items-center gap-1')
+              row.append(node, styleButton)
+              body.append(row)
+            } else {
+              body.append(node)
+            }
+          } else if (
+            game.adapter.id === 'my-sample-rpg' &&
+            groupKindOf(entity.kind) === 'monster'
+          ) {
+            // 몬스터: 생성 대상은 아니지만 클릭하면 그 몬스터 스프라이트를 스타일 변환한다.
+            const node = el(
+              'button',
+              'flex items-center gap-1 text-left rounded-lg px-2.5 py-2 text-sm text-zinc-400 transition hover:bg-white/[0.06] hover:text-zinc-200'
+            ) as HTMLButtonElement
+            node.type = 'button'
+            node.title = '클릭하면 이 몬스터를 스타일 변환합니다 (같은 종류의 몬스터가 함께 바뀝니다)'
+            node.append(
+              el('span', 'truncate', entity.name),
+              el('span', 'ml-auto shrink-0 text-[10px]', '🎨')
+            )
+            node.addEventListener('click', () => {
+              openStyleForCharacter(map, entity)
+            })
             body.append(node)
           } else if (
             game.adapter.id === 'my-sample-rpg' &&

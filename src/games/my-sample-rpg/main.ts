@@ -92,6 +92,10 @@ type SceneRenderer = {
   }) => { didApply: boolean; targetCharacterId?: string }
 }
 
+// 배경음악(BGM) 전역 사용 여부. false면 어떤 씬에서도 BGM을 재생하지 않는다(효과음은 그대로).
+// 저장된 볼륨 설정과 무관하게 코드에서 끄는 스위치 — 다시 켜려면 true로 바꾸면 된다.
+const BGM_ENABLED = false
+
 const AUDIO_SETTINGS_STORAGE_KEY = 'my-sample-rpg:audio-settings'
 const EVENT_DRAFT_MODE_STORAGE_KEY = 'my-sample-rpg:event-draft-mode'
 const OPENAI_API_KEY_STORAGE_KEY = 'my-sample-rpg:openai-api-key'
@@ -365,6 +369,14 @@ const destroyActiveScene = () => {
 }
 
 const playSceneMusic = (sceneId: SceneId) => {
+  // BGM이 꺼져 있으면 오디오를 만들지도 재생하지도 않는다(파일 로드도 생략).
+  if (!BGM_ENABLED) {
+    activeSceneMusic?.pause()
+    activeSceneMusic = undefined
+    activeSceneMusicUrl = ''
+    return
+  }
+
   const musicUrl = sceneMusicUrls[sceneId]
 
   if (activeSceneMusic && activeSceneMusicUrl === musicUrl) {
