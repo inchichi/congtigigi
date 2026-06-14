@@ -347,6 +347,9 @@ export const createEditorApp = ({
   analyzeButton.type = 'button'
   const resetButton = el('button', 'rounded-lg px-3 py-1.5 bg-white/5 text-xs text-zinc-400 text-left transition hover:bg-white/10 hover:text-zinc-200', '🏠 내 게임으로 복귀') as HTMLButtonElement
   resetButton.type = 'button'
+  // 시작 화면(프로젝트 선택)으로 돌아가는 버튼 — 핸들러는 landingBackdrop 정의 이후에 붙인다.
+  const backToLandingButton = el('button', 'rounded-lg px-3 py-1.5 bg-white/5 text-xs text-zinc-400 text-left transition hover:bg-white/10 hover:text-zinc-200', '↩ 프로젝트 선택으로') as HTMLButtonElement
+  backToLandingButton.type = 'button'
   // 프로젝트 버튼(폴더 열기/분석/복귀)은 설정 모달로 이동했다. 사이드바는 엔티티 목록만.
   const treeHeaderTop = el('div', 'flex items-center justify-between gap-2')
   treeHeaderTop.append(el('div', LABEL, '엔티티'))
@@ -860,7 +863,7 @@ export const createEditorApp = ({
   settingsClose.type = 'button'
   settingsTop.append(settingsClose)
   const projectControls = el('div', 'flex flex-col gap-2')
-  projectControls.append(el('div', LABEL, '프로젝트'), openButton, analyzeButton, resetButton)
+  projectControls.append(el('div', LABEL, '프로젝트'), openButton, analyzeButton, resetButton, backToLandingButton)
 
   // 외부 게임(Love2D 등)의 라이브 브리지 주소. 게임이 띄운 로컬 HTTP 서버를 가리킨다.
   const bridgeField = el('label', 'flex flex-col gap-1.5')
@@ -986,6 +989,14 @@ export const createEditorApp = ({
     // 샘플 게임 상태는 부팅 때 이미 로드돼 있다(트리·프로필) — 프리뷰 실행만 시작하면 된다.
     rememberSampleProject()
     startEditing()
+  })
+
+  // 설정의 '프로젝트 선택으로' — 시작 화면을 다시 띄우고 자동 복귀 기억을 끈다(새로고침해도 시작 화면 유지).
+  backToLandingButton.addEventListener('click', () => {
+    forgetActiveProject()
+    closeSettings()
+    landingError.textContent = ''
+    landingBackdrop.style.display = 'flex'
   })
   landingOpenButton.addEventListener('click', () => {
     void (async () => {
