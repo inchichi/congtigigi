@@ -84,6 +84,9 @@ export type GameAdapter = {
   extractEntities: (mapId: string, objects: TmxObject[]) => GameEntity[]
   // 이 게임에 생성물을 어떻게 적용하는지(UI/적용 라우팅용).
   applyMode: GameApplyMode
+  // 이 게임의 love.js 웹 빌드가 앱에 번들돼 있으면 그 URL. 설정에 사용자 입력이 없을 때
+  // 이 값을 기본으로 써서, 어느 컴퓨터에서나 별도 설정 없이 패널에서 바로 플레이된다.
+  defaultWebBuildUrl?: string
   // 이 게임의 콘텐츠를 LLM으로 생성한다. 결과를 applyMode에 맞는 경로로 게임에 반영한다.
   generate: (request: GenerationRequest) => Promise<GenerationResult>
 }
@@ -276,6 +279,9 @@ export const legendOfLuaAdapter: GameAdapter = {
       }),
   // 실행 중인 Love2D 게임에 HTTP 브리지로 라이브 적용한다(docs/legend-of-lua-bridge-protocol.md).
   applyMode: 'bridge',
+  // love.js로 빌드한 웹 버전이 public/legend-of-lua/에 번들돼 있어 Vite가 이 경로로 서빙한다.
+  // 기본값이라 별도 프로세스/브리지 없이도 어느 컴퓨터에서나 패널에서 바로 플레이된다.
+  defaultWebBuildUrl: '/legend-of-lua/',
   generate: (request) =>
     generateEntityLines('legend-of-lua (Love2D 2D 액션 RPG)', request)
 }

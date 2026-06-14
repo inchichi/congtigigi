@@ -494,6 +494,8 @@ export const createEditorApp = ({
     if (isRpgPreviewMode() || isWebBuildMode()) {
       connectionDot.className = 'w-2 h-2 rounded-full bg-emerald-400'
       connectionLabel.textContent = '게임 연결됨'
+      // 로딩 중 안내(showWebGamePreview가 띄운 '게임 로딩 중…')를 지운다.
+      setPreviewMessage(undefined)
     }
   })
   // 다른 게임의 맵을 Pixi로 그릴 호스트. 드래그 팬을 위해 기본 커서를 grab으로.
@@ -525,7 +527,19 @@ export const createEditorApp = ({
   // ---------- live preview behavior ----------
   // 내 게임(rpg)은 iframe 실행. 다른 게임은: love.js 웹 빌드 URL이 있으면 그걸 패널에서 플레이,
   // 없으면 맵을 Pixi로 렌더(정적 미리보기).
-  let webBuildUrl = (readLocalStorage(WEB_BUILD_URL_STORAGE_KEY) ?? '').trim()
+  // 사용자가 설정에 입력한 값(localStorage)을 우선하되, 없으면 어댑터가 번들로 제공하는
+  // 기본 웹빌드 URL(예: legend-of-lua의 /legend-of-lua/)을 쓴다. 그래야 localStorage가 비어 있는
+  // 다른 컴퓨터에서도 별도 설정 없이 패널에서 바로 플레이된다.
+  // 현재 게임 기준으로 웹빌드 URL을 정한다. webBuildUrl은 createEditorApp 생성 시 1회가 아니라
+  // game이 바뀔 때마다(폴더 열기/초기화) 다시 계산해야 한다 — 안 그러면 legend-of-lua가 아닌
+  // 초기 상태로 시작한 뒤 폴더를 열어도 빈 값이 남아 bridge 모드로 떨어진다.
+  const resolveWebBuildUrl = (): string => {
+    const stored = (readLocalStorage(WEB_BUILD_URL_STORAGE_KEY) ?? '').trim()
+    return stored.length > 0
+      ? stored
+      : (game.adapter.defaultWebBuildUrl ?? '').trim()
+  }
+  let webBuildUrl = resolveWebBuildUrl()
   const isRpgPreviewMode = (): boolean => game.adapter.id === 'my-sample-rpg'
   // 다른 게임 + love.js 빌드 URL이 있으면 패널에서 실제 게임을 iframe으로 플레이한다.
   const isWebBuildMode = (): boolean =>
@@ -682,6 +696,9 @@ export const createEditorApp = ({
       // 연결 표시는 iframe load에서 갱신. 로딩 동안엔 연결 중으로 둔다.
       connectionDot.className = 'w-2 h-2 rounded-full bg-amber-400'
       connectionLabel.textContent = '게임 로딩…'
+      // love.js 빌드는 wasm·게임 데이터를 받느라 첫 로드에 시간이 걸린다 — 빈 검은 화면 대신
+      // 로딩 안내를 띄우고, iframe load 이벤트에서 지운다.
+      setPreviewMessage('🎮 게임 로딩 중…')
     } else if (loadedIframeSrc === iframe.src) {
       // 이미 로드돼 플레이 중인 게임 — 로딩 표시로 되돌리지 않는다(영영 amber로 남는 버그 방지).
       connectionDot.className = 'w-2 h-2 rounded-full bg-emerald-400'
@@ -1822,6 +1839,10 @@ export const createEditorApp = ({
       const previousFiles = currentFiles
       game = loaded
       currentFiles = files
+      // 새 게임 기준으로 웹빌드 URL을 다시 정한다(예: legend-of-lua면 기본값 /legend-of-lua/).
+      // 이게 없으면 게임만 바뀌고 빈 webBuildUrl이 남아 bridge 모드로 떨어진다.
+      webBuildUrl = resolveWebBuildUrl()
+      webBuildInput.value = webBuildUrl
       selectedEntity = undefined
       currentResult = undefined
       currentAnalysis = undefined
@@ -1869,6 +1890,9 @@ export const createEditorApp = ({
     const previousFiles = currentFiles
     game = loadGame(initialFiles)
     currentFiles = initialFiles
+    // 초기(복귀) 게임 기준으로 웹빌드 URL을 다시 정한다 — 폴더 열기와 동일한 이유.
+    webBuildUrl = resolveWebBuildUrl()
+    webBuildInput.value = webBuildUrl
     selectedEntity = undefined
     currentResult = undefined
     currentAnalysis = undefined
