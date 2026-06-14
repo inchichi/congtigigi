@@ -137,13 +137,19 @@ def style_transfer_image(
     content_size: int = 512,
     style_size: int = 512,
     alpha_erode: int = 0,
+    preserve_size: bool = False,
 ) -> Image.Image:
     """PIL 이미지를 받아 스타일이 적용된 PIL 이미지를 반환한다. size 0은 원본 크기 유지.
 
     콘텐츠에 알파 채널이 있으면(투명 배경 스프라이트): RGB만 모델에 넣되 투명부를 중성
     회색으로 합성해 넣고(검정 배경 오염 방지), 결과를 원본 해상도로 되돌린 뒤 원본 알파를
     재합성한 RGBA를 반환한다 — 누끼가 원본과 동일하게 유지된다. alpha_erode(px)는 합성 전
-    알파를 침식해 경계 색 번짐을 줄이는 옵션. 알파가 없는 이미지는 기존 경로 그대로다.
+    알파를 침식해 경계 색 번짐을 줄이는 옵션.
+
+    preserve_size=True면 알파가 없어도 결과를 원본 해상도로 정확히 되돌린다 — 게임 에셋/
+    스프라이트 시트를 덮어쓸 때 프레임 좌표가 어긋나지 않게 하려는 용도(예: 몬스터 시트는
+    하드코딩된 프레임 rect로 잘리므로 크기가 1px만 달라도 안 됨). 알파 없는 일반 파일
+    업로드(미리보기용)는 기존처럼 모델 출력 크기를 그대로 둔다.
     """
     if not 0.0 <= alpha <= 1.0:
         raise ValueError(f"alpha는 0.0~1.0 사이여야 합니다: {alpha}")
@@ -173,16 +179,18 @@ def style_transfer_image(
     output = output.clamp(0, 1).squeeze(0).cpu()
     result = transforms.ToPILImage()(output)
 
+    # 원본 해상도 복원: 알파 스프라이트(누끼 보존)거나 preserve_size(에셋 덮어쓰기)일 때.
+    # VGG가 8배 다운/업샘플(ceil)이라 출력이 모델 입력보다 약간 클 수 있어, 입력 크기로 자른 뒤
+    # 원본 해상도로 되돌려야 픽셀/프레임 좌표가 정확히 맞는다.
+    if source_alpha is not None or preserve_size:
+        model_height, model_width = content_tensor.shape[-2:]
+        result = result.crop((0, 0, model_width, model_height))
+        if result.size != original_size:
+            resample = Image.BOX if result.width >= original_size[0] else Image.LANCZOS
+            result = result.resize(original_size, resample)
+
     if source_alpha is None:
         return result
-
-    # VGG가 8배 다운/업샘플(ceil)이라 출력이 모델 입력보다 약간 클 수 있다 — 입력 크기로
-    # 먼저 자른 뒤 원본 해상도로 되돌려야 알파와 픽셀이 정확히 맞는다.
-    model_height, model_width = content_tensor.shape[-2:]
-    result = result.crop((0, 0, model_width, model_height))
-    if result.size != original_size:
-        resample = Image.BOX if result.width >= original_size[0] else Image.LANCZOS
-        result = result.resize(original_size, resample)
 
     result = result.convert("RGBA")
     result.putalpha(erode_alpha(source_alpha, alpha_erode))

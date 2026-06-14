@@ -718,3 +718,26 @@ export const extractTmxTilesetImageInfo = (
   }
   return { imageSource, columns, tileWidth, tileHeight }
 }
+
+// 타일셋(.tsx)에서 class/type 주석이 주어진 값과 일치하는 타일의 로컬 id를 찾는다.
+// NPC/타일형 몬스터의 appearanceType(예: 'character_bearded_apron_man')을 tiny-dungeon-16의
+// 타일 id로 푸는 데 쓴다. 게임 런타임의 resolveTilesetLocalIdByType과 동일한 역검색.
+export const extractTilesetTileIdByType = (
+  tilesetText: string,
+  type: string
+): number | undefined => {
+  const doc = parseLenientXml(tilesetText)
+  const root =
+    doc?.documentElement?.tagName === 'tileset'
+      ? (doc.documentElement as unknown as Element)
+      : undefined
+  if (!root) {
+    return undefined
+  }
+  for (const [tileId, tileType] of collectTileTypes(root)) {
+    if (tileType === type) {
+      return tileId
+    }
+  }
+  return undefined
+}

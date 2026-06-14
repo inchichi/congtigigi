@@ -3,6 +3,7 @@ import townMapXml from '../games/my-sample-rpg/assets/maps/town.tmx?raw'
 import huntingGroundMapXml from '../games/my-sample-rpg/assets/maps/hunting-ground.tmx?raw'
 import caveMapXml from '../games/my-sample-rpg/assets/maps/cave.tmx?raw'
 import townTilesetXml from '../games/my-sample-rpg/assets/tilesets/town-32.tsx?raw'
+import tinyDungeonTilesetXml from '../games/my-sample-rpg/assets/tilesets/tiny-dungeon-16.tsx?raw'
 import { createEditorApp } from './createEditorApp'
 import type { GameFile } from './loadGame'
 
@@ -23,6 +24,13 @@ const initialFiles: GameFile[] = [
     name: 'town-32.tsx',
     path: 'src/games/my-sample-rpg/assets/tilesets/town-32.tsx',
     text: townTilesetXml
+  },
+  // NPC/타일형 몬스터의 외형(appearanceType) → 타일 id 매핑이 여기 type 주석에 있다.
+  // 스타일 변환이 NPC를 tiny-dungeon-16.png의 단일 타일로 풀려면 이 파일이 필요하다.
+  {
+    name: 'tiny-dungeon-16.tsx',
+    path: 'src/games/my-sample-rpg/assets/tilesets/tiny-dungeon-16.tsx',
+    text: tinyDungeonTilesetXml
   }
 ]
 
