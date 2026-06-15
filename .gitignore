@@ -23,3 +23,11 @@ public/vendor/lua/*
 
 notes/*
 !notes/.gitkeep
+
+__pycache__/
+style-service/sample_output.png
+style-service/compare.png
+style-service/alpha_test_result.png
+style-service/backups/
+style-service/originals/
+style-service/extracted-objects/

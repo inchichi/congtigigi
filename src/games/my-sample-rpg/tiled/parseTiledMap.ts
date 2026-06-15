@@ -138,14 +138,26 @@ export const parseTiledMap = ({
   const tilesets = tilesetReferences
     .map((tilesetReference) => {
       const firstGid = getRequiredNumberAttribute(tilesetReference, 'firstgid')
-      const source = getRequiredAttribute(tilesetReference, 'source')
-      const tilesetXml = externalTilesets[source]
+      const source = tilesetReference.getAttribute('source')
 
-      if (!tilesetXml) {
-        throw new Error(`Missing external TSX content for ${source}`)
+      // 외부 타일셋(.tsx 참조)이면 그 TSX를, 내장(embedded) 타일셋이면 참조 엘리먼트
+      // 자체를 파싱한다. 내장 타일셋은 고유 키(embedded:firstGid)를 source로 부여해 타일셋
+      // 리소스 맵에서 충돌하지 않게 한다.
+      if (source) {
+        const tilesetXml = externalTilesets[source]
+
+        if (!tilesetXml) {
+          throw new Error(`Missing external TSX content for ${source}`)
+        }
+
+        return parseTiledTileset({ firstGid, source, tilesetXml })
       }
 
-      return parseTiledTileset({ firstGid, source, tilesetXml })
+      return parseTiledTilesetElement(
+        tilesetReference,
+        firstGid,
+        `embedded:${firstGid}`
+      )
     })
     .sort((left, right) => left.firstGid - right.firstGid)
 
@@ -190,6 +202,16 @@ export const parseTiledTileset = ({
     throw new Error(`Expected the TSX root element to be <tileset> for ${source}`)
   }
 
+  return parseTiledTilesetElement(tilesetElement, firstGid, source)
+}
+
+// 외부 TSX의 루트든, TMX에 내장된 <tileset> 참조 엘리먼트든 공통으로 처리한다(내장은 firstgid
+// 같은 추가 속성을 갖지만 무시하면 된다). firstGid·source는 호출부가 결정해 넘긴다.
+export const parseTiledTilesetElement = (
+  tilesetElement: Element,
+  firstGid: number,
+  source: string
+): ParsedTiledTileset => {
   const imageElement = getRequiredDirectChildElement(tilesetElement, 'image')
   const tileTypes = Object.fromEntries(
     getDirectChildElements(tilesetElement, 'tile')

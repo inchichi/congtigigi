@@ -9,27 +9,27 @@ import {
 } from './parseTiledMap'
 
 const townMapXml = readFileSync(
-  new URL('../../../assets/maps/town.tmx', import.meta.url),
+  new URL('../assets/maps/town.tmx', import.meta.url),
   'utf8'
 )
 
 const huntingGroundMapXml = readFileSync(
-  new URL('../../../assets/maps/hunting-ground.tmx', import.meta.url),
+  new URL('../assets/maps/hunting-ground.tmx', import.meta.url),
   'utf8'
 )
 
 const caveMapXml = readFileSync(
-  new URL('../../../assets/maps/cave.tmx', import.meta.url),
+  new URL('../assets/maps/cave.tmx', import.meta.url),
   'utf8'
 )
 
 const townTilesetXml = readFileSync(
-  new URL('../../../assets/tilesets/town-32.tsx', import.meta.url),
+  new URL('../assets/tilesets/town-32.tsx', import.meta.url),
   'utf8'
 )
 
 const tinyDungeonTilesetXml = readFileSync(
-  new URL('../../../assets/tilesets/tiny-dungeon-16.tsx', import.meta.url),
+  new URL('../assets/tilesets/tiny-dungeon-16.tsx', import.meta.url),
   'utf8'
 )
 

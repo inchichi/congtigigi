@@ -5,7 +5,7 @@
 
 @font-face {
   font-family: 'NeoDunggeunmo';
-  src: url('../../assets/fonts/neodgm.woff2') format('woff2');
+  src: url('./assets/fonts/neodgm.woff2') format('woff2');
   font-display: swap;
   font-style: normal;
   font-weight: 400;
@@ -13,7 +13,7 @@
 
 @font-face {
   font-family: 'Jersey 25';
-  src: url('../../assets/fonts/Jersey25-Regular.ttf') format('truetype');
+  src: url('./assets/fonts/Jersey25-Regular.ttf') format('truetype');
   font-display: swap;
   font-style: normal;
   font-weight: 400;
@@ -1464,8 +1464,10 @@ body.game-root--map-focused > :not(.game-root) {
 .scenario-editor-overlay__panel {
   position: absolute;
   z-index: 1;
-  display: grid;
+  display: flex;
+  flex-direction: column;
   pointer-events: auto;
+  height: calc(100vh - 32px);
   overflow: hidden;
   border: 1px solid rgba(141, 230, 223, 0.18);
   border-radius: 18px;
@@ -1485,15 +1487,18 @@ body.game-root--map-focused > :not(.game-root) {
 }
 
 .scenario-editor-overlay__panel-body {
-  display: grid;
-  grid-template-rows: auto auto auto auto minmax(0, 1fr);
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
   gap: 12px;
   width: 100%;
-  height: 100%;
   min-width: 0;
   min-height: 0;
   padding: 16px;
-  overflow: hidden;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
 }
 
 .scenario-editor-overlay__header {
@@ -1502,6 +1507,7 @@ body.game-root--map-focused > :not(.game-root) {
   justify-content: space-between;
   gap: 14px;
   min-width: 0;
+  flex: none;
 }
 
 .scenario-editor-overlay__header-copy {
@@ -1605,6 +1611,7 @@ body.game-root--map-focused > :not(.game-root) {
   grid-template-columns: minmax(0, 1fr);
   gap: 10px;
   min-width: 0;
+  flex: none;
 }
 
 .scenario-editor-overlay__field {
@@ -1653,6 +1660,7 @@ body.game-root--map-focused > :not(.game-root) {
   gap: 8px;
   min-width: 0;
   min-height: 0;
+  flex: none;
 }
 
 .scenario-editor-overlay__section-header,
@@ -1701,6 +1709,7 @@ body.game-root--map-focused > :not(.game-root) {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+  flex: none;
 }
 
 .scenario-editor-overlay__button {
@@ -1738,11 +1747,10 @@ body.game-root--map-focused > :not(.game-root) {
 
 .scenario-editor-overlay__result-section {
   display: grid;
-  grid-template-rows: auto auto auto minmax(0, 1fr) auto;
   gap: 10px;
   min-width: 0;
   min-height: 0;
-  overflow: hidden;
+  flex: none;
 }
 
 .scenario-editor-overlay__error {
@@ -1769,6 +1777,14 @@ body.game-root--map-focused > :not(.game-root) {
   border-style: dashed;
 }
 
+.scenario-editor-overlay__summary-card--loading {
+  border-color: rgba(240, 180, 92, 0.42);
+  background: rgba(34, 23, 11, 0.76);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.04),
+    0 0 0 1px rgba(240, 180, 92, 0.08);
+}
+
 .scenario-editor-overlay__summary-label {
   color: #8de6df;
   font-size: 0.58rem;
@@ -1783,6 +1799,69 @@ body.game-root--map-focused > :not(.game-root) {
   line-height: 1.45;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+.scenario-editor-overlay__style-section {
+  display: grid;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid rgba(141, 230, 223, 0.14);
+  border-radius: 14px;
+  background: rgba(7, 10, 15, 0.72);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  flex: none;
+}
+
+.scenario-editor-overlay__style-hint {
+  color: #b8c5d1;
+  font-size: 0.58rem;
+  line-height: 1.4;
+  letter-spacing: 0.04em;
+  overflow-wrap: anywhere;
+}
+
+.scenario-editor-overlay__style-body {
+  display: grid;
+  gap: 10px;
+}
+
+.scenario-editor-overlay__style-preview {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid rgba(141, 230, 223, 0.12);
+  border-radius: 12px;
+  background: rgba(3, 5, 8, 0.6);
+}
+
+.scenario-editor-overlay__style-image {
+  width: 100%;
+  height: 220px;
+  object-fit: contain;
+  image-rendering: pixelated;
+  border-radius: 8px;
+  background:
+    repeating-conic-gradient(rgba(255, 255, 255, 0.05) 0% 25%, transparent 0% 50%)
+      50% / 16px 16px;
+}
+
+.scenario-editor-overlay__style-image--result {
+  border: 1px solid rgba(141, 230, 223, 0.3);
+}
+
+.scenario-editor-overlay__style-placeholder {
+  grid-column: 1 / -1;
+  align-self: center;
+  padding: 8px 4px;
+  color: #b8c5d1;
+  font-size: 0.62rem;
+  line-height: 1.4;
+  text-align: center;
+}
+
+.scenario-editor-overlay__style-preview[data-state='styling'] {
+  border-color: rgba(141, 230, 223, 0.35);
 }
 
 .scenario-editor-overlay__result-grid {
@@ -1814,13 +1893,19 @@ body.game-root--map-focused > :not(.game-root) {
 }
 
 .scenario-editor-overlay__card {
+  appearance: none;
   display: grid;
   gap: 8px;
   padding: 10px 11px 11px;
   border: 1px solid rgba(141, 230, 223, 0.12);
   border-radius: 12px;
   background: rgba(14, 18, 26, 0.88);
+  color: inherit;
+  font: inherit;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
 }
 
 .scenario-editor-overlay__card--quest {
@@ -1829,6 +1914,18 @@ body.game-root--map-focused > :not(.game-root) {
 
 .scenario-editor-overlay__card--dialogue {
   border-color: rgba(96, 207, 189, 0.28);
+}
+
+.scenario-editor-overlay__card:hover {
+  border-color: rgba(141, 230, 223, 0.4);
+  background: rgba(17, 22, 31, 0.96);
+}
+
+.scenario-editor-overlay__card:focus-visible {
+  border-color: rgba(141, 230, 223, 0.48);
+  background: rgba(17, 22, 31, 0.96);
+  outline: 2px solid rgba(141, 230, 223, 0.68);
+  outline-offset: 2px;
 }
 
 .scenario-editor-overlay__card-header {
@@ -1942,6 +2039,13 @@ body.game-root--map-focused > :not(.game-root) {
 }
 
 .scenario-editor-overlay__footer {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 4px;
+  align-items: start;
+  justify-items: start;
+  justify-content: start;
+  flex: none;
   color: #b8c5d1;
   font-size: 0.58rem;
   letter-spacing: 0.08em;
@@ -1950,7 +2054,15 @@ body.game-root--map-focused > :not(.game-root) {
 }
 
 .scenario-editor-overlay__footer-hint {
-  max-width: 62%;
+  min-width: 0;
+  max-width: none;
+  overflow-wrap: anywhere;
+}
+
+.scenario-editor-overlay__footer-state {
+  min-width: 0;
+  justify-self: start;
+  text-align: left;
 }
 
 .player-hud-overlay {
@@ -4251,12 +4363,7 @@ body.game-root--map-focused > :not(.game-root) {
   }
 
   .scenario-editor-overlay__footer {
-    flex-direction: column;
-    align-items: flex-start;
-  }
-
-  .scenario-editor-overlay__footer-hint {
-    max-width: 100%;
+    gap: 4px;
   }
 }
 

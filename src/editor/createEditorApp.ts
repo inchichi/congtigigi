@@ -1557,7 +1557,7 @@ export const createEditorApp = ({
   function render(): void {
     gameLabel.textContent = game.adapter.name
 
-    if (game.adapter.supportsApply) {
+    if (game.adapter.applyMode !== 'none') {
       supportNote.hidden = true
     } else {
       supportNote.hidden = false

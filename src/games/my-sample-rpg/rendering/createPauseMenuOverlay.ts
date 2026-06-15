@@ -9,6 +9,8 @@ import {
 export type AudioSettings = {
   bgmVolume: number
   sfxVolume: number
+  // 전체 음소거(에디터 헤더 토글). 볼륨값과 독립적으로 곱해진다 — 슬라이더 값은 보존된다.
+  isMuted: boolean
 }
 
 type CreatePauseMenuOverlayInput = {
@@ -266,7 +268,7 @@ export const createPauseMenuOverlay = ({
   }
 
   const handleVolumeInput = (
-    setting: keyof AudioSettings,
+    setting: 'bgmVolume' | 'sfxVolume',
     input: HTMLInputElement
   ) => {
     const audioSettings = getAudioSettings()
