@@ -29,7 +29,9 @@ import {
 } from './eventEvaluator'
 import { buildSessionMetrics, type SessionGenerationTally } from './sessionMetrics'
 import { editorIcon, type EditorIconName } from './editorIcons'
-import type { GameEntity, GenerationResult } from './gameAdapter'
+import type { GameEntity, GenerationFeedback, GenerationResult } from './gameAdapter'
+import { generateQuestCandidates, type QuestCandidate } from './questCandidates'
+import { dryRunEventApply, type DryRunReport } from './dryRunEventApply'
 
 // 하드코딩 어댑터가 엔티티를 못 찾은 미지의 게임을, LLM 분석이 찾은 editable 그룹으로 채운다.
 const buildEntitiesFromAnalysis = (
@@ -350,6 +352,19 @@ export const createEditorApp = ({
   const resultTimes = new WeakMap<GenerationResult, string>()
   // 이번 세션 집계: 생성 수 + Validator 통과 수. 프로젝트를 바꾸면 초기화한다.
   let sessionTally: SessionGenerationTally = { generations: 0, validatorPasses: 0 }
+  // 퀘스트 모드(2단계 생성): '퀘스트' 빠른시작을 고르면 켜진다. 1단계는 자연어 후보 N개를 만들고,
+  // 유저가 하나를 골라 2단계에서 그 후보만 이벤트 JSON으로 만든 뒤 드라이런 검증→적용한다.
+  let candidateMode = false
+  let candidates: QuestCandidate[] = []
+  let selectedCandidateIndex: number | undefined
+  // 인라인 요약 편집 중인 후보 인덱스(표시 전용).
+  let editingCandidateIndex: number | undefined
+  // 후보 재생성(피드백 루프) 반복 횟수.
+  let candidateIteration = 0
+  // 마지막 2단계 결과의 무결성 검증(드라이런) 리포트. 퀘스트 모드에서 적용 게이트로 쓴다.
+  let currentDryRun: DryRunReport | undefined
+  // 후보 카드 다시 그리기 훅 — 실제 구현은 핸들러 정의부에서 할당한다(render에서 안전히 호출하려 let).
+  let renderCandidates: () => void = () => {}
 
   // ---------- shell ----------
   // w-screen이 아니라 w-full — 100vw는 세로 스크롤바 폭을 포함해 가로 스크롤을 만든다.
@@ -577,8 +592,18 @@ export const createEditorApp = ({
   for (const quickCard of quickCards) {
     quickCard.card.addEventListener('click', () => {
       activeSuggestion = quickCard.label
+      // '퀘스트'만 2단계(후보→선택→검증) 모드. 다른 빠른시작은 기존 단일 생성 흐름.
+      candidateMode = quickCard.label === '퀘스트'
+      candidates = []
+      selectedCandidateIndex = undefined
+      editingCandidateIndex = undefined
+      currentDryRun = undefined
+      if (!candidateMode && activeBoardTab === 'candidates') {
+        activeBoardTab = undefined
+      }
       fillPrompt(quickCard.text)
       updateQuickCards()
+      render()
     })
   }
   quickStart.append(suggestionRow)
@@ -639,7 +664,7 @@ export const createEditorApp = ({
   validationLine.hidden = true
 
   // ---------- 결과 보드: 위 목록(4줄) + 아래 단일 상세 창 (퀘스트 로그식 마스터-디테일) ----------
-  type BoardTab = 'lua' | 'files' | 'verify' | 'apply'
+  type BoardTab = 'lua' | 'files' | 'verify' | 'apply' | 'candidates'
   // 표시 전용 상태 — 어떤 항목의 상세를 보여줄지. 처음엔 미선택("항목을 선택하세요").
   let activeBoardTab: BoardTab | undefined
   // 상태 카드형 목록(52px): 제목 + 짧은 상태 텍스트 + 우측 화살표. hover에서 화살표도 같이 강조.
@@ -665,6 +690,11 @@ export const createEditorApp = ({
   const filesStatus = el('div', 'text-[12px] text-[#9d9d9d]', '변경 파일 없음')
   filesView.body.append(filesStatus)
   const verifyView = makeDetailView('검증 결과')
+  // 무결성 검증(드라이런) 단계별 결과 — verify 상세에 validationLine과 함께 표시(render가 채움).
+  const dryRunBox = el('div', 'flex flex-col gap-1 pt-1')
+  dryRunBox.hidden = true
+  // 퀘스트 1단계 후보 카드 영역(render의 renderCandidates가 채움).
+  const candidatesView = makeDetailView('퀘스트 후보 (하나를 선택하세요)')
   const applyView = makeDetailView('적용 상태')
   const applyStatus = el('div', 'text-[12px] text-[#9d9d9d]', '대기 중')
   applyView.body.append(applyStatus)
@@ -711,7 +741,7 @@ export const createEditorApp = ({
     el('div', 'whitespace-pre-line text-[11px] leading-[1.5] text-[#777777] opacity-70', '왼쪽 패널에서 에셋을 선택하고\n이야기를 생성하면 여기에 표시됩니다.'),
     el('div', 'text-[11px] leading-[1.5] text-[#9d9d9d] opacity-80', '생성 → 검증 → 적용 결과를 이 영역에서 확인할 수 있습니다.')
   )
-  boardDetail.append(detailPlaceholder, luaView.view, filesView.view, verifyView.view, applyView.view)
+  boardDetail.append(detailPlaceholder, candidatesView.view, luaView.view, filesView.view, verifyView.view, applyView.view)
   const boardRows = BOARD_TABS.map((tab) => {
     const row = el('button', BOARD_ROW) as HTMLButtonElement
     // 제목(좌) + 상태 캡슐 배지(우, render()가 채움) + ▸ 화살표(클릭하면 아래 상세가 열린다는 신호).
@@ -735,6 +765,7 @@ export const createEditorApp = ({
       status.classList.toggle('ring-[#e7b15a]/60', active)
     }
     detailPlaceholder.hidden = activeBoardTab !== undefined
+    candidatesView.view.hidden = activeBoardTab !== 'candidates'
     luaView.view.hidden = activeBoardTab !== 'lua'
     filesView.view.hidden = activeBoardTab !== 'files'
     verifyView.view.hidden = activeBoardTab !== 'verify'
@@ -1107,7 +1138,7 @@ export const createEditorApp = ({
   const boardHint = el('div', 'text-[11px] text-[#777777]', '생성 결과와 검증 상태를 확인하세요.')
   // 검증 표시(render()가 갱신)는 검증 섹션 본문 안에 산다. 검증 전엔 대기 한 줄.
   const validationEmpty = el('div', 'text-[12px] text-[#9d9d9d]', '대기 중')
-  verifyView.body.append(validationEmpty, validationLine)
+  verifyView.body.append(validationEmpty, validationLine, dryRunBox)
   side.append(
     sideTitle,
     analysisPanel,
@@ -1674,11 +1705,48 @@ export const createEditorApp = ({
     // 검증 전 안내문은 검증 표시와 반대로 토글(둘 다 검증 섹션 본문 안).
     validationEmpty.hidden = !validationLine.hidden
 
+    // 무결성 검증(드라이런) 단계별 결과 — 퀘스트 2단계 생성 후에만 채워진다.
+    if (currentDryRun) {
+      dryRunBox.hidden = false
+      dryRunBox.replaceChildren(
+        el(
+          'div',
+          'text-[12px] font-semibold pt-1 ' +
+            (currentDryRun.ok ? 'text-[#8fc96a]' : 'text-[#e06c6c]'),
+          `무결성 검증(드라이런) — ${currentDryRun.ok ? '통과' : '실패'}`
+        ),
+        ...currentDryRun.steps.map((step) => {
+          const icon = step.status === 'ok' ? '✓' : step.status === 'warn' ? '⚠' : '✗'
+          const color =
+            step.status === 'ok'
+              ? 'text-[#8fc96a]'
+              : step.status === 'warn'
+                ? 'text-[#d9a64f]'
+                : 'text-[#e06c6c]'
+          return el('div', `text-[11px] leading-relaxed ${color}`, `${icon} ${step.label} — ${step.detail}`)
+        }),
+        ...currentDryRun.jsonIssues.map((issue) =>
+          el('div', 'text-[11px] leading-relaxed text-[#d9a64f]/80 pl-3', `• ${issue}`)
+        ),
+        el(
+          'div',
+          'text-[10px] leading-[1.4] text-[#777777] pt-1',
+          '※ 에디터 프로필 기준 시뮬레이션입니다. 실제 게임 상태와 다를 수 있습니다.'
+        )
+      )
+    } else {
+      dryRunBox.hidden = true
+    }
+
     generateLabel.textContent = isGenerating ? '✨ 생성 중...' : '✨ 이야기 생성'
     generateButton.disabled =
       isGenerating || apiKey.trim().length === 0 || promptInput.value.trim().length === 0
-    // 검증(issues)이 적용을 막지 않는다 — 사용자 요청대로 검증과 무관하게 바로 적용 가능.
-    applyButton.disabled = isGenerating || !currentResult?.apply
+    // 단일 흐름: 검증(issues)이 적용을 막지 않는다(기존 동작 유지). 퀘스트 모드에서는 무결성
+    // 검증(드라이런)이 통과해야만 적용을 허용한다 — 사용자가 정한 "검증 통과 시 라이브 적용".
+    applyButton.disabled =
+      isGenerating ||
+      !currentResult?.apply ||
+      (candidateMode && currentDryRun?.ok !== true)
     copyButton.disabled = !currentResult || isGenerating
     exportButton.disabled = !currentResult || isGenerating
     // 결과 보드 채우기(표시 전용): 목록 4줄은 항상 보이고, 상세 창 내용만 갱신된다.
@@ -1693,16 +1761,22 @@ export const createEditorApp = ({
         status.textContent = currentResult ? '1개' : '0개'
         status.className = `${BADGE} ${currentResult ? 'text-[#e8d5a5]' : 'text-[#9d9d9d]'}`
       } else if (id === 'verify') {
-        status.textContent = !currentResult
-          ? '0 Errors'
-          : currentResult.issues.length === 0
-            ? 'Passed'
-            : `${currentResult.issues.length} Issues`
-        status.className = !currentResult
-          ? `${BADGE} text-[#9d9d9d]`
-          : currentResult.issues.length === 0
-            ? `${BADGE} text-[#8fc96a]`
-            : `${BADGE} text-[#d9a64f]`
+        // 퀘스트 모드면 드라이런 통과/실패를 우선 표시, 아니면 기존 자동 검증 배지.
+        if (currentDryRun) {
+          status.textContent = currentDryRun.ok ? '검증 통과' : '검증 실패'
+          status.className = `${BADGE} ${currentDryRun.ok ? 'text-[#8fc96a]' : 'text-[#e06c6c]'}`
+        } else {
+          status.textContent = !currentResult
+            ? '0 Errors'
+            : currentResult.issues.length === 0
+              ? 'Passed'
+              : `${currentResult.issues.length} Issues`
+          status.className = !currentResult
+            ? `${BADGE} text-[#9d9d9d]`
+            : currentResult.issues.length === 0
+              ? `${BADGE} text-[#8fc96a]`
+              : `${BADGE} text-[#d9a64f]`
+        }
       } else {
         status.textContent = !currentResult ? 'Ready' : appliedNow ? '적용 완료' : '적용 전'
         status.className = appliedNow ? `${BADGE} text-[#8fc96a]` : `${BADGE} text-[#9d9d9d]`
@@ -1772,6 +1846,10 @@ export const createEditorApp = ({
       activeBoardTab = 'lua'
     }
     updateBoard()
+    // 퀘스트 후보 카드의 선택/버튼 상태를 현재 상태에 맞춰 다시 그린다(표시 전용).
+    if (candidateMode) {
+      renderCandidates()
+    }
     // 표시 전용 UI 동기화: 요약 카드 · 맵 탭 강조 · 진행 단계 바 · 컴포저 진행 상태 · 맵 통계.
     updateComposerSteps()
     updatePreviewStats()
@@ -1780,6 +1858,213 @@ export const createEditorApp = ({
     updateStepBar()
     renderEvaluation()
     renderHistory()
+  }
+
+  // ---------- 퀘스트 모드: 1단계 후보 ↔ 2단계 후보로 생성 + 드라이런 검증 ----------
+  const CANDIDATE_CARD =
+    'w-full flex flex-col gap-1 rounded-xl border border-[#d9a85c]/22 bg-[#2d2d30] px-3 py-2.5 text-left transition hover:border-[#d9a85c]/70 hover:bg-[#333333]'
+  const CANDIDATE_CARD_ACTIVE =
+    'w-full flex flex-col gap-1 rounded-xl border border-[#e7b15a] bg-[#3a2416] px-3 py-2.5 text-left shadow-[0_0_10px_rgba(217,168,92,0.3)]'
+
+  // 1단계: 자연어 후보 N개 생성(피드백이 있으면 재생성). 결과 보드의 '퀘스트 후보' 상세에 카드로 뜬다.
+  const runGenerateCandidates = async (
+    feedback?: GenerationFeedback
+  ): Promise<void> => {
+    // game은 let이라 TS가 game.profile을 좁혀주지 못한다 — const로 캡처해 좁힌다.
+    const profile = game.profile
+    if (!profile) {
+      setStatus('이 게임의 구조 프로필이 없습니다.')
+      return
+    }
+    isGenerating = true
+    const filesAtStart = currentFiles
+    setStatus('퀘스트 후보 생성 중...')
+    activeBoardTab = 'candidates'
+    render()
+
+    try {
+      const result = await generateQuestCandidates({
+        apiKey: apiKey.trim(),
+        userPrompt: promptInput.value,
+        profile,
+        entity: selectedEntity,
+        gameContext: currentAnalysis
+          ? `${currentAnalysis.game_name} (${currentAnalysis.engine}). 콘텐츠 모델: ${currentAnalysis.content_model}`
+          : undefined,
+        feedback
+      })
+      if (currentFiles !== filesAtStart) {
+        return
+      }
+      candidates = result
+      selectedCandidateIndex = undefined
+      editingCandidateIndex = undefined
+      currentResult = undefined
+      currentDryRun = undefined
+      setStatus(
+        result.length > 0
+          ? `후보 ${result.length}개 생성됨 — 하나를 골라 "이 후보로 생성"을 누르세요.`
+          : '후보를 생성하지 못했습니다. 다시 시도하세요.'
+      )
+    } catch (error) {
+      if (currentFiles !== filesAtStart) {
+        return
+      }
+      setStatus(`후보 생성 실패: ${error instanceof Error ? error.message : String(error)}`)
+    } finally {
+      isGenerating = false
+      render()
+    }
+  }
+
+  const runRegenerateCandidates = async (): Promise<void> => {
+    if (isGenerating) {
+      return
+    }
+    candidateIteration += 1
+    await runGenerateCandidates({
+      previousOutput: JSON.stringify(candidates),
+      validatorIssues: [],
+      rejectionReason: '다른 방향의 후보들로 다시 제안해줘',
+      iteration: candidateIteration
+    })
+  }
+
+  // 2단계: 고른 후보로만 실제 이벤트 JSON 생성 → 드라이런 검증 → 통과 시 적용 가능.
+  const runGenerateFromCandidate = async (): Promise<void> => {
+    if (isGenerating || selectedCandidateIndex === undefined) {
+      return
+    }
+    const candidate = candidates[selectedCandidateIndex]
+    if (!candidate) {
+      return
+    }
+    isGenerating = true
+    const filesAtStart = currentFiles
+    setStatus(`"${candidate.title}" 후보로 이벤트 생성 중...`)
+    render()
+
+    try {
+      const result = await game.adapter.generate({
+        apiKey: apiKey.trim(),
+        userPrompt: promptInput.value,
+        entity: selectedEntity,
+        profile: game.profile,
+        candidate,
+        gameContext: currentAnalysis
+          ? `${currentAnalysis.game_name} (${currentAnalysis.engine}). 콘텐츠 모델: ${currentAnalysis.content_model}`
+          : undefined
+      })
+      if (currentFiles !== filesAtStart) {
+        return
+      }
+      currentResult = result
+      // 무결성 검증(드라이런): 이벤트 JSON을 복제 스냅샷에 시험 적용해 통과/실패·위치를 보고한다.
+      currentDryRun =
+        result.eventJson && game.profile
+          ? dryRunEventApply(result.eventJson, game.profile)
+          : undefined
+      historyCounter += 1
+      history = [{ n: historyCounter, result }, ...history].slice(0, HISTORY_LIMIT)
+      sessionTally = {
+        generations: sessionTally.generations + 1,
+        validatorPasses:
+          sessionTally.validatorPasses + (result.issues.length === 0 ? 1 : 0)
+      }
+      activeBoardTab = 'verify'
+      setStatus(
+        currentDryRun && !currentDryRun.ok
+          ? `생성됨 — 무결성 검증 실패. '검증 결과'에서 위치를 확인하고 다시 시도하세요.`
+          : `생성 완료: ${result.label} — 무결성 검증 통과`
+      )
+    } catch (error) {
+      if (currentFiles !== filesAtStart) {
+        return
+      }
+      setStatus(`생성 실패: ${error instanceof Error ? error.message : String(error)}`)
+    } finally {
+      isGenerating = false
+      render()
+    }
+  }
+
+  // 후보 카드 렌더(상태 훅에 할당). 카드 클릭=선택, 수정=요약 인라인 편집, 하단에 생성/재생성 버튼.
+  renderCandidates = (): void => {
+    candidatesView.body.replaceChildren()
+    if (candidates.length === 0) {
+      candidatesView.body.append(
+        el(
+          'div',
+          'text-[12px] text-[#9d9d9d]',
+          isGenerating ? '후보 생성 중...' : '후보가 없습니다. "이야기 생성"으로 후보를 만드세요.'
+        )
+      )
+      return
+    }
+    candidates.forEach((candidate, index) => {
+      const selected = index === selectedCandidateIndex
+      const card = el('div', selected ? CANDIDATE_CARD_ACTIVE : CANDIDATE_CARD)
+      const header = el('div', 'flex items-center gap-2')
+      const titleEl = el('div', 'flex-1 text-[13px] font-semibold text-[#e8d5a5] truncate')
+      titleEl.textContent = candidate.title || `후보 ${index + 1}`
+      const editBtn = el(
+        'button',
+        'shrink-0 text-[11px] text-[#9d9d9d] transition hover:text-[#e8d5a5]',
+        editingCandidateIndex === index ? '완료' : '수정'
+      ) as HTMLButtonElement
+      editBtn.type = 'button'
+      editBtn.addEventListener('click', (event) => {
+        event.stopPropagation()
+        editingCandidateIndex = editingCandidateIndex === index ? undefined : index
+        renderCandidates()
+      })
+      header.append(titleEl, editBtn)
+      card.append(header)
+      if (editingCandidateIndex === index) {
+        const textarea = el(
+          'textarea',
+          `${FIELD_INPUT} min-h-[64px] text-[12px] leading-[1.5]`
+        ) as HTMLTextAreaElement
+        textarea.value = candidate.summary
+        textarea.addEventListener('click', (event) => event.stopPropagation())
+        textarea.addEventListener('input', () => {
+          candidates[index] = { ...candidate, summary: textarea.value }
+        })
+        card.append(textarea)
+      } else {
+        const summaryEl = el(
+          'div',
+          'text-[12px] leading-[1.5] text-[#bfbfbf] whitespace-pre-wrap'
+        )
+        summaryEl.textContent = candidate.summary
+        card.append(summaryEl)
+      }
+      if (candidate.target_hint) {
+        const chip = el(
+          'span',
+          'self-start rounded-full px-2 py-0.5 text-[10px] leading-none text-[#d5b87a] bg-[#dca14b]/10 border border-[#dca14b]/25'
+        )
+        chip.textContent = `대상: ${candidate.target_hint}`
+        card.append(chip)
+      }
+      card.addEventListener('click', () => {
+        selectedCandidateIndex = index
+        renderCandidates()
+        render()
+      })
+      candidatesView.body.append(card)
+    })
+    const actionRow = el('div', 'flex flex-wrap items-center gap-2 pt-1')
+    const genFromBtn = el('button', APPLY_BUTTON, '이 후보로 생성') as HTMLButtonElement
+    genFromBtn.type = 'button'
+    genFromBtn.disabled = selectedCandidateIndex === undefined || isGenerating
+    genFromBtn.addEventListener('click', () => void runGenerateFromCandidate())
+    const regenBtn = el('button', GHOST_BUTTON, '후보 다시 제안') as HTMLButtonElement
+    regenBtn.type = 'button'
+    regenBtn.disabled = isGenerating
+    regenBtn.addEventListener('click', () => void runRegenerateCandidates())
+    actionRow.append(genFromBtn, regenBtn)
+    candidatesView.body.append(actionRow)
   }
 
   const runGenerate = async (): Promise<void> => {
@@ -1794,6 +2079,12 @@ export const createEditorApp = ({
 
     if (promptInput.value.trim().length === 0) {
       setStatus('생성할 내용을 자연어 프롬프트에 입력하세요.')
+      return
+    }
+
+    // 퀘스트 모드: '이야기 생성'은 1단계(후보 N개)를 만든다. 실제 이벤트는 후보를 골라 2단계에서.
+    if (candidateMode) {
+      await runGenerateCandidates()
       return
     }
 
@@ -1918,6 +2209,13 @@ export const createEditorApp = ({
       selectedEntity = undefined
       currentResult = undefined
       currentAnalysis = undefined
+      // 퀘스트 모드 상태도 프로젝트 단위 — 새 게임에 옛 후보/검증이 묻어 나오지 않게 비운다.
+      candidateMode = false
+      candidates = []
+      selectedCandidateIndex = undefined
+      editingCandidateIndex = undefined
+      candidateIteration = 0
+      currentDryRun = undefined
       history = []
       historyCounter = 0
       sessionTally = { generations: 0, validatorPasses: 0 }
@@ -1957,6 +2255,12 @@ export const createEditorApp = ({
     selectedEntity = undefined
     currentResult = undefined
     currentAnalysis = undefined
+    candidateMode = false
+    candidates = []
+    selectedCandidateIndex = undefined
+    editingCandidateIndex = undefined
+    candidateIteration = 0
+    currentDryRun = undefined
     history = []
     historyCounter = 0
     sessionTally = { generations: 0, validatorPasses: 0 }
