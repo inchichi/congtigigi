@@ -40,11 +40,11 @@ const PLAYER_PROTECT_SKILL_DURATION_BY_LEVEL: Record<number, number> = {
 }
 
 const PLAYER_SMASH_SKILL_ICON_URL = new URL(
-  '../../assets/skills/Slash_skill.png',
+  './assets/skills/Slash_skill.png',
   import.meta.url
 ).href
 const PLAYER_PROTECT_SKILL_ICON_URL = new URL(
-  '../../assets/skills/Protect_skill.png',
+  './assets/skills/Protect_skill.png',
   import.meta.url
 ).href
 

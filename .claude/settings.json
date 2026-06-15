@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git lfs *)",
+      "Bash(command -v apt-get)",
+      "Bash(command -v git-lfs)",
+      "Read(//Users/parkseoyeon/Junior/Capstone/**)",
+      "Bash(rm -f /tmp/legend-of-lua.love)",
+      "Bash(zip -9 -r -q /tmp/legend-of-lua.love . -x '*/.git/*' '.git/*' '*.DS_Store')",
+      "Read(//tmp/**)",
+      "Bash(unzip -l /tmp/legend-of-lua.love)"
+    ]
+  }
+}

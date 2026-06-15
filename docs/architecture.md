@@ -5,8 +5,8 @@ This document is a short guide for module boundaries and code placement.
 ## Current Structure
 
 - `src/main.ts`: web entry point. Compose the application, bootstrap scenes, and route portal-driven scene transitions here.
-- `src/assets/`: runtime assets that are imported by the web client.
-- `src/assets/lua/`: project Lua controller scripts that are loaded by the web client at runtime.
+- `src/games/my-sample-rpg/assets/`: runtime assets that are imported by the web client.
+- `src/games/my-sample-rpg/assets/lua/`: project Lua controller scripts that are loaded by the web client at runtime.
 - `src/game/`: pure game or engine logic that should stay easy to test with Vitest.
 - `src/game/characterState.ts`: shared character state, optional monster level metadata, optional fixed sign text, controller decisions, and movement rules for both the player and NPCs.
 - `src/game/createCharacterControllerRuntime.ts`: controller attachment lifecycle, shared movement dispatch, and Lua script hot-update coordination.
@@ -66,7 +66,7 @@ This document is a short guide for module boundaries and code placement.
 
 ## Lua Controller Interface
 
-- `src/assets/lua/`: each Lua controller script should return one controller table.
+- `src/games/my-sample-rpg/assets/lua/`: each Lua controller script should return one controller table.
 - Reserved controller methods:
   - `register`: optional setup when the runtime attaches the script to one character
   - `unregister`: optional cleanup when the runtime detaches the script from one character

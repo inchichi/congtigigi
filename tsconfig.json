@@ -14,5 +14,5 @@
     "skipLibCheck": true
   },
   "include": ["src", "vite.config.ts"],
-  "exclude": ["src/assets/**/*.tsx", "src/games/legend-of-lua"]
+  "exclude": ["src/games/my-sample-rpg/assets/**/*.tsx", "src/games/legend-of-lua"]
 }

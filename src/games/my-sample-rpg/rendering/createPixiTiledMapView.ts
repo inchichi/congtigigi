@@ -146,6 +146,12 @@ import type {
   ParsedTiledTileset
 } from '../tiled/parseTiledMap'
 import {
+  createTileTexture,
+  resolveTilesetForTile,
+  type TileTextureFrameSource,
+  type TilesetRenderResources
+} from './tiledMapRenderResources'
+import {
   getSpriteTransformForTile,
   hasTileTransform
 } from './tiledSpriteTransform'
@@ -223,11 +229,6 @@ export type ApplyEventDraftResult = {
   targetCharacterId?: string
 }
 
-type TilesetRenderResources = {
-  imageTexture: Texture
-  tileTextures: Texture[]
-}
-
 type SlashVfxRenderResources = {
   horizontalTextures: Texture[]
   verticalTextures: Texture[]
@@ -240,14 +241,6 @@ type ProtectVfxRenderResources = {
 type ResolvedCharacterAppearanceTexture = {
   texture: Texture
   renderScale: number
-}
-
-type TileTextureFrameSource = {
-  columns: number
-  margin: number
-  spacing: number
-  tileWidth: number
-  tileHeight: number
 }
 
 type CollisionRect = {
@@ -395,56 +388,56 @@ type PlayerWeaponAppearanceConfig = {
 
 const DEPTH_SORTED_LAYER_NAME = 'object'
 const TINY_DUNGEON_TILESET_IMAGE_URL = new URL(
-  '../../../assets/tilesets/tiny-dungeon-16.png',
+  '../assets/tilesets/tiny-dungeon-16.png',
   import.meta.url
 ).href
 const MONSTER_EQUIPMENT_DROP_IMAGE_URL_BY_DROP_ID: Record<string, string> = {
   'iron-sword_drop': new URL(
-    '../../../assets/weapons/weapon-sword.png',
+    '../assets/weapons/weapon-sword.png',
     import.meta.url
   ).href,
   'battle-axe_drop': new URL(
-    '../../../assets/weapons/weapon-axe.png',
+    '../assets/weapons/weapon-axe.png',
     import.meta.url
   ).href,
   'long-spear_drop': new URL(
-    '../../../assets/weapons/weapon-spear.png',
+    '../assets/weapons/weapon-spear.png',
     import.meta.url
   ).href,
   'quick-dagger_drop': new URL(
-    '../../../assets/weapons/weapon-dagger.png',
+    '../assets/weapons/weapon-dagger.png',
     import.meta.url
   ).href,
   'spiked-mace_drop': new URL(
-    '../../../assets/weapons/weapon-mace.png',
+    '../assets/weapons/weapon-mace.png',
     import.meta.url
   ).href,
   'magic-staff_drop': new URL(
-    '../../../assets/weapons/weapon-staff.png',
+    '../assets/weapons/weapon-staff.png',
     import.meta.url
   ).href,
   Leather_Armor_drop: new URL(
-    '../../../assets/armor/dropimage/Leather_Armor_drop.png',
+    '../assets/armor/dropimage/Leather_Armor_drop.png',
     import.meta.url
   ).href,
   Leather_Helmet_drop: new URL(
-    '../../../assets/armor/dropimage/Leather_Helmet_drop.png',
+    '../assets/armor/dropimage/Leather_Helmet_drop.png',
     import.meta.url
   ).href,
   Chain_Armor_drop: new URL(
-    '../../../assets/armor/dropimage/Chain_Armor_drop.png',
+    '../assets/armor/dropimage/Chain_Armor_drop.png',
     import.meta.url
   ).href,
   Chain_Helmet_drop: new URL(
-    '../../../assets/armor/dropimage/Chain_Helmet_drop.png',
+    '../assets/armor/dropimage/Chain_Helmet_drop.png',
     import.meta.url
   ).href,
   Iron_Armor_drop: new URL(
-    '../../../assets/armor/dropimage/Iron_Armor_drop.png',
+    '../assets/armor/dropimage/Iron_Armor_drop.png',
     import.meta.url
   ).href,
   Iron_Helmet_drop: new URL(
-    '../../../assets/armor/dropimage/Iron_Helmet_drop.png',
+    '../assets/armor/dropimage/Iron_Helmet_drop.png',
     import.meta.url
   ).href
 }
@@ -622,27 +615,27 @@ const PLAYER_WEAPON_TILE_FRAME_SOURCE: TileTextureFrameSource = {
 }
 const WHITE_SLASH_WIDE_FRAME_URLS = [
   new URL(
-    '../../../assets/vfx/Sword Slashes/White Slash Wide/File1.png',
+    '../assets/vfx/Sword Slashes/White Slash Wide/File1.png',
     import.meta.url
   ).href,
   new URL(
-    '../../../assets/vfx/Sword Slashes/White Slash Wide/File2.png',
+    '../assets/vfx/Sword Slashes/White Slash Wide/File2.png',
     import.meta.url
   ).href,
   new URL(
-    '../../../assets/vfx/Sword Slashes/White Slash Wide/File3.png',
+    '../assets/vfx/Sword Slashes/White Slash Wide/File3.png',
     import.meta.url
   ).href,
   new URL(
-    '../../../assets/vfx/Sword Slashes/White Slash Wide/File4.png',
+    '../assets/vfx/Sword Slashes/White Slash Wide/File4.png',
     import.meta.url
   ).href,
   new URL(
-    '../../../assets/vfx/Sword Slashes/White Slash Wide/File5.png',
+    '../assets/vfx/Sword Slashes/White Slash Wide/File5.png',
     import.meta.url
   ).href,
   new URL(
-    '../../../assets/vfx/Sword Slashes/White Slash Wide/File6.png',
+    '../assets/vfx/Sword Slashes/White Slash Wide/File6.png',
     import.meta.url
   ).href
 ]
@@ -655,7 +648,7 @@ const WHITE_SLASH_WIDE_FRAME_BOUNDS: CollisionRect[] = [
   { x: 29, y: 63, width: 23, height: 55 }
 ]
 const PROTECT_VFX_FRAME_IMAGE_URL = new URL(
-  '../../../assets/Pipoya VFX HEXShield/192x192/pipo-btleffect207_192.png',
+  '../assets/Pipoya VFX HEXShield/192x192/pipo-btleffect207_192.png',
   import.meta.url
 ).href
 const PROTECT_VFX_FRAME_WIDTH = 192
@@ -693,37 +686,37 @@ const PLAYER_WEAPON_APPEARANCE_CONFIG_BY_ITEM_ID: Record<
   PlayerWeaponAppearanceConfig
 > = {
   'iron-sword': {
-    imageUrl: new URL('../../../assets/weapons/weapon-sword.png', import.meta.url).href,
+    imageUrl: new URL('../assets/weapons/weapon-sword.png', import.meta.url).href,
     worldScale: 0.085,
     idleOffsetX: -3,
     idleOffsetY: 2
   },
   'battle-axe': {
-    imageUrl: new URL('../../../assets/weapons/weapon-axe.png', import.meta.url).href,
+    imageUrl: new URL('../assets/weapons/weapon-axe.png', import.meta.url).href,
     worldScale: 0.085,
     idleOffsetX: -5,
     idleOffsetY: 4
   },
   'long-spear': {
-    imageUrl: new URL('../../../assets/weapons/weapon-spear.png', import.meta.url).href,
+    imageUrl: new URL('../assets/weapons/weapon-spear.png', import.meta.url).href,
     worldScale: 0.085,
     idleOffsetX: -2,
     idleOffsetY: 3
   },
   'quick-dagger': {
-    imageUrl: new URL('../../../assets/weapons/weapon-dagger.png', import.meta.url).href,
+    imageUrl: new URL('../assets/weapons/weapon-dagger.png', import.meta.url).href,
     worldScale: 0.085,
     idleOffsetX: -2,
     idleOffsetY: 1
   },
   'spiked-mace': {
-    imageUrl: new URL('../../../assets/weapons/weapon-mace.png', import.meta.url).href,
+    imageUrl: new URL('../assets/weapons/weapon-mace.png', import.meta.url).href,
     worldScale: 0.085,
     idleOffsetX: -4,
     idleOffsetY: 4
   },
   'magic-staff': {
-    imageUrl: new URL('../../../assets/weapons/weapon-staff.png', import.meta.url).href,
+    imageUrl: new URL('../assets/weapons/weapon-staff.png', import.meta.url).href,
     worldScale: 0.085,
     idleOffsetX: -2,
     idleOffsetY: 3
@@ -753,37 +746,37 @@ const PLAYER_EQUIPMENT_APPEARANCE_CONFIG_BY_ITEM_ID: Record<
 > = {
   Leather_Armor: {
     slotId: 'armor',
-    imageUrl: new URL('../../../assets/armor/Leather_Armor.png', import.meta.url).href,
+    imageUrl: new URL('../assets/armor/Leather_Armor.png', import.meta.url).href,
     ...PLAYER_ARMOR_EQUIPMENT_CONFIG
   },
   Leather_Helmet: {
     slotId: 'hat',
-    imageUrl: new URL('../../../assets/armor/Leather_Helmet.png', import.meta.url).href,
+    imageUrl: new URL('../assets/armor/Leather_Helmet.png', import.meta.url).href,
     ...PLAYER_HELMET_EQUIPMENT_CONFIG
   },
   Chain_Armor: {
     slotId: 'armor',
-    imageUrl: new URL('../../../assets/armor/Chain_Armor.png', import.meta.url).href,
+    imageUrl: new URL('../assets/armor/Chain_Armor.png', import.meta.url).href,
     ...PLAYER_ARMOR_EQUIPMENT_CONFIG
   },
   Chain_Helmet: {
     slotId: 'hat',
-    imageUrl: new URL('../../../assets/armor/Chain_Helmet.png', import.meta.url).href,
+    imageUrl: new URL('../assets/armor/Chain_Helmet.png', import.meta.url).href,
     ...PLAYER_HELMET_EQUIPMENT_CONFIG
   },
   Iron_Armor: {
     slotId: 'armor',
-    imageUrl: new URL('../../../assets/armor/Iron_Armor.png', import.meta.url).href,
+    imageUrl: new URL('../assets/armor/Iron_Armor.png', import.meta.url).href,
     ...PLAYER_ARMOR_EQUIPMENT_CONFIG
   },
   Iron_Helmet: {
     slotId: 'hat',
-    imageUrl: new URL('../../../assets/armor/Iron_Helmet.png', import.meta.url).href,
+    imageUrl: new URL('../assets/armor/Iron_Helmet.png', import.meta.url).href,
     ...PLAYER_HELMET_EQUIPMENT_CONFIG
   }
 }
 const PORTAL_INSIDE_IMAGE_URL = new URL(
-  '../../../assets/tilesets/portal_inside.png',
+  '../assets/tilesets/portal_inside.png',
   import.meta.url
 ).href
 const PORTAL_INSIDE_WORLD_SCALE = 0.08
@@ -936,6 +929,7 @@ export const createPixiTiledMapView = async ({
   onRequestSceneChange
 }: CreatePixiTiledMapViewInput): Promise<{
   destroy: () => void
+  updateAudioSettings: (nextAudioSettings: AudioSettings) => void
   applyEventDraft: (
     draft: HolidayDialogueEventSpec,
     input?: ApplyEventDraftInput
@@ -1093,7 +1087,7 @@ export const createPixiTiledMapView = async ({
   const gameEventQueue = createGameEventQueue()
   let currentAudioSettings = audioSettings
   const gameSoundEffects = createGameSoundEffects({
-    masterVolume: currentAudioSettings.sfxVolume
+    masterVolume: currentAudioSettings.isMuted ? 0 : currentAudioSettings.sfxVolume
   })
   const interactionLockUntilByCharacterPair = new Map<string, number>()
   const activeCharacterMessages = new Map<string, ActiveCharacterMessage>()
@@ -1237,13 +1231,6 @@ export const createPixiTiledMapView = async ({
     destroy: () => {}
   }
   let questTrackerOverlay: {
-    syncFrame: () => void
-    destroy: () => void
-  } = {
-    syncFrame: () => {},
-    destroy: () => {}
-  }
-  let scenarioEditorOverlay: {
     syncFrame: () => void
     destroy: () => void
   } = {
@@ -1984,7 +1971,10 @@ export const createPixiTiledMapView = async ({
   }
   const updateCurrentAudioSettings = (nextAudioSettings: AudioSettings) => {
     currentAudioSettings = nextAudioSettings
-    gameSoundEffects.setMasterVolume(currentAudioSettings.sfxVolume)
+    // 음소거는 마스터 볼륨에 곱해 적용 — 해제 시 저장된 sfxVolume이 그대로 돌아온다.
+    gameSoundEffects.setMasterVolume(
+      currentAudioSettings.isMuted ? 0 : currentAudioSettings.sfxVolume
+    )
     onAudioSettingsChange(currentAudioSettings)
     pauseMenuOverlay.syncFrame()
   }
@@ -2459,7 +2449,6 @@ export const createPixiTiledMapView = async ({
     onQuestLogChange: setQuestLog
   })
   // 인게임 시나리오 에디터 런처는 제거했다 — 콘텐츠 생성은 별도 에디터 페이지(/editor.html)가 담당한다.
-  // scenarioEditorOverlay는 위에서 no-op 스텁으로 초기화돼 있어 ticker/destroy 참조는 그대로 안전하다.
 
   const syncRuntimeWarningBanner = () => {
     const warnings = controllerRuntime.getRuntimeWarnings()
@@ -6041,11 +6030,6 @@ export const createPixiTiledMapView = async ({
   app.ticker.add(playerShopOverlay.syncFrame, undefined, UPDATE_PRIORITY.UTILITY)
   app.ticker.add(pauseMenuOverlay.syncFrame, undefined, UPDATE_PRIORITY.UTILITY)
   app.ticker.add(questTrackerOverlay.syncFrame, undefined, UPDATE_PRIORITY.UTILITY)
-  app.ticker.add(
-    scenarioEditorOverlay.syncFrame,
-    undefined,
-    UPDATE_PRIORITY.UTILITY
-  )
   syncAllCharacterSprites()
   syncQuestNpcBadges()
   syncViewportDisplayScale()
@@ -6061,7 +6045,6 @@ export const createPixiTiledMapView = async ({
   playerShopOverlay.syncFrame()
   pauseMenuOverlay.syncFrame()
   questTrackerOverlay.syncFrame()
-  scenarioEditorOverlay.syncFrame()
   handleVisibilityChange()
 
   const destroy = () => {
@@ -6087,7 +6070,6 @@ export const createPixiTiledMapView = async ({
     app.ticker.remove(playerShopOverlay.syncFrame)
     app.ticker.remove(pauseMenuOverlay.syncFrame)
     app.ticker.remove(questTrackerOverlay.syncFrame)
-    app.ticker.remove(scenarioEditorOverlay.syncFrame)
     gameEventQueue.clear()
     monsterPatrolStates.clear()
     monsterSpawnStates.clear()
@@ -6128,7 +6110,6 @@ export const createPixiTiledMapView = async ({
     potionShopOverlay.destroy()
     pauseMenuOverlay.destroy()
     questTrackerOverlay.destroy()
-    scenarioEditorOverlay.destroy()
     gameSoundEffects.destroy()
     controllerRuntime.destroy()
     app.destroy({ removeView: true }, { children: true })
@@ -6141,6 +6122,7 @@ export const createPixiTiledMapView = async ({
 
   return {
     destroy,
+    updateAudioSettings: updateCurrentAudioSettings,
     applyEventDraft,
     applyLuaScript
   }
@@ -6306,45 +6288,6 @@ const loadTilesetRenderResources = async (
     imageTexture,
     tileTextures
   }
-}
-
-const createTileTexture = (
-  imageTexture: Texture,
-  tileset: TileTextureFrameSource,
-  localId: number
-): Texture => {
-  const columnIndex = localId % tileset.columns
-  const rowIndex = Math.floor(localId / tileset.columns)
-  const frameX =
-    tileset.margin + columnIndex * (tileset.tileWidth + tileset.spacing)
-  const frameY =
-    tileset.margin + rowIndex * (tileset.tileHeight + tileset.spacing)
-
-  return new Texture({
-    source: imageTexture.source,
-    frame: new Rectangle(
-      frameX,
-      frameY,
-      tileset.tileWidth,
-      tileset.tileHeight
-    ),
-    orig: new Rectangle(0, 0, tileset.tileWidth, tileset.tileHeight)
-  })
-}
-
-const resolveTilesetForTile = (
-  tile: ParsedTiledTile,
-  tilesets: ParsedTiledTileset[]
-): ParsedTiledTileset => {
-  for (let index = tilesets.length - 1; index >= 0; index -= 1) {
-    const tileset = tilesets[index]
-
-    if (tileset.firstGid <= tile.gid) {
-      return tileset
-    }
-  }
-
-  throw new Error(`Could not resolve tileset for gid ${tile.gid}`)
 }
 
 const clampScrollOffset = (value: number, max: number): number =>

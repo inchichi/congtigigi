@@ -63,35 +63,35 @@ type TradePaneElements = {
 }
 
 const UI_SPRITESHEET_IMAGE_URL = new URL(
-  '../../../assets/spritesheets/uipack_rpg_sheet.png',
+  '../assets/spritesheets/uipack_rpg_sheet.png',
   import.meta.url
 ).href
 const TINY_DUNGEON_TILESET_IMAGE_URL = new URL(
-  '../../../assets/tilesets/tiny-dungeon-16.png',
+  '../assets/tilesets/tiny-dungeon-16.png',
   import.meta.url
 ).href
 const WEAPON_SWORD_IMAGE_URL = new URL(
-  '../../../assets/weapons/weapon-sword.png',
+  '../assets/weapons/weapon-sword.png',
   import.meta.url
 ).href
 const WEAPON_AXE_IMAGE_URL = new URL(
-  '../../../assets/weapons/weapon-axe.png',
+  '../assets/weapons/weapon-axe.png',
   import.meta.url
 ).href
 const WEAPON_SPEAR_IMAGE_URL = new URL(
-  '../../../assets/weapons/weapon-spear.png',
+  '../assets/weapons/weapon-spear.png',
   import.meta.url
 ).href
 const WEAPON_DAGGER_IMAGE_URL = new URL(
-  '../../../assets/weapons/weapon-dagger.png',
+  '../assets/weapons/weapon-dagger.png',
   import.meta.url
 ).href
 const WEAPON_MACE_IMAGE_URL = new URL(
-  '../../../assets/weapons/weapon-mace.png',
+  '../assets/weapons/weapon-mace.png',
   import.meta.url
 ).href
 const WEAPON_STAFF_IMAGE_URL = new URL(
-  '../../../assets/weapons/weapon-staff.png',
+  '../assets/weapons/weapon-staff.png',
   import.meta.url
 ).href
 const UI_SPRITESHEET_WIDTH = 512
@@ -234,7 +234,7 @@ const EQUIPMENT_ICON_FRAME_BY_KEY: Record<
     }
   },
   'town-crate-sword-right': {
-    imageUrl: new URL('../../../assets/tilesets/town-32.png', import.meta.url).href,
+    imageUrl: new URL('../assets/tilesets/town-32.png', import.meta.url).href,
     imageWidth: 256,
     imageHeight: 2240,
     frame: {

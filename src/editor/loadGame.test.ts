@@ -137,7 +137,8 @@ describe('loadGame', () => {
     const game = loadGame([file('conf.lua', ''), file('test.tmx', legendTmx)])
 
     expect(game.adapter.id).toBe('legend-of-lua')
-    expect(game.adapter.supportsApply).toBe(false)
+    // 실행 중인 Love2D 게임에 HTTP 브리지로 적용한다.
+    expect(game.adapter.applyMode).toBe('bridge')
     expect(game.maps[0].entities).toEqual([
       { id: 'Enemies-105', name: 'slime', kind: 'enemy', mapId: 'test' }
     ])
