@@ -184,21 +184,21 @@ const el = <K extends keyof HTMLElementTagNameMap>(
 // 타입 스케일은 3단으로 고정한다: LABEL(11px 섹션 eyebrow) · text-xs(메타) · text-sm(본문/컨트롤).
 // 예전엔 0.65/0.7/0.72/0.8rem 등이 뒤섞여 글자 크기가 들쭉날쭉했다.
 const LABEL =
-  'text-[11px] font-semibold uppercase tracking-wider text-zinc-400'
+  'text-[11px] font-semibold uppercase tracking-wider text-[#9d9d9d]'
 const CARD =
-  'rounded-xl border border-white/10 bg-white/[0.03] p-4 flex flex-col gap-2'
+  'rounded-xl border border-[#d9a85c]/20 bg-[#2d2d30] p-4 flex flex-col gap-2'
 const FIELD_INPUT =
-  'w-full rounded-lg border border-white/15 bg-black/40 px-3 py-2.5 text-sm text-zinc-100 outline-none transition placeholder:text-zinc-500 focus:border-indigo-500/60 focus:ring-2 focus:ring-indigo-500/25'
+  'w-full rounded-lg border border-[#d9a85c]/35 bg-[#1a1a1a] px-3 py-2.5 text-sm text-[#d4d4d4] outline-none transition placeholder:text-[#777777] focus:border-[#d9a85c] focus:ring-2 focus:ring-[#d9a85c]/25'
 const PRIMARY_BUTTON =
-  'rounded-lg px-4 py-2 bg-indigo-500 text-white text-sm font-medium shadow-sm shadow-indigo-500/30 transition hover:bg-indigo-400 active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed disabled:shadow-none'
+  'rounded-lg px-4 py-2 bg-gradient-to-b from-[#d9a85c] to-[#9a6a2f] text-[#1e1e1e] text-sm font-semibold border border-[#8c5b26] transition hover:brightness-110 active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed'
 const GHOST_BUTTON =
-  'rounded-lg px-3.5 py-2 bg-white/[0.04] text-zinc-300 text-sm border border-white/10 transition hover:bg-white/[0.08] hover:text-zinc-100 hover:border-white/20 disabled:opacity-40 disabled:cursor-not-allowed'
+  'rounded-lg px-3.5 py-2 bg-[#2d2d30] text-[#d4d4d4] text-sm border border-[#d9a85c]/25 transition hover:bg-[#333333] hover:text-white hover:border-[#d9a85c]/50 disabled:opacity-40 disabled:cursor-not-allowed'
 const ENTITY_BASE =
-  'truncate text-left rounded-lg px-2.5 py-2 text-sm text-zinc-300 transition hover:bg-white/[0.06] hover:text-zinc-100'
+  'truncate text-left rounded-lg px-2.5 py-2 text-sm text-[#d4d4d4] transition hover:bg-[#2d2d30] hover:text-white'
 const ENTITY_ACTIVE =
-  'truncate text-left rounded-lg px-2.5 py-2 text-sm bg-indigo-500/15 text-indigo-100 ring-1 ring-inset ring-indigo-500/30 transition'
+  'truncate text-left rounded-lg px-2.5 py-2 text-sm bg-[#d9a85c]/15 text-[#f3d88b] ring-1 ring-inset ring-[#d9a85c]/40 transition'
 const ENTITY_GROUP_HEADER =
-  'w-full flex items-center gap-1.5 text-left rounded-lg px-2.5 py-2 text-sm text-zinc-200 font-medium transition hover:bg-white/[0.06] hover:text-zinc-100'
+  'w-full flex items-center gap-1.5 text-left rounded-lg px-2.5 py-2 text-sm text-[#d4d4d4] font-medium transition hover:bg-[#2d2d30] hover:text-white'
 
 // 폴더에서 만든 이미지 object URL을 정리한다(새 프로젝트를 열 때 옛 URL 누수 방지).
 const revokePreviewObjectUrls = (files: GameFile[]): void => {
@@ -252,30 +252,30 @@ export const createEditorApp = ({
 
   // ---------- shell ----------
   // w-screen이 아니라 w-full — 100vw는 세로 스크롤바 폭을 포함해 가로 스크롤을 만든다.
-  const root = el('div', 'h-screen w-full flex flex-col bg-zinc-950 text-zinc-100 overflow-hidden')
+  const root = el('div', 'h-screen w-full flex flex-col bg-[#181818] text-[#e6e6e6] overflow-hidden')
 
-  const header = el('header', 'h-12 shrink-0 flex items-center justify-between px-4 border-b border-white/10 bg-zinc-900/60')
+  const header = el('header', 'h-12 shrink-0 flex items-center justify-between px-4 border-b border-[#d9a85c]/20 bg-[#252526]')
   const brand = el('div', 'flex items-center gap-2')
   brand.append(
-    el('span', 'w-2.5 h-2.5 rounded-full bg-indigo-500'),
+    el('span', 'w-2.5 h-2.5 rounded-full bg-[#d9a85c]'),
     el('span', 'text-sm font-semibold tracking-tight whitespace-nowrap', 'Scenario Editor'),
     // 게임 이름·모델 배지는 좁은 화면에선 숨긴다 — 헤더가 넘치면 설정 버튼이 밀려난다.
-    el('span', 'hidden sm:inline text-xs text-zinc-600', '·')
+    el('span', 'hidden sm:inline text-xs text-[#6a6a6a]', '·')
   )
-  const gameLabel = el('span', 'hidden sm:inline text-xs text-zinc-400 truncate', game.adapter.name)
+  const gameLabel = el('span', 'hidden sm:inline text-xs text-[#9d9d9d] truncate', game.adapter.name)
   brand.append(gameLabel)
   // 모델 배지 — 입력한 키의 provider(Claude/GPT)에 따라 동적으로 갱신된다.
   const modelBadge = el(
     'span',
-    'hidden md:inline-block text-[11px] rounded-full px-2 py-0.5 bg-indigo-500/10 text-indigo-300 border border-indigo-500/20',
+    'hidden md:inline-block text-[11px] rounded-full px-2 py-0.5 bg-[#d9a85c]/12 text-[#d9a85c] border border-[#d9a85c]/30',
     `Claude · ${ANTHROPIC_MODEL}`
   )
   brand.append(modelBadge)
-  const connection = el('div', 'flex items-center gap-2 text-xs text-zinc-400')
-  const connectionDot = el('span', 'w-2 h-2 rounded-full bg-zinc-600')
+  const connection = el('div', 'flex items-center gap-2 text-xs text-[#9d9d9d]')
+  const connectionDot = el('span', 'w-2 h-2 rounded-full bg-[#6a6a6a]')
   const connectionLabel = el('span', '', '게임 로딩...')
   connection.append(connectionDot, connectionLabel)
-  const settingsButton = el('button', 'rounded-lg px-2.5 py-1 text-sm bg-white/[0.04] border border-white/10 text-zinc-300 transition hover:bg-white/[0.08] hover:text-zinc-100', '⚙ 설정') as HTMLButtonElement
+  const settingsButton = el('button', 'rounded-lg px-2.5 py-1 text-sm bg-[#2d2d30] border border-[#d9a85c]/20 text-[#d4d4d4] transition hover:bg-[#333333] hover:text-[#e6e6e6]', '⚙ 설정') as HTMLButtonElement
   settingsButton.type = 'button'
   // 음소거 토글 — 소리는 게임(iframe)이 내므로 postMessage로 즉시 끄고, 게임 리로드/에디터
   // 재시작에도 유지되도록 게임의 오디오 설정(localStorage, 같은 origin 공유)에 함께 기록한다.
@@ -289,7 +289,7 @@ export const createEditorApp = ({
     }
   }
   let isGameMuted = readStoredMuted()
-  const muteButton = el('button', 'rounded-lg px-2.5 py-1 text-sm bg-white/[0.04] border border-white/10 text-zinc-300 transition hover:bg-white/[0.08] hover:text-zinc-100') as HTMLButtonElement
+  const muteButton = el('button', 'rounded-lg px-2.5 py-1 text-sm bg-[#2d2d30] border border-[#d9a85c]/20 text-[#d4d4d4] transition hover:bg-[#333333] hover:text-[#e6e6e6]') as HTMLButtonElement
   muteButton.type = 'button'
   const renderMuteButton = (): void => {
     muteButton.textContent = isGameMuted ? '🔇' : '🔊'
@@ -334,25 +334,25 @@ export const createEditorApp = ({
   // 스택 배치(<md)에선 아래 경계선 + 높이 제한(목록이 길면 자체 스크롤), 옆 배치에선 오른쪽 경계선.
   const tree = el(
     'aside',
-    '[grid-area:tree] min-w-0 max-h-[35vh] border-b md:max-h-none md:border-b-0 md:border-r border-white/10 flex flex-col min-h-0'
+    '[grid-area:tree] min-w-0 max-h-[35vh] border-b md:max-h-none md:border-b-0 md:border-r border-[#d9a85c]/20 flex flex-col min-h-0'
   )
-  const treeHeader = el('div', 'p-3 border-b border-white/10 flex flex-col gap-2')
-  const openButton = el('button', 'rounded-lg px-3 py-2 bg-white/5 text-sm text-zinc-200 text-left transition hover:bg-white/10', '📂 게임 폴더 열기') as HTMLButtonElement
+  const treeHeader = el('div', 'p-3 border-b border-[#d9a85c]/20 flex flex-col gap-2')
+  const openButton = el('button', 'rounded-lg px-3 py-2 bg-[#2d2d30] text-sm text-[#d4d4d4] text-left transition hover:bg-[#333333]', '📂 게임 폴더 열기') as HTMLButtonElement
   openButton.type = 'button'
-  const analyzeButton = el('button', 'rounded-lg px-3 py-2 bg-indigo-500/10 text-sm text-indigo-200 text-left transition hover:bg-indigo-500/20 disabled:opacity-50', '🔍 LLM 게임 분석') as HTMLButtonElement
+  const analyzeButton = el('button', 'rounded-lg px-3 py-2 bg-[#d9a85c]/12 text-sm text-[#f3d88b] text-left transition hover:bg-[#d9a85c]/20 disabled:opacity-50', '🔍 LLM 게임 분석') as HTMLButtonElement
   analyzeButton.type = 'button'
-  const resetButton = el('button', 'rounded-lg px-3 py-1.5 bg-white/5 text-xs text-zinc-400 text-left transition hover:bg-white/10 hover:text-zinc-200', '🏠 내 게임으로 복귀') as HTMLButtonElement
+  const resetButton = el('button', 'rounded-lg px-3 py-1.5 bg-[#2d2d30] text-xs text-[#9d9d9d] text-left transition hover:bg-[#333333] hover:text-[#d4d4d4]', '🏠 내 게임으로 복귀') as HTMLButtonElement
   resetButton.type = 'button'
   // 프로젝트 버튼(폴더 열기/분석/복귀)은 설정 모달로 이동했다. 사이드바는 엔티티 목록만.
   const treeHeaderTop = el('div', 'flex items-center justify-between gap-2')
   treeHeaderTop.append(el('div', LABEL, '엔티티'))
   // 라이브 게임이 맵을 보고한 뒤에만 의미가 있는 토글(현재 맵만 ↔ 전체 맵). 그 전엔 숨긴다.
-  const mapFilterToggle = el('button', 'text-[11px] text-zinc-500 transition hover:text-zinc-300', '전체 보기') as HTMLButtonElement
+  const mapFilterToggle = el('button', 'text-[11px] text-[#777777] transition hover:text-[#d4d4d4]', '전체 보기') as HTMLButtonElement
   mapFilterToggle.type = 'button'
   mapFilterToggle.hidden = true
   treeHeaderTop.append(mapFilterToggle)
   // 게임과의 동기화 상태(현재 맵 이름)를 보여주는 줄. 연결 전엔 대기 메시지.
-  const treeSyncLine = el('div', 'text-[11px] text-zinc-500', '게임과 연결 대기 중…')
+  const treeSyncLine = el('div', 'text-[11px] text-[#777777]', '게임과 연결 대기 중…')
   treeHeader.append(treeHeaderTop, treeSyncLine)
   const treeList = el('div', 'flex-1 overflow-auto p-3 flex flex-col gap-3')
   tree.append(treeHeader, treeList)
@@ -360,8 +360,8 @@ export const createEditorApp = ({
   // ---------- center: 라이브 게임(위) + 프롬프트 컴포저(아래) ----------
   // min-w-0: grid 자식의 기본 min-width:auto 때문에 내용이 열을 밀어내는 것 방지.
   const center = el('main', '[grid-area:main] min-w-0 min-h-0 flex flex-col')
-  const targetLine = el('div', 'text-sm text-zinc-400')
-  const analysisPanel = el('div', 'rounded-xl border border-indigo-500/20 bg-indigo-500/5 p-4 flex flex-col gap-1.5')
+  const targetLine = el('div', 'text-sm text-[#9d9d9d]')
+  const analysisPanel = el('div', 'rounded-xl border border-[#d9a85c]/30 bg-[#d9a85c]/8 p-4 flex flex-col gap-1.5')
   analysisPanel.hidden = true
   const supportNote = el('div', 'rounded-xl border border-amber-500/30 bg-amber-500/10 px-3.5 py-2.5 text-xs text-amber-200')
 
@@ -374,7 +374,7 @@ export const createEditorApp = ({
   apiKeyInput.value = apiKey
   apiKeyField.append(apiKeyInput)
   // 키 유효성 피드백(입력 시 디바운스로 갱신). 빈 문자열이면 자리만 차지하지 않게 둔다.
-  const apiKeyStatus = el('span', 'text-xs text-zinc-500', '')
+  const apiKeyStatus = el('span', 'text-xs text-[#777777]', '')
   apiKeyField.append(apiKeyStatus)
 
   // 모델 선택 — 키는 모델을 정하지 않으므로, 감지된 provider의 모델 중에서 고른다(저장됨).
@@ -401,7 +401,7 @@ export const createEditorApp = ({
   exportButton.type = 'button'
   actions.append(generateButton, applyButton, copyButton, exportButton)
 
-  const status = el('div', 'text-sm text-zinc-400 min-h-[1.25rem]')
+  const status = el('div', 'text-sm text-[#9d9d9d] min-h-[1.25rem]')
   const validationLine = el('div', 'text-xs')
   validationLine.hidden = true
 
@@ -409,7 +409,7 @@ export const createEditorApp = ({
   // 분석 패널·평가 카드에 밀려 0 높이로 찌그러져 결과가 안 보였다).
   const resultWrap = el('div', 'flex flex-col gap-1.5 shrink-0')
   resultWrap.append(el('span', LABEL, '생성 결과'))
-  const result = el('pre', 'm-0 min-h-[8rem] max-h-[40vh] overflow-auto rounded-lg border border-white/10 bg-black/40 p-3.5 text-xs leading-relaxed text-zinc-300 whitespace-pre-wrap break-words')
+  const result = el('pre', 'm-0 min-h-[8rem] max-h-[40vh] overflow-auto rounded-lg border border-[#d9a85c]/20 bg-[#1a1a1a] p-3.5 text-xs leading-relaxed text-[#d4d4d4] whitespace-pre-wrap break-words')
   resultWrap.append(result)
 
   // ---------- Evaluator (사람 이진 평가) ----------
@@ -420,7 +420,7 @@ export const createEditorApp = ({
   evaluationTop.append(
     el('span', LABEL, 'Evaluator · 사람 이진 평가')
   )
-  const acceptanceStat = el('span', 'text-xs text-zinc-400')
+  const acceptanceStat = el('span', 'text-xs text-[#9d9d9d]')
   evaluationTop.append(acceptanceStat)
   // 거절 사유 입력 — 거부 시 평가 기록(reason)과 다음 재생성 입력에 들어간다.
   const reasonInput = el('input', `${FIELD_INPUT} text-sm`) as HTMLInputElement
@@ -435,7 +435,7 @@ export const createEditorApp = ({
   const regenerateButton = el('button', GHOST_BUTTON, '🔄 사유로 재생성') as HTMLButtonElement
   regenerateButton.type = 'button'
   const evaluationVerdict = el('span', 'text-xs flex-1 min-w-[6rem]')
-  const resetEvaluationsButton = el('button', 'text-[11px] text-zinc-500 transition hover:text-zinc-300', '누적 기록 초기화') as HTMLButtonElement
+  const resetEvaluationsButton = el('button', 'text-[11px] text-[#777777] transition hover:text-[#d4d4d4]', '누적 기록 초기화') as HTMLButtonElement
   resetEvaluationsButton.type = 'button'
   evaluationButtons.append(acceptButton, rejectButton, regenerateButton, evaluationVerdict, resetEvaluationsButton)
   evaluationWrap.append(evaluationTop, reasonInput, evaluationButtons)
@@ -446,7 +446,7 @@ export const createEditorApp = ({
   historyHeader.append(
     el('span', LABEL, '생성 히스토리')
   )
-  const clearHistoryButton = el('button', 'text-[11px] text-zinc-500 transition hover:text-zinc-300', '비우기') as HTMLButtonElement
+  const clearHistoryButton = el('button', 'text-[11px] text-[#777777] transition hover:text-[#d4d4d4]', '비우기') as HTMLButtonElement
   clearHistoryButton.type = 'button'
   historyHeader.append(clearHistoryButton)
   const historyList = el('div', 'flex flex-col gap-1')
@@ -462,8 +462,8 @@ export const createEditorApp = ({
   // 맵 버튼이 많아도 바가 안 잘리도록: [제목(잘림)] [맵 버튼(줄바꿈)] [새창·새로고침(고정)].
   // 가로 스크롤 대신 줄바꿈(wrap)을 쓴다 — 스크롤은 클릭과 제스처가 충돌(관성 스크롤 중 클릭이
   // 빗나감)하지만, 줄바꿈은 모든 버튼이 제자리에 고정돼 클릭이 항상 확실하다.
-  const previewBar = el('div', 'shrink-0 flex items-start gap-2 px-3 py-1.5 border-b border-white/10 bg-zinc-900/40')
-  const previewTitle = el('span', 'text-xs text-zinc-400 shrink-0 whitespace-nowrap truncate max-w-[30%] leading-6', '🎮 라이브 게임 (실제 게임 실행 중)')
+  const previewBar = el('div', 'shrink-0 flex items-start gap-2 px-3 py-1.5 border-b border-[#d9a85c]/20 bg-[#252526]')
+  const previewTitle = el('span', 'text-xs text-[#9d9d9d] shrink-0 whitespace-nowrap truncate max-w-[30%] leading-6', '🎮 라이브 게임 (실제 게임 실행 중)')
   // 내 게임 iframe 모드에서 전환할 씬(마을/사냥터/동굴).
   const rpgPreviewScenes = [
     { id: 'town', label: '마을' },
@@ -473,9 +473,9 @@ export const createEditorApp = ({
   // 맵 버튼 줄: 남는 공간을 차지하고, 넘치면 다음 줄로 접힌다(wrap). 스크롤이 없어 클릭이 항상 확실.
   const mapSwitcher = el('div', 'flex flex-wrap items-center gap-1 flex-1 min-w-0')
   const previewActions = el('div', 'flex items-center gap-2 shrink-0 leading-6')
-  const popoutButton = el('button', 'text-xs text-zinc-400 transition hover:text-zinc-100', '↗ 새 창') as HTMLButtonElement
+  const popoutButton = el('button', 'text-xs text-[#9d9d9d] transition hover:text-[#e6e6e6]', '↗ 새 창') as HTMLButtonElement
   popoutButton.type = 'button'
-  const reloadButton = el('button', 'text-xs text-zinc-400 transition hover:text-zinc-100', '↻ 새로고침') as HTMLButtonElement
+  const reloadButton = el('button', 'text-xs text-[#9d9d9d] transition hover:text-[#e6e6e6]', '↻ 새로고침') as HTMLButtonElement
   reloadButton.type = 'button'
   previewActions.append(popoutButton, reloadButton)
   previewBar.append(previewTitle, mapSwitcher, previewActions)
@@ -502,7 +502,7 @@ export const createEditorApp = ({
   const mapPreviewHost = el('div', 'absolute inset-0 bg-black overflow-hidden cursor-grab')
   mapPreviewHost.style.display = 'none'
   // 렌더 진행/실패 안내(이미지 누락, 미지원 인코딩 등).
-  const previewMessage = el('div', 'absolute inset-0 flex items-center justify-center p-6 text-center text-xs text-zinc-400 pointer-events-none')
+  const previewMessage = el('div', 'absolute inset-0 flex items-center justify-center p-6 text-center text-xs text-[#9d9d9d] pointer-events-none')
   previewMessage.style.display = 'none'
   previewBody.append(iframe, mapPreviewHost, previewMessage)
   preview.append(previewBar, previewBody)
@@ -510,7 +510,7 @@ export const createEditorApp = ({
   // ---------- center 하단: 프롬프트 컴포저 (LLM 챗의 입력창처럼 게임 바로 아래) ----------
   // 챗 입력창처럼 낮게 유지한다 — 컴포저가 높을수록 게임이 그만큼 낮아진다.
   // max-h+스크롤: 창이 낮을 때 컴포저가 게임 영역을 통째로 밀어내지 않게 한다.
-  const composer = el('div', 'shrink-0 max-h-[45%] overflow-y-auto border-t border-white/10 p-3 flex flex-col gap-2')
+  const composer = el('div', 'shrink-0 max-h-[45%] overflow-y-auto border-t border-[#d9a85c]/20 p-3 flex flex-col gap-2')
   composer.append(targetLine, supportNote, promptField, actions, status)
   center.append(preview, composer)
 
@@ -518,7 +518,7 @@ export const createEditorApp = ({
   // 옆 배치(md부터, body 그리드와 동일 기준)에선 왼쪽 경계선, 아래 배치(<md)에선 위 경계선.
   const side = el(
     'aside',
-    '[grid-area:side] min-w-0 min-h-0 overflow-y-auto p-4 flex flex-col gap-4 border-t md:border-t-0 md:border-l border-white/10'
+    '[grid-area:side] min-w-0 min-h-0 overflow-y-auto p-4 flex flex-col gap-4 border-t md:border-t-0 md:border-l border-[#d9a85c]/20'
   )
   side.append(analysisPanel, validationLine, resultWrap, evaluationWrap, historyWrap)
 
@@ -567,9 +567,9 @@ export const createEditorApp = ({
   }
 
   const MAP_BUTTON_BASE =
-    'shrink-0 whitespace-nowrap text-[11px] rounded px-2 py-0.5 bg-white/[0.04] border border-white/10 text-zinc-300 transition hover:bg-white/[0.08] hover:text-zinc-100'
+    'shrink-0 whitespace-nowrap text-[11px] rounded px-2 py-0.5 bg-[#2d2d30] border border-[#d9a85c]/20 text-[#d4d4d4] transition hover:bg-[#333333] hover:text-[#e6e6e6]'
   const MAP_BUTTON_ACTIVE =
-    'shrink-0 whitespace-nowrap text-[11px] rounded px-2 py-0.5 bg-indigo-500/20 border border-indigo-500/40 text-indigo-100 transition'
+    'shrink-0 whitespace-nowrap text-[11px] rounded px-2 py-0.5 bg-[#d9a85c]/20 border border-[#d9a85c]/45 text-[#f3d88b] transition'
 
   // 스위처 버튼들을 추적해, 클릭 시 전체를 다시 그리지 않고 활성 표시만 바꾼다.
   // (replaceChildren로 매번 다시 그리면 가로 스크롤이 0으로 리셋되고 버튼이 커서 밑에서 움직여
@@ -831,7 +831,7 @@ export const createEditorApp = ({
       connectionDot.className = 'w-2 h-2 rounded-full bg-amber-400'
       connectionLabel.textContent = '게임 연결 중…'
     } else {
-      connectionDot.className = 'w-2 h-2 rounded-full bg-zinc-600'
+      connectionDot.className = 'w-2 h-2 rounded-full bg-[#6a6a6a]'
       connectionLabel.textContent = '게임 미연결'
     }
   }
@@ -866,10 +866,10 @@ export const createEditorApp = ({
   // 숨김은 hidden 속성 대신 인라인 display로 제어한다 — `flex` 클래스의 display:flex가 [hidden]을
   // 덮어써 안 닫히는 사고를 막는다(인라인 스타일이 항상 이긴다).
   settingsBackdrop.style.display = 'none'
-  const settingsPanel = el('div', 'w-full max-w-md rounded-2xl border border-white/10 bg-zinc-900 p-5 flex flex-col gap-4 shadow-2xl')
+  const settingsPanel = el('div', 'w-full max-w-md rounded-2xl border border-[#d9a85c]/20 bg-[#1e1e1e] p-5 flex flex-col gap-4 shadow-2xl')
   const settingsTop = el('div', 'flex items-center justify-between')
   settingsTop.append(el('span', 'text-sm font-semibold tracking-tight', '⚙ 설정'))
-  const settingsClose = el('button', 'text-zinc-500 text-sm transition hover:text-zinc-200', '✕') as HTMLButtonElement
+  const settingsClose = el('button', 'text-[#777777] text-sm transition hover:text-[#d4d4d4]', '✕') as HTMLButtonElement
   settingsClose.type = 'button'
   settingsTop.append(settingsClose)
   const projectControls = el('div', 'flex flex-col gap-2')
@@ -909,7 +909,7 @@ export const createEditorApp = ({
     render()
   })
 
-  settingsPanel.append(settingsTop, apiKeyField, modelField, bridgeField, webBuildField, el('div', 'h-px bg-white/10'), projectControls)
+  settingsPanel.append(settingsTop, apiKeyField, modelField, bridgeField, webBuildField, el('div', 'h-px bg-[#333333]'), projectControls)
   settingsBackdrop.append(settingsPanel)
 
   const closeSettings = (): void => {
@@ -934,32 +934,32 @@ export const createEditorApp = ({
   // ---------- 시작 화면: 프로젝트 선택 ----------
   // 에디터는 특정 게임에 묶이지 않는다 — 첫 화면에서 어떤 프로젝트를 편집할지 고른 뒤에야
   // 게임 로드(프리뷰 실행 포함)를 시작한다. 내장 샘플 게임도 자동 선택이 아니라 선택지 중 하나.
-  const landingBackdrop = el('div', 'fixed inset-0 z-40 bg-zinc-950 flex items-center justify-center p-6')
+  const landingBackdrop = el('div', 'fixed inset-0 z-40 bg-[#181818] flex items-center justify-center p-6')
   const landingPanel = el('div', 'w-full max-w-md flex flex-col gap-6')
   const landingBrand = el('div', 'flex flex-col gap-1.5')
   const landingBrandRow = el('div', 'flex items-center gap-2')
   landingBrandRow.append(
-    el('span', 'w-2.5 h-2.5 rounded-full bg-indigo-500'),
+    el('span', 'w-2.5 h-2.5 rounded-full bg-[#d9a85c]'),
     el('span', 'text-lg font-semibold tracking-tight', 'Scenario Editor')
   )
   landingBrand.append(
     landingBrandRow,
-    el('div', 'text-sm text-zinc-400', '편집할 게임 프로젝트를 선택하세요.')
+    el('div', 'text-sm text-[#9d9d9d]', '편집할 게임 프로젝트를 선택하세요.')
   )
 
   const LANDING_CARD =
-    'w-full text-left rounded-2xl border border-white/10 bg-white/[0.03] p-5 flex flex-col gap-1 transition hover:bg-white/[0.06] hover:border-indigo-500/40 disabled:opacity-50 disabled:cursor-not-allowed'
+    'w-full text-left rounded-2xl border border-[#d9a85c]/20 bg-[#2d2d30] p-5 flex flex-col gap-1 transition hover:bg-[#2d2d30] hover:border-[#d9a85c]/45 disabled:opacity-50 disabled:cursor-not-allowed'
   const landingOpenButton = el('button', LANDING_CARD) as HTMLButtonElement
   landingOpenButton.type = 'button'
   landingOpenButton.append(
-    el('div', 'text-sm font-semibold text-zinc-100', '📂 게임 폴더 열기'),
-    el('div', 'text-xs text-zinc-400 leading-relaxed', '내 컴퓨터의 게임 프로젝트 폴더(.tmx 맵 포함)를 선택해 엽니다.')
+    el('div', 'text-sm font-semibold text-[#e6e6e6]', '📂 게임 폴더 열기'),
+    el('div', 'text-xs text-[#9d9d9d] leading-relaxed', '내 컴퓨터의 게임 프로젝트 폴더(.tmx 맵 포함)를 선택해 엽니다.')
   )
   const landingSampleButton = el('button', LANDING_CARD) as HTMLButtonElement
   landingSampleButton.type = 'button'
   landingSampleButton.append(
-    el('div', 'text-sm font-semibold text-zinc-100', '🎮 샘플 게임으로 시작'),
-    el('div', 'text-xs text-zinc-400 leading-relaxed', '내장 샘플(My Sample RPG)을 열어 라이브 프리뷰와 함께 에디터를 사용합니다.')
+    el('div', 'text-sm font-semibold text-[#e6e6e6]', '🎮 샘플 게임으로 시작'),
+    el('div', 'text-xs text-[#9d9d9d] leading-relaxed', '내장 샘플(My Sample RPG)을 열어 라이브 프리뷰와 함께 에디터를 사용합니다.')
   )
   // 폴더 열기 실패 사유(맵 없음·권한 등)를 시작 화면 안에서 바로 보여준다 — 뒤의 상태줄은 가려져 안 보인다.
   const landingError = el('div', 'text-xs text-amber-300 min-h-[1rem]')
@@ -1023,14 +1023,14 @@ export const createEditorApp = ({
     analysisPanel.hidden = false
     const analysis = currentAnalysis
     analysisPanel.replaceChildren(
-      el('div', 'text-[11px] font-semibold uppercase tracking-wider text-indigo-300', '🔍 LLM 게임 분석'),
-      el('div', 'text-sm text-zinc-100 font-medium', `${analysis.game_name} · ${analysis.engine}`),
-      el('div', 'text-xs text-zinc-400', `콘텐츠 모델: ${analysis.content_model}`),
-      el('div', 'text-xs text-zinc-400', `적용 전략: ${analysis.apply_strategy}`),
+      el('div', 'text-[11px] font-semibold uppercase tracking-wider text-[#d9a85c]', '🔍 LLM 게임 분석'),
+      el('div', 'text-sm text-[#e6e6e6] font-medium', `${analysis.game_name} · ${analysis.engine}`),
+      el('div', 'text-xs text-[#9d9d9d]', `콘텐츠 모델: ${analysis.content_model}`),
+      el('div', 'text-xs text-[#9d9d9d]', `적용 전략: ${analysis.apply_strategy}`),
       ...analysis.entity_groups.map((entityGroup) =>
         el(
           'div',
-          'text-xs text-zinc-500',
+          'text-xs text-[#777777]',
           `• ${entityGroup.group} → ${entityGroup.kind}${entityGroup.editable ? ' (편집 가능)' : ''}`
         )
       )
@@ -1262,7 +1262,7 @@ export const createEditorApp = ({
         el('span', 'inline-block w-1.5 h-1.5 rounded-full bg-emerald-400 mr-1.5 align-middle'),
         showAllMaps
           ? document.createTextNode('전체 맵 표시 중')
-          : el('span', 'text-zinc-300', `현재 맵: ${focusMap.name}`)
+          : el('span', 'text-[#d4d4d4]', `현재 맵: ${focusMap.name}`)
       )
     } else {
       mapFilterToggle.hidden = true
@@ -1282,7 +1282,7 @@ export const createEditorApp = ({
       group.append(
         el(
           'div',
-          'text-xs text-zinc-300 font-medium px-1',
+          'text-xs text-[#d4d4d4] font-medium px-1',
           `🗺 ${map.name}${isCurrent ? ' · 현재 맵' : ''}`
         )
       )
@@ -1324,12 +1324,12 @@ export const createEditorApp = ({
         const headerButton = el('button', ENTITY_GROUP_HEADER) as HTMLButtonElement
         headerButton.type = 'button'
         headerButton.setAttribute('aria-expanded', String(expanded))
-        const arrow = el('span', 'w-3 shrink-0 text-[10px] text-zinc-500', expanded ? '▾' : '▸')
+        const arrow = el('span', 'w-3 shrink-0 text-[10px] text-[#777777]', expanded ? '▾' : '▸')
         arrow.setAttribute('aria-hidden', 'true')
         headerButton.append(
           arrow,
           el('span', 'truncate', `${KIND_ICON[kind] ?? '•'} ${KIND_LABEL[kind] ?? kind}`),
-          el('span', 'ml-auto shrink-0 text-[10px] tabular-nums text-zinc-500', String(entities.length))
+          el('span', 'ml-auto shrink-0 text-[10px] tabular-nums text-[#777777]', String(entities.length))
         )
 
         const body = el('div', 'flex flex-col gap-0.5 pl-3')
@@ -1369,7 +1369,7 @@ export const createEditorApp = ({
             // 타일 구조물·장식 오브젝트: LLM 생성 대상은 아니지만, 클릭하면 그 오브젝트만 스타일 변환한다.
             const node = el(
               'button',
-              'flex items-center gap-1 text-left rounded-lg px-2.5 py-2 text-sm text-zinc-400 transition hover:bg-white/[0.06] hover:text-zinc-200'
+              'flex items-center gap-1 text-left rounded-lg px-2.5 py-2 text-sm text-[#9d9d9d] transition hover:bg-[#2d2d30] hover:text-[#d4d4d4]'
             ) as HTMLButtonElement
             node.type = 'button'
             node.title = '클릭하면 이 오브젝트를 스타일 변환합니다 (같은 타일을 쓰는 다른 곳도 함께 바뀔 수 있습니다)'
@@ -1388,7 +1388,7 @@ export const createEditorApp = ({
             body.append(node)
           } else {
             // 몬스터·표지판·포털(및 다른 게임의 구조물)은 맵에 있음을 보여주되(보기 전용), 생성 대상은 아니다.
-            const row = el('div', 'truncate rounded-lg px-2.5 py-2 text-sm text-zinc-400', entity.name)
+            const row = el('div', 'truncate rounded-lg px-2.5 py-2 text-sm text-[#9d9d9d]', entity.name)
             body.append(row)
           }
         }
@@ -1399,14 +1399,14 @@ export const createEditorApp = ({
       // 요소는 있는데 생성 대상이 하나도 없는 맵(사냥터·동굴 등)에선, 왜 클릭할 게 없는지 알려준다.
       if (selectableCount === 0 && map.entities.length > 0) {
         group.append(
-          el('div', 'px-1 text-[11px] text-zinc-500 italic', '생성 대상이 없는 맵 — 위 요소는 보기 전용입니다.')
+          el('div', 'px-1 text-[11px] text-[#777777] italic', '생성 대상이 없는 맵 — 위 요소는 보기 전용입니다.')
         )
       }
 
       // "ground" 같은 타일/지형 레이어 — 객체가 아니라 맵 자체의 구성. 보기 전용 정보로 한 줄에 보여준다.
       if (map.layers.length > 0) {
         group.append(
-          el('div', 'px-1 pt-0.5 text-[11px] text-zinc-500', `🗂 타일 레이어: ${map.layers.join(' · ')}`)
+          el('div', 'px-1 pt-0.5 text-[11px] text-[#777777]', `🗂 타일 레이어: ${map.layers.join(' · ')}`)
         )
       }
 
@@ -1418,7 +1418,7 @@ export const createEditorApp = ({
         focusMap && !showAllMaps
           ? `현재 맵(${focusMap.name})에서 읽을 요소가 없습니다. ‘전체 보기’로 다른 맵을 볼 수 있어요.`
           : '로드된 맵이 없습니다. "게임 폴더 열기"로 프로젝트를 여세요.'
-      groups.push(el('div', 'text-xs text-zinc-500 leading-relaxed', message))
+      groups.push(el('div', 'text-xs text-[#777777] leading-relaxed', message))
     }
 
     treeList.replaceChildren(...groups)
@@ -1438,8 +1438,8 @@ export const createEditorApp = ({
         const node = el(
           'button',
           active
-            ? 'truncate text-left rounded-md px-2.5 py-1.5 text-xs bg-indigo-500/15 text-indigo-200 transition'
-            : 'truncate text-left rounded-md px-2.5 py-1.5 text-xs text-zinc-400 transition hover:bg-white/5 hover:text-zinc-100'
+            ? 'truncate text-left rounded-md px-2.5 py-1.5 text-xs bg-[#d9a85c]/15 text-[#f3d88b] transition'
+            : 'truncate text-left rounded-md px-2.5 py-1.5 text-xs text-[#9d9d9d] transition hover:bg-[#2d2d30] hover:text-[#e6e6e6]'
         ) as HTMLButtonElement
         node.type = 'button'
         const mark = entry.result.issues.length === 0 ? '✅' : '⚠️'
@@ -1498,7 +1498,7 @@ export const createEditorApp = ({
       evaluationVerdict.className = 'text-xs text-rose-300'
       evaluationVerdict.textContent = '· 거부됨 — ‘사유로 재생성’하거나 사유를 고쳐 다시 시도하세요'
     } else {
-      evaluationVerdict.className = 'text-xs text-zinc-500'
+      evaluationVerdict.className = 'text-xs text-[#777777]'
       evaluationVerdict.textContent =
         iteration > 1 ? `· ${iteration}회차 — 검토 후 수용/거부` : '· 검토 후 수용/거부 (적용은 수락 후)'
     }
@@ -1575,13 +1575,13 @@ export const createEditorApp = ({
     if (selectedEntity) {
       targetLine.replaceChildren(
         document.createTextNode('대상: '),
-        el('span', 'text-indigo-300 font-medium', selectedEntity.name),
+        el('span', 'text-[#d9a85c] font-medium', selectedEntity.name),
         document.createTextNode(' '),
-        el('span', 'text-zinc-500', `(${selectedEntity.kind} · ${selectedEntity.mapId})`)
+        el('span', 'text-[#777777]', `(${selectedEntity.kind} · ${selectedEntity.mapId})`)
       )
     } else {
       targetLine.replaceChildren(
-        el('span', 'text-zinc-400', '왼쪽에서 엔티티를 선택하면 그 대상으로 생성합니다.')
+        el('span', 'text-[#9d9d9d]', '왼쪽에서 엔티티를 선택하면 그 대상으로 생성합니다.')
       )
     }
 
@@ -1940,12 +1940,12 @@ export const createEditorApp = ({
       modelBadge.textContent = `${PROVIDER_LABEL[provider]} · ${getProviderModel(provider)}`
     }
     if (key.length === 0) {
-      apiKeyStatus.className = 'text-xs text-zinc-500'
+      apiKeyStatus.className = 'text-xs text-[#777777]'
       apiKeyStatus.textContent = '키를 입력하세요.'
       return
     }
     const seq = ++apiKeyCheckSeq
-    apiKeyStatus.className = 'text-xs text-zinc-400'
+    apiKeyStatus.className = 'text-xs text-[#9d9d9d]'
     apiKeyStatus.textContent = '🔍 확인 중...'
     const check = await validateApiKey(key)
     // 확인 중 더 최신 입력이 있었으면 이 결과는 버린다(레이스 방지).
