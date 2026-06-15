@@ -7,6 +7,8 @@ import { savePendingEvent } from './pendingEvents'
 import { generateJson } from './llmProvider'
 import { createEntityLinesValidationIssues } from './entityLinesValidator'
 import type { BridgeApplyMessage } from './gameBridge'
+import type { GeneratedEventJson } from './eventJsonSchema'
+import type { QuestCandidate } from './questCandidates'
 
 // 게임에 적용하는 방식:
 // - 'local-storage': 에디터와 같은 origin 웹게임(my-sample-rpg). apply()가 localStorage로 전달.
@@ -40,6 +42,9 @@ export type GenerationRequest = {
   gameContext?: string
   // 있으면 재생성 모드: 이전 결과를 이 피드백에 맞춰 수정한다(처음부터 새로 쓰지 않음).
   feedback?: GenerationFeedback
+  // 퀘스트 2단계: 유저가 고른 자연어 후보. 있으면 그 후보를 이벤트 JSON 생성 프롬프트에 엮는다.
+  // 없으면 기존 단일 생성과 완전히 동일하게 동작한다.
+  candidate?: QuestCandidate
 }
 
 // 재생성 시 모델에 붙이는 수정 지침. 이미 된 부분은 유지하고 거절 사유·검증 문제만 고치게 유도한다.
@@ -73,6 +78,8 @@ export type GenerationResult = {
   apply: (() => void) | null
   // 브리지(별도 프로세스 게임) 적용용 구조화 페이로드. applyMode가 'bridge'인 게임에서 채운다.
   bridgePayload: BridgeApplyMessage | null
+  // 이벤트 JSON 게임(my-sample-rpg)에서 채운다. 에디터가 드라이런 검증(dryRunEventApply)에 쓴다.
+  eventJson?: GeneratedEventJson
 }
 
 export type GameAdapter = {
@@ -132,7 +139,7 @@ export const rpgAdapter: GameAdapter = {
       }
     }),
   applyMode: 'local-storage',
-  generate: async ({ apiKey, userPrompt, entity, profile, feedback }) => {
+  generate: async ({ apiKey, userPrompt, entity, profile, feedback, candidate }) => {
     if (!profile) {
       throw new Error('이 게임의 구조 프로필이 없습니다.')
     }
@@ -140,10 +147,16 @@ export const rpgAdapter: GameAdapter = {
     const targetHint = entity
       ? ` 이 이벤트의 대상은 반드시 NPC id="${entity.id}"(${entity.name}, map=${entity.mapId})로 한다.`
       : ''
+    // 퀘스트 2단계: 고른 후보가 있으면 그 방향대로 이벤트 JSON을 만들게 엮는다.
+    // candidate가 없으면 이 문자열은 빈 값이라 기존 단일 생성과 프롬프트가 동일하다.
+    const candidateHint = candidate
+      ? `\n\n선택된 퀘스트 후보를 그대로 구현한다:\n- 제목: ${candidate.title}\n- 내용: ${candidate.summary}` +
+        (candidate.target_hint ? `\n- 대상 NPC: ${candidate.target_hint}` : '')
+      : ''
     const feedbackHint = feedback ? buildFeedbackInstruction(feedback) : ''
     const eventJson = await generateEventJsonDraftWithClaude({
       apiKey,
-      userPrompt: `${userPrompt}${targetHint}${feedbackHint}`,
+      userPrompt: `${userPrompt}${candidateHint}${targetHint}${feedbackHint}`,
       profile
     })
 
@@ -162,7 +175,9 @@ export const rpgAdapter: GameAdapter = {
           savePendingEvent(spec)
         }
       },
-      bridgePayload: null
+      bridgePayload: null,
+      // 에디터가 드라이런 검증(dryRunEventApply)에 쓰도록 원본 이벤트 JSON을 노출한다.
+      eventJson
     }
   }
 }
