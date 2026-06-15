@@ -8,7 +8,10 @@
       "Bash(rm -f /tmp/legend-of-lua.love)",
       "Bash(zip -9 -r -q /tmp/legend-of-lua.love . -x '*/.git/*' '.git/*' '*.DS_Store')",
       "Read(//tmp/**)",
-      "Bash(unzip -l /tmp/legend-of-lua.love)"
+      "Bash(unzip -l /tmp/legend-of-lua.love)",
+      "Bash(gh auth *)",
+      "Bash(gh api *)",
+      "Bash(curl -s https://api.github.com/users/yean1234)"
     ]
   }
 }
