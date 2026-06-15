@@ -24,9 +24,9 @@
 
 ## Resource Layout
 
-- Keep static assets under `src/assets/`.
+- Keep static assets under `src/games/my-sample-rpg/assets/`.
 - Application code should load needed assets through Vite imports.
-- Keep project Lua controller scripts under `src/assets/lua/`.
+- Keep project Lua controller scripts under `src/games/my-sample-rpg/assets/lua/`.
 - Vendor the Lua source under `third_party/lua-5.3.6/`.
 - Download the official Lua test suite into `third_party/lua-5.3.4-tests/` only when needed.
 - Generate Lua wasm output under `public/vendor/lua/`.

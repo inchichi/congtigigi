@@ -1,0 +1,2136 @@
+import { openProjectDirectory } from './openProjectDirectory'
+import {
+  buildTileClusterEntities,
+  findAllStyleTargetCells,
+  findFileByRelativeSource,
+  findObjectKindCells,
+  findTileClusterDetail,
+  isTileClusterEntity,
+  loadGame,
+  resolveRelativePath,
+  type GameFile,
+  type LoadedGame,
+  type LoadedGameMap
+} from './loadGame'
+import { buildMapPreviewInputs } from './buildMapPreviewInputs'
+import {
+  createTiledMapPreview,
+  type TiledMapPreview
+} from './createTiledMapPreview'
+import { createGameBridge, type BridgeStatus } from './gameBridge'
+import { extractTmxTilesetImageInfo } from './tmxTileEntities'
+import { analyzeGame, type GameAnalysis } from './analyzeGame'
+import { extractTmxLayerNames, extractTmxObjects, type TmxObject } from './tmxObjects'
+import { readLocalStorage, writeLocalStorage } from './safeStorage'
+import { ANTHROPIC_MODEL } from './anthropicGenerate'
+import {
+  PROVIDER_LABEL,
+  PROVIDER_MODELS,
+  detectProvider,
+  getProviderModel,
+  setProviderModel,
+  validateApiKey,
+  type LlmProvider
+} from './llmProvider'
+import {
+  appendEventEvaluation,
+  clearEventEvaluations,
+  loadEventEvaluations,
+  type EventEvaluation,
+  type EventEvaluationVerdict
+} from './eventEvaluator'
+import { buildSessionMetrics, type SessionGenerationTally } from './sessionMetrics'
+import {
+  createStyleTransferModal,
+  type StyleTransferMapObject
+} from './createStyleTransferModal'
+import type {
+  GameEntity,
+  GenerationFeedback,
+  GenerationResult
+} from './gameAdapter'
+
+// 하드코딩 어댑터가 엔티티를 못 찾은 미지의 게임을, LLM 분석이 찾은 editable 그룹으로 채운다.
+const buildEntitiesFromAnalysis = (
+  files: GameFile[],
+  analysis: GameAnalysis
+): LoadedGameMap[] => {
+  const editableKindByGroup = new Map<string, string>()
+  for (const entityGroup of analysis.entity_groups) {
+    if (entityGroup.editable) {
+      editableKindByGroup.set(entityGroup.group, entityGroup.kind)
+    }
+  }
+
+  return files
+    .filter((file) => file.name.endsWith('.tmx'))
+    .map((file) => {
+      const id = file.name.replace(/\.tmx$/u, '')
+      // 한 맵이 깨졌다고 분석 기반 트리 재구성을 통째로 죽이지 않는다(loadGame과 동일한 격리).
+      let objects: TmxObject[] = []
+      try {
+        objects = extractTmxObjects(file.text)
+      } catch {
+        // 파싱 실패 맵 → 엔티티 0개
+      }
+      const entities = objects
+        .filter(
+          (object) =>
+            editableKindByGroup.has(object.group) && object.name.length > 0
+        )
+        .map((object) => ({
+          id: `${object.group}-${object.id}`,
+          name: object.name,
+          kind: editableKindByGroup.get(object.group) ?? 'entity',
+          mapId: id
+        }))
+        // 분석으로 트리를 갈아끼워도 타일 군집(보기 전용 구조물)은 유지한다 — loadGame과 동일.
+        .concat(buildTileClusterEntities(id, file, files, objects))
+      return { id, name: id, file: file.path, entities, layers: extractTmxLayerNames(file.text) }
+    })
+}
+
+type CreateEditorAppInput = {
+  mountElement: HTMLElement
+  initialFiles: GameFile[]
+  gamePreviewUrl: string
+}
+
+const API_KEY_STORAGE_KEY = 'my-sample-rpg:anthropic-api-key'
+const MODEL_STORAGE_PREFIX = 'my-sample-rpg:model:'
+const BRIDGE_URL_STORAGE_KEY = 'my-sample-rpg:game-bridge-url'
+// 실행 중인 외부 게임(Love2D 등)의 로컬 HTTP 브리지 기본 주소.
+const DEFAULT_BRIDGE_URL = 'http://localhost:17320'
+// love.js로 빌드한 게임의 웹 URL(예: /legend-of-lua/). 설정하면 그 게임을 패널에서 직접 플레이한다.
+const WEB_BUILD_URL_STORAGE_KEY = 'my-sample-rpg:web-build-url'
+
+const KIND_ICON: Record<string, string> = {
+  npc: '👤',
+  monster: '👹',
+  sign: '🪧',
+  portal: '🚪',
+  chest: '📦',
+  loot: '💰',
+  building: '🏠',
+  character: '🧍',
+  // 타일 군집(tmxTileEntities)으로 인식되는 종류들.
+  tent: '⛺',
+  clocktower: '🕰',
+  fountain: '⛲',
+  lamp: '🏮',
+  banner: '🚩',
+  tree: '🌳',
+  hedge: '🌿',
+  flower: '🌸',
+  prop: '🧺',
+  rock: '🪨',
+  stairs: '🪜',
+  wall: '🧱',
+  window: '🪟'
+}
+
+// 보기 전용 요소(몬스터·표지판·포털 등)에 붙는 짧은 한국어 종류 라벨.
+const KIND_LABEL: Record<string, string> = {
+  npc: 'NPC',
+  monster: '몬스터',
+  sign: '표지판',
+  portal: '포털',
+  chest: '상자',
+  loot: '전리품',
+  building: '건물',
+  object: '객체',
+  character: '캐릭터',
+  // 타일 군집(tmxTileEntities)으로 인식되는 종류들.
+  tent: '천막',
+  clocktower: '시계탑',
+  fountain: '분수',
+  lamp: '가로등',
+  banner: '깃발',
+  tree: '나무',
+  hedge: '생울타리',
+  flower: '화단',
+  prop: '소품',
+  rock: '바위',
+  stairs: '계단',
+  wall: '벽',
+  window: '창문'
+}
+
+// 트리 그룹핑용 종류 정규화. LLM 분석이 'NPC'처럼 대소문자를 섞어 줄 수 있어 소문자로 맞추고,
+// enemy는 라벨·아이콘이 '몬스터'로 같아 monster 그룹에 합친다(그래서 위 맵에는 enemy 키가 없다).
+const groupKindOf = (kind: string): string => {
+  const normalized = kind.trim().toLowerCase()
+  return normalized === 'enemy' ? 'monster' : normalized
+}
+
+// 부분 스타일 변환 대상에서 제외할 종류: 캐릭터·표지판·포털은 점 객체(스프라이트)라
+// 타일셋 패치 방식의 대상이 아니다. NPC는 LLM 생성 대상으로 이미 클릭이 점유돼 있다.
+const STYLE_TARGET_EXCLUDED_KINDS = new Set(['npc', 'monster', 'sign', 'portal'])
+
+const el = <K extends keyof HTMLElementTagNameMap>(
+  tag: K,
+  className: string,
+  text?: string
+): HTMLElementTagNameMap[K] => {
+  const node = document.createElement(tag)
+  node.className = className
+  if (text !== undefined) {
+    node.textContent = text
+  }
+  return node
+}
+
+// ---- 디자인 토큰 ----
+// 타입 스케일은 3단으로 고정한다: LABEL(11px 섹션 eyebrow) · text-xs(메타) · text-sm(본문/컨트롤).
+// 예전엔 0.65/0.7/0.72/0.8rem 등이 뒤섞여 글자 크기가 들쭉날쭉했다.
+const LABEL =
+  'text-[11px] font-semibold uppercase tracking-wider text-zinc-400'
+const CARD =
+  'rounded-xl border border-white/10 bg-white/[0.03] p-4 flex flex-col gap-2'
+const FIELD_INPUT =
+  'w-full rounded-lg border border-white/15 bg-black/40 px-3 py-2.5 text-sm text-zinc-100 outline-none transition placeholder:text-zinc-500 focus:border-indigo-500/60 focus:ring-2 focus:ring-indigo-500/25'
+const PRIMARY_BUTTON =
+  'rounded-lg px-4 py-2 bg-indigo-500 text-white text-sm font-medium shadow-sm shadow-indigo-500/30 transition hover:bg-indigo-400 active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed disabled:shadow-none'
+const GHOST_BUTTON =
+  'rounded-lg px-3.5 py-2 bg-white/[0.04] text-zinc-300 text-sm border border-white/10 transition hover:bg-white/[0.08] hover:text-zinc-100 hover:border-white/20 disabled:opacity-40 disabled:cursor-not-allowed'
+const ENTITY_BASE =
+  'truncate text-left rounded-lg px-2.5 py-2 text-sm text-zinc-300 transition hover:bg-white/[0.06] hover:text-zinc-100'
+const ENTITY_ACTIVE =
+  'truncate text-left rounded-lg px-2.5 py-2 text-sm bg-indigo-500/15 text-indigo-100 ring-1 ring-inset ring-indigo-500/30 transition'
+const ENTITY_GROUP_HEADER =
+  'w-full flex items-center gap-1.5 text-left rounded-lg px-2.5 py-2 text-sm text-zinc-200 font-medium transition hover:bg-white/[0.06] hover:text-zinc-100'
+
+// 폴더에서 만든 이미지 object URL을 정리한다(새 프로젝트를 열 때 옛 URL 누수 방지).
+const revokePreviewObjectUrls = (files: GameFile[]): void => {
+  for (const file of files) {
+    if (file.url?.startsWith('blob:')) {
+      URL.revokeObjectURL(file.url)
+    }
+  }
+}
+
+export const createEditorApp = ({
+  mountElement,
+  initialFiles,
+  gamePreviewUrl
+}: CreateEditorAppInput): void => {
+  let game: LoadedGame = loadGame(initialFiles)
+  let currentFiles: GameFile[] = initialFiles
+  let apiKey = readLocalStorage(API_KEY_STORAGE_KEY) ?? ''
+  let selectedEntity: GameEntity | undefined
+  let currentResult: GenerationResult | undefined
+  let currentAnalysis: GameAnalysis | undefined
+  let isGenerating = false
+  let isAnalyzing = false
+  let entityButtons: Array<{ entity: GameEntity; node: HTMLButtonElement }> = []
+  // 라이브 게임(iframe)이 보고한 현재 맵 id. 트리를 이 맵의 요소만으로 좁힌다(showAllMaps면 전부).
+  // 게임의 sceneId 와 에디터 map.id(=tmx 파일명)가 같아 직접 비교한다. 게임이 맵을 바꿀 때마다
+  // 'game:scene-changed' 메시지로 갱신된다.
+  let currentMapId: string | undefined
+  let showAllMaps = false
+  // 게임이 마지막으로 보고한 씬. 열기/복귀가 currentMapId를 비운 뒤, iframe을 리로드하지 않고
+  // rpg 모드로 돌아올 때(리로드가 없으면 게임이 다시 보고하지 않음) 트리 집중을 복원하는 데 쓴다.
+  let lastRpgSceneId: string | undefined
+  // 트리의 종류별 그룹(NPC/몬스터 등) 펼침 상태. 키는 `${mapId}:${kind}` — 트리를 다시 그려도 유지된다.
+  // 기본은 접힘: 요소를 쭉 나열하면 목록이 길어 보기 불편하다는 피드백에 따른 동작.
+  const expandedGroups = new Set<string>()
+  // 세션 내 생성 결과 누적(최신 우선, 최대 10개). 데모에서 여러 생성을 비교·재선택하려는 용도.
+  const HISTORY_LIMIT = 10
+  let history: Array<{ n: number; result: GenerationResult }> = []
+  let historyCounter = 0
+  // Evaluator(사람 이진 평가, 회의 #3/#7): 생성/검증과 분리된 품질 판정. 단일 지표 acceptance_rate.
+  // 평가 판정은 결과 객체 동일성으로 기억한다(단일 슬롯이면 히스토리에서 옛 결과를 다시 골라 재평가 →
+  // 중복 집계되어 acceptance_rate가 오염됨). WeakMap이라 참조가 사라진 결과는 알아서 GC된다.
+  let evaluations: EventEvaluation[] = loadEventEvaluations()
+  let verdictByResult = new WeakMap<GenerationResult, EventEvaluationVerdict>()
+  // 피드백 루프: 거절 사유를 결과별로 기억해 재생성 입력에 넣는다. iteration은 현재 시도 회차
+  // (새 생성=1, 재생성마다 +1). 프로젝트를 바꾸면 초기화한다.
+  let rejectedReasonByResult = new WeakMap<GenerationResult, string>()
+  let iteration = 1
+  // 이번 세션 집계: 생성 수 + Validator 통과 수. 프로젝트를 바꾸면 초기화한다.
+  let sessionTally: SessionGenerationTally = { generations: 0, validatorPasses: 0 }
+
+  // ---------- shell ----------
+  // w-screen이 아니라 w-full — 100vw는 세로 스크롤바 폭을 포함해 가로 스크롤을 만든다.
+  const root = el('div', 'h-screen w-full flex flex-col bg-zinc-950 text-zinc-100 overflow-hidden')
+
+  const header = el('header', 'h-12 shrink-0 flex items-center justify-between px-4 border-b border-white/10 bg-zinc-900/60')
+  const brand = el('div', 'flex items-center gap-2')
+  brand.append(
+    el('span', 'w-2.5 h-2.5 rounded-full bg-indigo-500'),
+    el('span', 'text-sm font-semibold tracking-tight whitespace-nowrap', 'Scenario Editor'),
+    // 게임 이름·모델 배지는 좁은 화면에선 숨긴다 — 헤더가 넘치면 설정 버튼이 밀려난다.
+    el('span', 'hidden sm:inline text-xs text-zinc-600', '·')
+  )
+  const gameLabel = el('span', 'hidden sm:inline text-xs text-zinc-400 truncate', game.adapter.name)
+  brand.append(gameLabel)
+  // 모델 배지 — 입력한 키의 provider(Claude/GPT)에 따라 동적으로 갱신된다.
+  const modelBadge = el(
+    'span',
+    'hidden md:inline-block text-[11px] rounded-full px-2 py-0.5 bg-indigo-500/10 text-indigo-300 border border-indigo-500/20',
+    `Claude · ${ANTHROPIC_MODEL}`
+  )
+  brand.append(modelBadge)
+  const connection = el('div', 'flex items-center gap-2 text-xs text-zinc-400')
+  const connectionDot = el('span', 'w-2 h-2 rounded-full bg-zinc-600')
+  const connectionLabel = el('span', '', '게임 로딩...')
+  connection.append(connectionDot, connectionLabel)
+  const settingsButton = el('button', 'rounded-lg px-2.5 py-1 text-sm bg-white/[0.04] border border-white/10 text-zinc-300 transition hover:bg-white/[0.08] hover:text-zinc-100', '⚙ 설정') as HTMLButtonElement
+  settingsButton.type = 'button'
+  // 음소거 토글 — 소리는 게임(iframe)이 내므로 postMessage로 즉시 끄고, 게임 리로드/에디터
+  // 재시작에도 유지되도록 게임의 오디오 설정(localStorage, 같은 origin 공유)에 함께 기록한다.
+  const AUDIO_SETTINGS_KEY = 'my-sample-rpg:audio-settings'
+  const readStoredMuted = (): boolean => {
+    try {
+      const settings = JSON.parse(readLocalStorage(AUDIO_SETTINGS_KEY) ?? '{}') as { isMuted?: unknown }
+      return settings.isMuted === true
+    } catch {
+      return false
+    }
+  }
+  let isGameMuted = readStoredMuted()
+  const muteButton = el('button', 'rounded-lg px-2.5 py-1 text-sm bg-white/[0.04] border border-white/10 text-zinc-300 transition hover:bg-white/[0.08] hover:text-zinc-100') as HTMLButtonElement
+  muteButton.type = 'button'
+  const renderMuteButton = (): void => {
+    muteButton.textContent = isGameMuted ? '🔇' : '🔊'
+    muteButton.title = isGameMuted ? '음소거 해제' : '게임 소리 끄기'
+    muteButton.setAttribute('aria-pressed', String(isGameMuted))
+  }
+  renderMuteButton()
+  muteButton.addEventListener('click', () => {
+    isGameMuted = !isGameMuted
+    let settings: Record<string, unknown> = {}
+    try {
+      settings = JSON.parse(readLocalStorage(AUDIO_SETTINGS_KEY) ?? '{}') as Record<string, unknown>
+    } catch {
+      settings = {}
+    }
+    writeLocalStorage(AUDIO_SETTINGS_KEY, JSON.stringify({ ...settings, isMuted: isGameMuted }))
+    iframe.contentWindow?.postMessage({ type: 'editor:set-mute', isMuted: isGameMuted }, '*')
+    renderMuteButton()
+  })
+
+  // AdaIN 스타일 트랜스퍼 — 로컬 Python 서비스(/api/style 프록시)로 이미지를 변환하는 독립 모달.
+  const styleTransfer = createStyleTransferModal()
+  const headerRight = el('div', 'flex items-center gap-3')
+  headerRight.append(muteButton, styleTransfer.openButton, settingsButton, connection)
+  header.append(brand, headerRight)
+
+  // LLM 챗 스타일 배치: 가운데가 라이브 게임(위 가득) + 프롬프트(아래), 오른쪽이 생성 결과.
+  // 3열은 md(≥768px)부터 바로 적용한다 — 이전엔 lg부터여서, 브라우저 줌을 쓰는 일반 노트북
+  // 창이 "결과가 하단 전폭" 배치로 떨어지며 게임 세로 공간을 잃었다(게임이 납작한 띠가 됨).
+  //  - md(≥768px): [엔티티 트리 | 게임+프롬프트 | 생성 결과] 3열 (lg부터는 사이드가 약간 넓어짐)
+  //  - 그 미만: 트리 → 게임+프롬프트 → 생성 결과 세로 스택
+  const body = el(
+    'div',
+    'flex-1 min-h-0 grid ' +
+      'grid-cols-1 grid-rows-[auto_minmax(0,1.4fr)_minmax(0,1fr)] [grid-template-areas:"tree""main""side"] ' +
+      // 결과 사이드는 코드 확인용이라 좁게 잡는다(26%/30%는 게임 화면을 잡아먹는다는 피드백).
+      'md:grid-cols-[minmax(170px,210px)_minmax(0,1fr)_minmax(220px,20%)] md:grid-rows-[minmax(0,1fr)] md:[grid-template-areas:"tree_main_side"] ' +
+      'lg:grid-cols-[minmax(200px,250px)_minmax(0,1fr)_minmax(250px,22%)]'
+  )
+
+  // ---------- left: project tree ----------
+  // 스택 배치(<md)에선 아래 경계선 + 높이 제한(목록이 길면 자체 스크롤), 옆 배치에선 오른쪽 경계선.
+  const tree = el(
+    'aside',
+    '[grid-area:tree] min-w-0 max-h-[35vh] border-b md:max-h-none md:border-b-0 md:border-r border-white/10 flex flex-col min-h-0'
+  )
+  const treeHeader = el('div', 'p-3 border-b border-white/10 flex flex-col gap-2')
+  const openButton = el('button', 'rounded-lg px-3 py-2 bg-white/5 text-sm text-zinc-200 text-left transition hover:bg-white/10', '📂 게임 폴더 열기') as HTMLButtonElement
+  openButton.type = 'button'
+  const analyzeButton = el('button', 'rounded-lg px-3 py-2 bg-indigo-500/10 text-sm text-indigo-200 text-left transition hover:bg-indigo-500/20 disabled:opacity-50', '🔍 LLM 게임 분석') as HTMLButtonElement
+  analyzeButton.type = 'button'
+  const resetButton = el('button', 'rounded-lg px-3 py-1.5 bg-white/5 text-xs text-zinc-400 text-left transition hover:bg-white/10 hover:text-zinc-200', '🏠 내 게임으로 복귀') as HTMLButtonElement
+  resetButton.type = 'button'
+  // 프로젝트 버튼(폴더 열기/분석/복귀)은 설정 모달로 이동했다. 사이드바는 엔티티 목록만.
+  const treeHeaderTop = el('div', 'flex items-center justify-between gap-2')
+  treeHeaderTop.append(el('div', LABEL, '엔티티'))
+  // 라이브 게임이 맵을 보고한 뒤에만 의미가 있는 토글(현재 맵만 ↔ 전체 맵). 그 전엔 숨긴다.
+  const mapFilterToggle = el('button', 'text-[11px] text-zinc-500 transition hover:text-zinc-300', '전체 보기') as HTMLButtonElement
+  mapFilterToggle.type = 'button'
+  mapFilterToggle.hidden = true
+  treeHeaderTop.append(mapFilterToggle)
+  // 게임과의 동기화 상태(현재 맵 이름)를 보여주는 줄. 연결 전엔 대기 메시지.
+  const treeSyncLine = el('div', 'text-[11px] text-zinc-500', '게임과 연결 대기 중…')
+  treeHeader.append(treeHeaderTop, treeSyncLine)
+  const treeList = el('div', 'flex-1 overflow-auto p-3 flex flex-col gap-3')
+  tree.append(treeHeader, treeList)
+
+  // ---------- center: 라이브 게임(위) + 프롬프트 컴포저(아래) ----------
+  // min-w-0: grid 자식의 기본 min-width:auto 때문에 내용이 열을 밀어내는 것 방지.
+  const center = el('main', '[grid-area:main] min-w-0 min-h-0 flex flex-col')
+  const targetLine = el('div', 'text-sm text-zinc-400')
+  const analysisPanel = el('div', 'rounded-xl border border-indigo-500/20 bg-indigo-500/5 p-4 flex flex-col gap-1.5')
+  analysisPanel.hidden = true
+  const supportNote = el('div', 'rounded-xl border border-amber-500/30 bg-amber-500/10 px-3.5 py-2.5 text-xs text-amber-200')
+
+  const apiKeyField = el('label', 'flex flex-col gap-1.5')
+  apiKeyField.append(el('span', LABEL, 'API 키 — Claude 또는 GPT (자동 감지)'))
+  const apiKeyInput = el('input', FIELD_INPUT) as HTMLInputElement
+  apiKeyInput.type = 'password'
+  apiKeyInput.placeholder = 'sk-ant-… (Claude)  또는  sk-… (GPT)'
+  apiKeyInput.autocomplete = 'off'
+  apiKeyInput.value = apiKey
+  apiKeyField.append(apiKeyInput)
+  // 키 유효성 피드백(입력 시 디바운스로 갱신). 빈 문자열이면 자리만 차지하지 않게 둔다.
+  const apiKeyStatus = el('span', 'text-xs text-zinc-500', '')
+  apiKeyField.append(apiKeyStatus)
+
+  // 모델 선택 — 키는 모델을 정하지 않으므로, 감지된 provider의 모델 중에서 고른다(저장됨).
+  const modelField = el('label', 'flex flex-col gap-1.5')
+  modelField.append(el('span', LABEL, '모델'))
+  const modelSelect = el('select', `${FIELD_INPUT} cursor-pointer`) as HTMLSelectElement
+  modelField.append(modelSelect)
+
+  const promptField = el('label', 'flex flex-col gap-1.5')
+  promptField.append(el('span', LABEL, '자연어 프롬프트  ·  ⌘/Ctrl+Enter로 생성'))
+  // 챗 컴포저처럼 기본 2줄 높이 — 필요하면 손잡이로 늘릴 수 있다(resize-y).
+  const promptInput = el('textarea', `${FIELD_INPUT} min-h-[60px] resize-y`) as HTMLTextAreaElement
+  promptInput.placeholder = '예: 대장장이가 새로 만든 검을 자랑하는 대화'
+  promptField.append(promptInput)
+
+  const actions = el('div', 'flex flex-wrap items-center gap-2')
+  const generateButton = el('button', PRIMARY_BUTTON, '생성') as HTMLButtonElement
+  generateButton.type = 'button'
+  const applyButton = el('button', GHOST_BUTTON, '게임에 적용') as HTMLButtonElement
+  applyButton.type = 'button'
+  const copyButton = el('button', GHOST_BUTTON, '⧉ 복사') as HTMLButtonElement
+  copyButton.type = 'button'
+  const exportButton = el('button', GHOST_BUTTON, '↓ 내보내기') as HTMLButtonElement
+  exportButton.type = 'button'
+  actions.append(generateButton, applyButton, copyButton, exportButton)
+
+  const status = el('div', 'text-sm text-zinc-400 min-h-[1.25rem]')
+  const validationLine = el('div', 'text-xs')
+  validationLine.hidden = true
+
+  // 결과 박스는 항상 읽히도록 최소 높이를 주고, 길면 자체 스크롤한다(예전엔 flex-1 min-h-0이라
+  // 분석 패널·평가 카드에 밀려 0 높이로 찌그러져 결과가 안 보였다).
+  const resultWrap = el('div', 'flex flex-col gap-1.5 shrink-0')
+  resultWrap.append(el('span', LABEL, '생성 결과'))
+  const result = el('pre', 'm-0 min-h-[8rem] max-h-[40vh] overflow-auto rounded-lg border border-white/10 bg-black/40 p-3.5 text-xs leading-relaxed text-zinc-300 whitespace-pre-wrap break-words')
+  resultWrap.append(result)
+
+  // ---------- Evaluator (사람 이진 평가) ----------
+  const evaluationWrap = el('div', CARD)
+  evaluationWrap.hidden = true
+  // flex-wrap: 좁은 사이드바에선 지표 줄이 라벨 옆에 끼어 두 줄 컬럼으로 뭉개지는 대신 제 줄로 내려간다.
+  const evaluationTop = el('div', 'flex flex-wrap items-center justify-between gap-x-2 gap-y-1')
+  evaluationTop.append(
+    el('span', LABEL, 'Evaluator · 사람 이진 평가')
+  )
+  const acceptanceStat = el('span', 'text-xs text-zinc-400')
+  evaluationTop.append(acceptanceStat)
+  // 거절 사유 입력 — 거부 시 평가 기록(reason)과 다음 재생성 입력에 들어간다.
+  const reasonInput = el('input', `${FIELD_INPUT} text-sm`) as HTMLInputElement
+  reasonInput.type = 'text'
+  reasonInput.placeholder = '거절 사유 (예: 너무 장황함 · 톤이 안 맞음 · 맥락 누락 · 구조 오류)'
+  const evaluationButtons = el('div', 'flex items-center gap-2 flex-wrap')
+
+  const acceptButton = el('button', GHOST_BUTTON, '👍 수용') as HTMLButtonElement
+  acceptButton.type = 'button'
+  const rejectButton = el('button', GHOST_BUTTON, '👎 거부') as HTMLButtonElement
+  rejectButton.type = 'button'
+  const regenerateButton = el('button', GHOST_BUTTON, '🔄 사유로 재생성') as HTMLButtonElement
+  regenerateButton.type = 'button'
+  const evaluationVerdict = el('span', 'text-xs flex-1 min-w-[6rem]')
+  const resetEvaluationsButton = el('button', 'text-[11px] text-zinc-500 transition hover:text-zinc-300', '누적 기록 초기화') as HTMLButtonElement
+  resetEvaluationsButton.type = 'button'
+  evaluationButtons.append(acceptButton, rejectButton, regenerateButton, evaluationVerdict, resetEvaluationsButton)
+  evaluationWrap.append(evaluationTop, reasonInput, evaluationButtons)
+
+  const historyWrap = el('div', 'flex flex-col gap-1.5')
+  historyWrap.hidden = true
+  const historyHeader = el('div', 'flex items-center justify-between')
+  historyHeader.append(
+    el('span', LABEL, '생성 히스토리')
+  )
+  const clearHistoryButton = el('button', 'text-[11px] text-zinc-500 transition hover:text-zinc-300', '비우기') as HTMLButtonElement
+  clearHistoryButton.type = 'button'
+  historyHeader.append(clearHistoryButton)
+  const historyList = el('div', 'flex flex-col gap-1')
+  historyWrap.append(historyHeader, historyList)
+
+  // ---------- center 상단: live game preview ----------
+  // min-h 바닥: 어떤 창 크기에서도 게임이 HUD만 보이는 납작한 띠로 짓눌리지 않게 한다.
+  // 내 게임(my-sample-rpg)은 웹 런타임이 있어 iframe으로 "실제 실행"을 보여주지만, 다른 게임
+// (예: Love2D의 legend-of-lua)은 브라우저에서 런타임을 못 돌린다. love.js 웹 빌드가 있으면
+  // iframe으로 직접 플레이하고, 없으면 본게임과 똑같은 Pixi Tiled 렌더 경로로 그 게임의 맵을
+  // 라이브로 그려 보여준다. iframe과 Pixi 캔버스를 한 자리에 겹쳐 두고 모드에 따라 바꿔 켠다.
+  const preview = el('section', 'flex-1 min-h-[200px] md:min-h-[300px] min-w-0 flex flex-col')
+  // 맵 버튼이 많아도 바가 안 잘리도록: [제목(잘림)] [맵 버튼(줄바꿈)] [새창·새로고침(고정)].
+  // 가로 스크롤 대신 줄바꿈(wrap)을 쓴다 — 스크롤은 클릭과 제스처가 충돌(관성 스크롤 중 클릭이
+  // 빗나감)하지만, 줄바꿈은 모든 버튼이 제자리에 고정돼 클릭이 항상 확실하다.
+  const previewBar = el('div', 'shrink-0 flex items-start gap-2 px-3 py-1.5 border-b border-white/10 bg-zinc-900/40')
+  const previewTitle = el('span', 'text-xs text-zinc-400 shrink-0 whitespace-nowrap truncate max-w-[30%] leading-6', '🎮 라이브 게임 (실제 게임 실행 중)')
+  // 내 게임 iframe 모드에서 전환할 씬(마을/사냥터/동굴).
+  const rpgPreviewScenes = [
+    { id: 'town', label: '마을' },
+    { id: 'hunting-ground', label: '사냥터' },
+    { id: 'cave', label: '동굴' }
+  ]
+  // 맵 버튼 줄: 남는 공간을 차지하고, 넘치면 다음 줄로 접힌다(wrap). 스크롤이 없어 클릭이 항상 확실.
+  const mapSwitcher = el('div', 'flex flex-wrap items-center gap-1 flex-1 min-w-0')
+  const previewActions = el('div', 'flex items-center gap-2 shrink-0 leading-6')
+  const popoutButton = el('button', 'text-xs text-zinc-400 transition hover:text-zinc-100', '↗ 새 창') as HTMLButtonElement
+  popoutButton.type = 'button'
+  const reloadButton = el('button', 'text-xs text-zinc-400 transition hover:text-zinc-100', '↻ 새로고침') as HTMLButtonElement
+  reloadButton.type = 'button'
+  previewActions.append(popoutButton, reloadButton)
+  previewBar.append(previewTitle, mapSwitcher, previewActions)
+
+  const previewBody = el('div', 'flex-1 relative min-h-0')
+  const iframe = el('iframe', 'absolute inset-0 w-full h-full border-0 bg-black') as HTMLIFrameElement
+  // src는 여기서 넣지 않는다 — 시작 화면에서 프로젝트를 고르기 전엔 게임을 로드하지 않는다
+  // (자동 실행되면 시작 화면 뒤에서 샘플 게임이 돌며 소리·CPU를 쓴다). showRpgPreview가 로드한다.
+  iframe.title = '게임 프리뷰'
+  // 실제로 로드가 끝난 URL. 모드 전환 함수들이 "이미 로드됨"과 "로딩 중"을 구분하는 데 쓴다
+  // (연결 표시등을 로드 전에 초록으로 만들지 않기 위해 — 초록 = 진짜 로드됨 의미 보존).
+  let loadedIframeSrc: string | undefined
+  iframe.addEventListener('load', () => {
+    loadedIframeSrc = iframe.src
+    // iframe이 게임을 띄우는 모드(rpg 웹게임 / love.js 웹빌드)면 연결됨으로 표시한다.
+    if (isRpgPreviewMode() || isWebBuildMode()) {
+      connectionDot.className = 'w-2 h-2 rounded-full bg-emerald-400'
+      connectionLabel.textContent = '게임 연결됨'
+      // 로딩 중 안내(showWebGamePreview가 띄운 '게임 로딩 중…')를 지운다.
+      setPreviewMessage(undefined)
+    }
+  })
+  // 다른 게임의 맵을 Pixi로 그릴 호스트. 드래그 팬을 위해 기본 커서를 grab으로.
+  const mapPreviewHost = el('div', 'absolute inset-0 bg-black overflow-hidden cursor-grab')
+  mapPreviewHost.style.display = 'none'
+  // 렌더 진행/실패 안내(이미지 누락, 미지원 인코딩 등).
+  const previewMessage = el('div', 'absolute inset-0 flex items-center justify-center p-6 text-center text-xs text-zinc-400 pointer-events-none')
+  previewMessage.style.display = 'none'
+  previewBody.append(iframe, mapPreviewHost, previewMessage)
+  preview.append(previewBar, previewBody)
+
+  // ---------- center 하단: 프롬프트 컴포저 (LLM 챗의 입력창처럼 게임 바로 아래) ----------
+  // 챗 입력창처럼 낮게 유지한다 — 컴포저가 높을수록 게임이 그만큼 낮아진다.
+  // max-h+스크롤: 창이 낮을 때 컴포저가 게임 영역을 통째로 밀어내지 않게 한다.
+  const composer = el('div', 'shrink-0 max-h-[45%] overflow-y-auto border-t border-white/10 p-3 flex flex-col gap-2')
+  composer.append(targetLine, supportNote, promptField, actions, status)
+  center.append(preview, composer)
+
+  // ---------- right: 생성 결과 사이드바 ----------
+  // 옆 배치(md부터, body 그리드와 동일 기준)에선 왼쪽 경계선, 아래 배치(<md)에선 위 경계선.
+  const side = el(
+    'aside',
+    '[grid-area:side] min-w-0 min-h-0 overflow-y-auto p-4 flex flex-col gap-4 border-t md:border-t-0 md:border-l border-white/10'
+  )
+  side.append(analysisPanel, validationLine, resultWrap, evaluationWrap, historyWrap)
+
+  body.append(tree, center, side)
+
+  // ---------- live preview behavior ----------
+  // 내 게임(rpg)은 iframe 실행. 다른 게임은: love.js 웹 빌드 URL이 있으면 그걸 패널에서 플레이,
+  // 없으면 맵을 Pixi로 렌더(정적 미리보기).
+  // 사용자가 설정에 입력한 값(localStorage)을 우선하되, 없으면 어댑터가 번들로 제공하는
+  // 기본 웹빌드 URL(예: legend-of-lua의 /legend-of-lua/)을 쓴다. 그래야 localStorage가 비어 있는
+  // 다른 컴퓨터에서도 별도 설정 없이 패널에서 바로 플레이된다.
+  // 현재 게임 기준으로 웹빌드 URL을 정한다. webBuildUrl은 createEditorApp 생성 시 1회가 아니라
+  // game이 바뀔 때마다(폴더 열기/초기화) 다시 계산해야 한다 — 안 그러면 legend-of-lua가 아닌
+  // 초기 상태로 시작한 뒤 폴더를 열어도 빈 값이 남아 bridge 모드로 떨어진다.
+  const resolveWebBuildUrl = (): string => {
+    const stored = (readLocalStorage(WEB_BUILD_URL_STORAGE_KEY) ?? '').trim()
+    return stored.length > 0
+      ? stored
+      : (game.adapter.defaultWebBuildUrl ?? '').trim()
+  }
+  let webBuildUrl = resolveWebBuildUrl()
+  const isRpgPreviewMode = (): boolean => game.adapter.id === 'my-sample-rpg'
+  // 다른 게임 + love.js 빌드 URL이 있으면 패널에서 실제 게임을 iframe으로 플레이한다.
+  const isWebBuildMode = (): boolean =>
+    !isRpgPreviewMode() && webBuildUrl.length > 0
+
+  let activeMapPreview: TiledMapPreview | undefined
+  // 맵 전환이 빠르게 겹쳐도 늦게 끝난 렌더가 패널을 덮지 않게 토큰으로 최신 요청만 커밋한다.
+  let mapPreviewToken = 0
+  let selectedPreviewMapId: string | undefined
+
+  const setPreviewMessage = (message: string | undefined): void => {
+    if (message === undefined) {
+      previewMessage.style.display = 'none'
+      previewMessage.textContent = ''
+      return
+    }
+
+    previewMessage.style.display = 'flex'
+    previewMessage.textContent = message
+  }
+
+  const destroyMapPreview = (): void => {
+    activeMapPreview?.destroy()
+    activeMapPreview = undefined
+  }
+
+  const MAP_BUTTON_BASE =
+    'shrink-0 whitespace-nowrap text-[11px] rounded px-2 py-0.5 bg-white/[0.04] border border-white/10 text-zinc-300 transition hover:bg-white/[0.08] hover:text-zinc-100'
+  const MAP_BUTTON_ACTIVE =
+    'shrink-0 whitespace-nowrap text-[11px] rounded px-2 py-0.5 bg-indigo-500/20 border border-indigo-500/40 text-indigo-100 transition'
+
+  // 스위처 버튼들을 추적해, 클릭 시 전체를 다시 그리지 않고 활성 표시만 바꾼다.
+  // (replaceChildren로 매번 다시 그리면 가로 스크롤이 0으로 리셋되고 버튼이 커서 밑에서 움직여
+  //  다음 클릭이 엉뚱하게 떨어진다.) 활성 = 트리가 집중하는 맵(currentMapId), 전체 보기면 '전체'.
+  let mapSwitcherButtons: Array<{ id: string | undefined; node: HTMLButtonElement }> = []
+
+  const updateMapSwitcherActive = (): void => {
+    const activeId = showAllMaps ? undefined : currentMapId
+    for (const { id, node } of mapSwitcherButtons) {
+      node.className = id === activeId ? MAP_BUTTON_ACTIVE : MAP_BUTTON_BASE
+    }
+  }
+
+  const makeMapButton = (
+    id: string | undefined,
+    label: string,
+    onClick: () => void
+  ): HTMLButtonElement => {
+    const button = el('button', MAP_BUTTON_BASE, label) as HTMLButtonElement
+    button.type = 'button'
+    // 부분만 보이는 버튼을 클릭할 때 브라우저가 포커스로 자동 스크롤(=튕김)하면서 버튼이 커서 밑에서
+    // 움직여 click이 안 먹는다. 포커스를 막으면 자동 스크롤이 사라지고, click은 그대로 발생한다.
+    button.addEventListener('mousedown', (event) => event.preventDefault())
+    button.addEventListener('click', onClick)
+    mapSwitcherButtons.push({ id, node: button })
+    return button
+  }
+
+  // 스위처를 처음부터 다시 그린다(모드/게임 변경 시에만 호출 — 클릭 시엔 updateMapSwitcherActive 사용).
+  const renderMapSwitcher = (): void => {
+    mapSwitcherButtons = []
+    const children: HTMLButtonElement[] = []
+
+    // "전체": 트리 맵 집중 해제(전체 맵 표시) — 트리 헤더의 '전체 보기' 토글과 같은 동작.
+    children.push(
+      makeMapButton(undefined, '전체', () => {
+        showAllMaps = true
+        renderTree()
+        render()
+        updateMapSwitcherActive()
+      })
+    )
+
+    if (isRpgPreviewMode()) {
+      // 씬 = 맵. 누르면 iframe에 씬 전환을 보낸다. 트리 좁히기는 게임이 돌려보내는
+      // 'game:scene-changed' 메시지가 처리한다(초기 로드·포털 이동과 같은 경로).
+      for (const scene of rpgPreviewScenes) {
+        children.push(
+          makeMapButton(scene.id, scene.label, () => {
+            iframe.contentWindow?.postMessage(
+              { type: 'editor:switch-scene', sceneId: scene.id },
+              '*'
+            )
+          })
+        )
+      }
+    } else {
+      // 다른 게임: 맵 버튼이 트리를 그 맵으로 좁힌다(이 게임들은 씬 변경을 보고하지 않으므로
+      // 버튼이 currentMapId의 소유자다). 맵 미리보기 모드면 Pixi 렌더, love.js 플레이 모드면
+      // 게임에 맵 전환 요청(미리보기로 갈아끼우지 않음).
+      for (const map of game.maps) {
+        children.push(
+          makeMapButton(map.id, map.name, () => {
+            currentMapId = map.id
+            showAllMaps = false
+            renderTree()
+            render()
+            updateMapSwitcherActive()
+            if (isWebBuildMode()) {
+              iframe.contentWindow?.postMessage(
+                { type: 'editor:goto-map', mapId: map.id, mapName: map.name },
+                '*'
+              )
+            } else {
+              void renderMapPreview(map.id)
+            }
+          })
+        )
+      }
+    }
+
+    mapSwitcher.replaceChildren(...children)
+    updateMapSwitcherActive()
+  }
+
+  const showRpgPreview = (): void => {
+    destroyMapPreview()
+    setPreviewMessage(undefined)
+    mapPreviewHost.style.display = 'none'
+    iframe.style.display = 'block'
+    popoutButton.style.display = 'inline'
+    const rpgUrl = new URL(gamePreviewUrl, location.href).href
+    if (iframe.src !== rpgUrl) {
+      iframe.src = gamePreviewUrl
+    } else if (currentMapId === undefined && lastRpgSceneId !== undefined) {
+      // 리로드가 없으면 게임이 씬을 다시 보고하지 않는다(bootstrapScene에서만 보냄) —
+      // 열기/복귀가 비운 트리 집중을 마지막으로 보고된 씬으로 복원한다.
+      currentMapId = lastRpgSceneId
+      showAllMaps = false
+      renderTree()
+      render()
+    }
+    previewTitle.textContent = '🎮 라이브 게임 (실제 게임 실행 중)'
+    // 초록 = 진짜 로드됨. 아직 로딩 중이면 load 리스너가 곧 초록으로 갱신한다.
+    if (loadedIframeSrc === rpgUrl) {
+      connectionDot.className = 'w-2 h-2 rounded-full bg-emerald-400'
+      connectionLabel.textContent = '게임 연결됨'
+    } else {
+      connectionDot.className = 'w-2 h-2 rounded-full bg-amber-400'
+      connectionLabel.textContent = '게임 로딩…'
+    }
+    renderMapSwitcher()
+  }
+
+  // love.js 웹 빌드를 패널에서 직접 플레이한다(별도 창 없이, my-sample-rpg처럼 iframe 안에서).
+  const showWebGamePreview = (): void => {
+    destroyMapPreview()
+    setPreviewMessage(undefined)
+    mapPreviewHost.style.display = 'none'
+    iframe.style.display = 'block'
+    popoutButton.style.display = 'inline'
+    if (iframe.src !== new URL(webBuildUrl, location.href).href) {
+      iframe.src = webBuildUrl
+      // 연결 표시는 iframe load에서 갱신. 로딩 동안엔 연결 중으로 둔다.
+      connectionDot.className = 'w-2 h-2 rounded-full bg-amber-400'
+      connectionLabel.textContent = '게임 로딩…'
+      // love.js 빌드는 wasm·게임 데이터를 받느라 첫 로드에 시간이 걸린다 — 빈 검은 화면 대신
+      // 로딩 안내를 띄우고, iframe load 이벤트에서 지운다.
+      setPreviewMessage('🎮 게임 로딩 중…')
+    } else if (loadedIframeSrc === iframe.src) {
+      // 이미 로드돼 플레이 중인 게임 — 로딩 표시로 되돌리지 않는다(영영 amber로 남는 버그 방지).
+      connectionDot.className = 'w-2 h-2 rounded-full bg-emerald-400'
+      connectionLabel.textContent = '게임 연결됨'
+    }
+    previewTitle.textContent = `🎮 라이브 게임 (love.js) — ${game.adapter.name}`
+    renderMapSwitcher()
+  }
+
+  // 브리지 게임은 헤더 연결 표시를 브리지 상태가 소유한다 — 맵 프리뷰가 그걸 덮지 않게 한다.
+  const markMapPreviewConnection = (ok: boolean): void => {
+    if (game.adapter.applyMode === 'bridge') {
+      return
+    }
+
+    connectionDot.className = ok
+      ? 'w-2 h-2 rounded-full bg-emerald-400'
+      : 'w-2 h-2 rounded-full bg-amber-400'
+    connectionLabel.textContent = ok ? '맵 미리보기' : '맵 미리보기 불가'
+  }
+
+  const renderMapPreview = async (mapId: string): Promise<void> => {
+    const targetMap = game.maps.find((map) => map.id === mapId)
+
+    if (!targetMap) {
+      return
+    }
+
+    selectedPreviewMapId = mapId
+    iframe.style.display = 'none'
+    popoutButton.style.display = 'none'
+    mapPreviewHost.style.display = 'block'
+    previewTitle.textContent = `🗺 맵 미리보기 — ${targetMap.name}`
+    // 스위처는 syncPreviewToGame에서 한 번 그려둔다. 여기선 활성 표시만 갱신(스크롤 보존).
+    updateMapSwitcherActive()
+
+    const inputs = buildMapPreviewInputs(currentFiles, targetMap.file)
+
+    if (!inputs.ok) {
+      destroyMapPreview()
+      setPreviewMessage(inputs.error)
+      markMapPreviewConnection(false)
+      return
+    }
+
+    const token = (mapPreviewToken += 1)
+    setPreviewMessage('맵 렌더링 중...')
+    destroyMapPreview()
+
+    try {
+      const instance = await createTiledMapPreview({
+        mountElement: mapPreviewHost,
+        map: inputs.inputs.map,
+        imageUrls: inputs.inputs.imageUrls
+      })
+
+      // 렌더 중에 더 최근 요청(맵 전환/리셋)이 들어왔으면 이 결과는 버린다.
+      if (token !== mapPreviewToken) {
+        instance.destroy()
+        return
+      }
+
+      activeMapPreview = instance
+      setPreviewMessage(undefined)
+      markMapPreviewConnection(true)
+    } catch (error) {
+      if (token !== mapPreviewToken) {
+        return
+      }
+
+      setPreviewMessage(
+        `맵을 렌더링하지 못했습니다: ${error instanceof Error ? error.message : String(error)}`
+      )
+      markMapPreviewConnection(false)
+    }
+  }
+
+  // 게임이 바뀔 때(열기/복귀) 프리뷰를 그 게임에 맞게 동기화한다.
+  const syncPreviewToGame = (): void => {
+    // 음소거·스타일 변환은 내 게임(rpg)에만 배선돼 있다 — 'editor:set-mute' 핸들러도, 스타일
+    // 서비스의 대상(src/games/my-sample-rpg/assets)도 my-sample-rpg뿐이라, 다른 게임을 보는 동안 누르면 화면의
+    // 게임이 아니라 안 보이는 rpg의 설정/에셋만 바뀐다. 그 모드에선 헤더에서 숨긴다.
+    // (hidden 속성 대신 인라인 display — 유틸리티 클래스가 [hidden]을 덮어쓰는 사고 방지 관례.)
+    muteButton.style.display = isRpgPreviewMode() ? '' : 'none'
+    styleTransfer.openButton.style.display = isRpgPreviewMode() ? '' : 'none'
+    if (isRpgPreviewMode()) {
+      showRpgPreview()
+      return
+    }
+
+    // love.js 웹 빌드가 설정돼 있으면 그 게임을 패널에서 직접 플레이한다.
+    if (isWebBuildMode()) {
+      showWebGamePreview()
+      return
+    }
+
+    // 맵 미리보기 모드: 숨겨질 iframe 속 게임(rpg/love.js)을 내려 CPU·사운드를 멈추고,
+    // 숨은 게임이 보내는 늦은 메시지도 원천 차단한다(rpg 복귀 시 showRpgPreview가 다시 로드).
+    if (iframe.src !== 'about:blank') {
+      iframe.src = 'about:blank'
+    }
+
+    // 웹 빌드가 없으면 맵을 Pixi로 렌더(정적 미리보기). 엔티티가 있는 맵을 우선(없으면 첫 맵).
+    const firstMap =
+      game.maps.find((map) => map.entities.length > 0) ?? game.maps[0]
+
+    if (!firstMap) {
+      destroyMapPreview()
+      setPreviewMessage('이 게임에서 렌더할 맵을 찾지 못했습니다.')
+      return
+    }
+
+    // 미리보기 모드에선 보이는 맵이 곧 "현재 맵" — 트리도 그 맵으로 집중시킨다.
+    currentMapId = firstMap.id
+    renderTree()
+    renderMapSwitcher() // 스위처를 이 게임의 맵으로 한 번 그린다(이후 클릭은 활성 표시만 갱신).
+    void renderMapPreview(firstMap.id)
+  }
+
+  // ---------- live game bridge (별도 프로세스 게임용) ----------
+  // my-sample-rpg는 같은 origin localStorage로 적용하지만, Love2D 같은 외부 프로세스 게임은
+  // 실행 중인 게임의 로컬 HTTP 브리지로 생성물을 보낸다. 연결 상태는 헤더 표시등이 보여준다.
+  let bridgeStatus: BridgeStatus = 'disconnected'
+
+  const applyBridgeStatusToIndicator = (): void => {
+    if (bridgeStatus === 'connected') {
+      connectionDot.className = 'w-2 h-2 rounded-full bg-emerald-400'
+      connectionLabel.textContent = '게임 연결됨'
+    } else if (bridgeStatus === 'connecting') {
+      connectionDot.className = 'w-2 h-2 rounded-full bg-amber-400'
+      connectionLabel.textContent = '게임 연결 중…'
+    } else {
+      connectionDot.className = 'w-2 h-2 rounded-full bg-zinc-600'
+      connectionLabel.textContent = '게임 미연결'
+    }
+  }
+
+  const bridge = createGameBridge({
+    baseUrl: readLocalStorage(BRIDGE_URL_STORAGE_KEY) ?? DEFAULT_BRIDGE_URL,
+    onStatusChange: (next) => {
+      bridgeStatus = next
+      // 브리지 게임이고 웹빌드 모드가 아닐 때만 헤더 표시등을 브리지 상태로 갱신한다.
+      if (game.adapter.applyMode === 'bridge' && !isWebBuildMode()) {
+        applyBridgeStatusToIndicator()
+      }
+      // 적용 버튼 활성/지원 안내가 연결 상태에 의존하므로 다시 그린다.
+      render()
+    }
+  })
+
+  // 브리지 적용 게임이고 웹빌드(love.js)로 패널에서 직접 플레이하는 게 아니면 폴링을 켠다.
+  // love.js 모드에선 게임이 iframe 안에 있으므로 HTTP 브리지(별도 프로세스용)는 끈다.
+  const syncBridgeForGame = (): void => {
+    if (game.adapter.applyMode === 'bridge' && !isWebBuildMode()) {
+      bridge.start()
+      applyBridgeStatusToIndicator()
+    } else {
+      bridge.stop()
+    }
+  }
+
+  // ---------- settings modal (헤더 ⚙) ----------
+  // API 키·폴더 열기·분석·복귀는 상시 노출 대신 여기로 모은다. 메인은 편집에 집중.
+  const settingsBackdrop = el('div', 'fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4')
+  // 숨김은 hidden 속성 대신 인라인 display로 제어한다 — `flex` 클래스의 display:flex가 [hidden]을
+  // 덮어써 안 닫히는 사고를 막는다(인라인 스타일이 항상 이긴다).
+  settingsBackdrop.style.display = 'none'
+  const settingsPanel = el('div', 'w-full max-w-md rounded-2xl border border-white/10 bg-zinc-900 p-5 flex flex-col gap-4 shadow-2xl')
+  const settingsTop = el('div', 'flex items-center justify-between')
+  settingsTop.append(el('span', 'text-sm font-semibold tracking-tight', '⚙ 설정'))
+  const settingsClose = el('button', 'text-zinc-500 text-sm transition hover:text-zinc-200', '✕') as HTMLButtonElement
+  settingsClose.type = 'button'
+  settingsTop.append(settingsClose)
+  const projectControls = el('div', 'flex flex-col gap-2')
+  projectControls.append(el('div', LABEL, '프로젝트'), openButton, analyzeButton, resetButton)
+
+  // 외부 게임(Love2D 등)의 라이브 브리지 주소. 게임이 띄운 로컬 HTTP 서버를 가리킨다.
+  const bridgeField = el('label', 'flex flex-col gap-1.5')
+  bridgeField.append(el('span', LABEL, '게임 브리지 URL — 외부 게임(Love2D 등) 라이브 적용'))
+  const bridgeInput = el('input', FIELD_INPUT) as HTMLInputElement
+  bridgeInput.type = 'text'
+  bridgeInput.placeholder = DEFAULT_BRIDGE_URL
+  bridgeInput.value = bridge.getBaseUrl()
+  bridgeInput.spellcheck = false
+  bridgeField.append(bridgeInput)
+  bridgeInput.addEventListener('change', () => {
+    const url = bridgeInput.value.trim() || DEFAULT_BRIDGE_URL
+    bridge.setBaseUrl(url)
+    writeLocalStorage(BRIDGE_URL_STORAGE_KEY, url)
+    bridgeInput.value = bridge.getBaseUrl()
+  })
+
+  // love.js로 빌드한 게임의 웹 URL. 넣으면 그 게임을 패널에서 직접 플레이한다(비우면 맵 미리보기).
+  const webBuildField = el('label', 'flex flex-col gap-1.5')
+  webBuildField.append(el('span', LABEL, 'love.js 웹 빌드 URL — 패널에서 게임 직접 플레이(예: /legend-of-lua/)'))
+  const webBuildInput = el('input', FIELD_INPUT) as HTMLInputElement
+  webBuildInput.type = 'text'
+  webBuildInput.placeholder = '/legend-of-lua/'
+  webBuildInput.value = webBuildUrl
+  webBuildInput.spellcheck = false
+  webBuildField.append(webBuildInput)
+  webBuildInput.addEventListener('change', () => {
+    webBuildUrl = webBuildInput.value.trim()
+    writeLocalStorage(WEB_BUILD_URL_STORAGE_KEY, webBuildUrl)
+    // 현재 보고 있는 게임이 외부 게임이면 즉시 모드를 다시 맞춘다(미리보기 ↔ 플레이).
+    syncPreviewToGame()
+    syncBridgeForGame()
+    render()
+  })
+
+  settingsPanel.append(settingsTop, apiKeyField, modelField, bridgeField, webBuildField, el('div', 'h-px bg-white/10'), projectControls)
+  settingsBackdrop.append(settingsPanel)
+
+  const closeSettings = (): void => {
+    settingsBackdrop.style.display = 'none'
+  }
+  settingsButton.addEventListener('click', () => {
+    settingsBackdrop.style.display = 'flex'
+  })
+  settingsClose.addEventListener('click', closeSettings)
+  settingsBackdrop.addEventListener('click', (event) => {
+    // 패널 바깥(백드롭)을 클릭했을 때만 닫는다.
+    if (event.target === settingsBackdrop) {
+      closeSettings()
+    }
+  })
+  window.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && settingsBackdrop.style.display !== 'none') {
+      closeSettings()
+    }
+  })
+
+  // ---------- 시작 화면: 프로젝트 선택 ----------
+  // 에디터는 특정 게임에 묶이지 않는다 — 첫 화면에서 어떤 프로젝트를 편집할지 고른 뒤에야
+  // 게임 로드(프리뷰 실행 포함)를 시작한다. 내장 샘플 게임도 자동 선택이 아니라 선택지 중 하나.
+  const landingBackdrop = el('div', 'fixed inset-0 z-40 bg-zinc-950 flex items-center justify-center p-6')
+  const landingPanel = el('div', 'w-full max-w-md flex flex-col gap-6')
+  const landingBrand = el('div', 'flex flex-col gap-1.5')
+  const landingBrandRow = el('div', 'flex items-center gap-2')
+  landingBrandRow.append(
+    el('span', 'w-2.5 h-2.5 rounded-full bg-indigo-500'),
+    el('span', 'text-lg font-semibold tracking-tight', 'Scenario Editor')
+  )
+  landingBrand.append(
+    landingBrandRow,
+    el('div', 'text-sm text-zinc-400', '편집할 게임 프로젝트를 선택하세요.')
+  )
+
+  const LANDING_CARD =
+    'w-full text-left rounded-2xl border border-white/10 bg-white/[0.03] p-5 flex flex-col gap-1 transition hover:bg-white/[0.06] hover:border-indigo-500/40 disabled:opacity-50 disabled:cursor-not-allowed'
+  const landingOpenButton = el('button', LANDING_CARD) as HTMLButtonElement
+  landingOpenButton.type = 'button'
+  landingOpenButton.append(
+    el('div', 'text-sm font-semibold text-zinc-100', '📂 게임 폴더 열기'),
+    el('div', 'text-xs text-zinc-400 leading-relaxed', '내 컴퓨터의 게임 프로젝트 폴더(.tmx 맵 포함)를 선택해 엽니다.')
+  )
+  const landingSampleButton = el('button', LANDING_CARD) as HTMLButtonElement
+  landingSampleButton.type = 'button'
+  landingSampleButton.append(
+    el('div', 'text-sm font-semibold text-zinc-100', '🎮 샘플 게임으로 시작'),
+    el('div', 'text-xs text-zinc-400 leading-relaxed', '내장 샘플(My Sample RPG)을 열어 라이브 프리뷰와 함께 에디터를 사용합니다.')
+  )
+  // 폴더 열기 실패 사유(맵 없음·권한 등)를 시작 화면 안에서 바로 보여준다 — 뒤의 상태줄은 가려져 안 보인다.
+  const landingError = el('div', 'text-xs text-amber-300 min-h-[1rem]')
+  landingPanel.append(landingBrand, landingOpenButton, landingSampleButton, landingError)
+  landingBackdrop.append(landingPanel)
+
+  // 선택이 끝나면 시작 화면을 닫고 편집을 시작한다(프리뷰·브리지 동기화 + 데모 흐름 포커스).
+  const startEditing = (): void => {
+    landingBackdrop.style.display = 'none'
+    syncPreviewToGame()
+    syncBridgeForGame()
+    // 데모 흐름: 키가 없으면 키 입력에, 있으면 바로 프롬프트에 포커스.
+    ;(apiKey.trim().length > 0 ? promptInput : apiKeyInput).focus()
+  }
+
+  landingSampleButton.addEventListener('click', () => {
+    // 샘플 게임 상태는 부팅 때 이미 로드돼 있다(트리·프로필) — 프리뷰 실행만 시작하면 된다.
+    startEditing()
+  })
+  landingOpenButton.addEventListener('click', () => {
+    void (async () => {
+      landingOpenButton.disabled = true
+      landingSampleButton.disabled = true
+      const statusBefore = status.textContent
+      const opened = await runOpenProject()
+      landingOpenButton.disabled = false
+      landingSampleButton.disabled = false
+      if (opened) {
+        // runOpenProject가 프리뷰·브리지 동기화까지 끝냈다 — 화면만 닫고 포커스를 준다.
+        landingBackdrop.style.display = 'none'
+        ;(apiKey.trim().length > 0 ? promptInput : apiKeyInput).focus()
+        return
+      }
+      // 실패 사유는 상태줄에 적힌다. 단순 취소(메시지 무변화)면 조용히 시작 화면에 머문다.
+      landingError.textContent =
+        status.textContent !== statusBefore ? (status.textContent ?? '') : ''
+    })()
+  })
+
+  root.append(header, body, settingsBackdrop, styleTransfer.backdrop, landingBackdrop)
+  mountElement.append(root)
+
+  // ---------- behavior ----------
+  const setStatus = (message: string): void => {
+    status.textContent = message
+  }
+
+  // 파싱 실패한 맵이 있으면 상태 메시지 끝에 붙일 경고(없으면 빈 문자열). loadGame이 throw 대신
+  // game.parseErrors로 모아주므로, 에디터가 통째로 안 뜨는 일 없이 실패를 사용자에게 알린다.
+  const parseErrorNote = (): string =>
+    game.parseErrors.length > 0
+      ? ` · ⚠️ 파싱 실패 맵 ${game.parseErrors.length}개: ${game.parseErrors.join(', ')}`
+      : ''
+
+  const renderAnalysis = (): void => {
+    if (!currentAnalysis) {
+      analysisPanel.hidden = true
+      return
+    }
+
+    analysisPanel.hidden = false
+    const analysis = currentAnalysis
+    analysisPanel.replaceChildren(
+      el('div', 'text-[11px] font-semibold uppercase tracking-wider text-indigo-300', '🔍 LLM 게임 분석'),
+      el('div', 'text-sm text-zinc-100 font-medium', `${analysis.game_name} · ${analysis.engine}`),
+      el('div', 'text-xs text-zinc-400', `콘텐츠 모델: ${analysis.content_model}`),
+      el('div', 'text-xs text-zinc-400', `적용 전략: ${analysis.apply_strategy}`),
+      ...analysis.entity_groups.map((entityGroup) =>
+        el(
+          'div',
+          'text-xs text-zinc-500',
+          `• ${entityGroup.group} → ${entityGroup.kind}${entityGroup.editable ? ' (편집 가능)' : ''}`
+        )
+      )
+    )
+  }
+
+  const runAnalyze = async (): Promise<void> => {
+    if (isAnalyzing) {
+      return
+    }
+
+    if (apiKey.trim().length === 0) {
+      setStatus('분석하려면 먼저 Claude(Anthropic) API 키를 입력하세요.')
+      return
+    }
+
+    isAnalyzing = true
+    analyzeButton.disabled = true
+    analyzeButton.textContent = '분석 중...'
+    setStatus('LLM이 게임을 분석 중...')
+
+    const filesAtStart = currentFiles
+    try {
+      const analysis = await analyzeGame({ apiKey: apiKey.trim(), files: filesAtStart })
+      // 분석 중 다른 프로젝트를 열었으면 이 결과는 버린다(레이스 방지).
+      if (currentFiles !== filesAtStart) {
+        return
+      }
+      currentAnalysis = analysis
+      // 하드코딩 어댑터가 엔티티를 못 찾았으면(미지의 게임), 분석 결과로 트리를 채운다.
+      // 타일 군집(보기 전용 구조물)은 세지 않는다 — 장식만 있는 미지의 게임에서 분석 결과가
+      // 트리에 반영되지 못하게 막아버린다.
+      const totalEntities = game.maps.reduce(
+        (sum, map) =>
+          sum + map.entities.filter((entity) => !isTileClusterEntity(entity)).length,
+        0
+      )
+      if (totalEntities === 0) {
+        game = { ...game, maps: buildEntitiesFromAnalysis(filesAtStart, analysis) }
+        // 트리를 새 엔티티로 갈아끼우므로, 이전 대상의 생성 결과·히스토리·세션 집계는 모두 무효 처리한다
+        // (open/reset과 동일한 초기화 묶음 — 지표가 폐기된 생성을 계속 세지 않도록).
+        selectedEntity = undefined
+        currentResult = undefined
+        history = []
+        historyCounter = 0
+        sessionTally = { generations: 0, validatorPasses: 0 }
+        expandedGroups.clear()
+        renderTree()
+      }
+      renderAnalysis()
+      render()
+      setStatus(`분석 완료: ${analysis.game_name} (${analysis.engine})`)
+    } catch (error) {
+      setStatus(`분석 실패: ${error instanceof Error ? error.message : String(error)}`)
+    } finally {
+      isAnalyzing = false
+      analyzeButton.disabled = false
+      analyzeButton.textContent = '🔍 LLM 게임 분석'
+    }
+  }
+
+  // 트리에서 클릭한 타일 군집(나무·분수·가로등 등)을 부분 스타일 변환 대상으로 변환한다.
+  // 셀·타일 id를 되찾고, 타일셋 .tsx에서 이미지 경로·격자 정보를 읽는다. 실패하면 undefined —
+  // 호출부가 상태줄로 알린다. 서비스는 src/games/my-sample-rpg/assets 안만 다루므로 다른 폴더로 연 게임은 대상 외.
+  const buildStyleObjectTarget = (
+    map: LoadedGameMap,
+    entity: GameEntity
+  ): StyleTransferMapObject | undefined => {
+    const mapFile = currentFiles.find((file) => file.path === map.file)
+    if (!mapFile) {
+      return undefined
+    }
+    let objects: TmxObject[] = []
+    try {
+      objects = extractTmxObjects(mapFile.text)
+    } catch {
+      return undefined
+    }
+    // 타일 군집(좌표 id)은 군집 재추출로, 영역 오브젝트(건물·분수·나무 장식 등)는
+    // 사각형 안의 같은 종류 타일 수집으로 셀 목록을 얻는다.
+    const detail = isTileClusterEntity(entity)
+      ? findTileClusterDetail(mapFile, currentFiles, objects, entity.id)
+      : findObjectKindCells(mapFile, currentFiles, objects, entity)
+    if (!detail || detail.cells.length === 0 || detail.tilesetSource === undefined) {
+      return undefined
+    }
+    const tsxFile = findFileByRelativeSource(currentFiles, mapFile.path, detail.tilesetSource)
+    const info = tsxFile ? extractTmxTilesetImageInfo(tsxFile.text) : undefined
+    if (!tsxFile || !info) {
+      return undefined
+    }
+    const imagePath = resolveRelativePath(tsxFile.path, info.imageSource)
+    if (!imagePath.startsWith('src/games/my-sample-rpg/assets/')) {
+      return undefined
+    }
+    const kind = groupKindOf(entity.kind)
+    return {
+      label: `${KIND_ICON[kind] ?? '•'} ${entity.name}`,
+      tilesetImagePath: imagePath,
+      tileWidth: info.tileWidth,
+      tileHeight: info.tileHeight,
+      columns: info.columns,
+      cells: detail.cells,
+      sharedOutsideCells: detail.sharedOutsideCells
+    }
+  }
+
+  // 맵 인식 시점의 자동 누끼 추출: 현재 맵의 변환 가능 오브젝트들의 셀 정보를 모아 서비스에
+  // 배치로 보낸다. 서비스가 타일을 조립해 투명 PNG로 저장하고(이미 추출된 키는 스킵),
+  // 모달의 '추출 오브젝트' 탭이 그 목록을 쓴다. 백그라운드 fetch라 에디터 UI는 멈추지 않고,
+  // 서비스가 꺼져 있으면 조용히 무시한다. 성공한 맵은 세션 내 재전송하지 않는다.
+  const extractedMapIds = new Set<string>()
+  const extractMapObjectsInBackground = (mapId: string): void => {
+    if (game.adapter.id !== 'my-sample-rpg' || extractedMapIds.has(mapId)) {
+      return
+    }
+    const map = game.maps.find((candidate) => candidate.id === mapId)
+    if (!map) {
+      return
+    }
+    // 준비(파싱)는 scene-changed 핸들러의 페인트를 막지 않게 타이머로 미루고,
+    // 엔티티별 재파싱 대신 일괄 수집(맵당 파싱 2회)으로 메인 스레드 점유를 줄인다.
+    window.setTimeout(() => {
+      const mapFile = currentFiles.find((file) => file.path === map.file)
+      if (!mapFile) {
+        return
+      }
+      let objects: TmxObject[] = []
+      try {
+        objects = extractTmxObjects(mapFile.text)
+      } catch {
+        return
+      }
+      const styleable = map.entities.filter(
+        (entity) => !STYLE_TARGET_EXCLUDED_KINDS.has(groupKindOf(entity.kind))
+      )
+      const cellsByEntityId = findAllStyleTargetCells(mapFile, currentFiles, objects, styleable)
+
+      // 타일셋 .tsx 해석은 source별로 1회만.
+      type ResolvedTileset = { imagePath: string; tileWidth: number; tileHeight: number; columns: number }
+      const tilesetBySource = new Map<string, ResolvedTileset | undefined>()
+      const resolveTileset = (source: string): ResolvedTileset | undefined => {
+        if (!tilesetBySource.has(source)) {
+          const tsxFile = findFileByRelativeSource(currentFiles, mapFile.path, source)
+          const info = tsxFile ? extractTmxTilesetImageInfo(tsxFile.text) : undefined
+          const imagePath = tsxFile && info ? resolveRelativePath(tsxFile.path, info.imageSource) : undefined
+          tilesetBySource.set(
+            source,
+            info && imagePath && imagePath.startsWith('src/games/my-sample-rpg/assets/')
+              ? { imagePath, tileWidth: info.tileWidth, tileHeight: info.tileHeight, columns: info.columns }
+              : undefined
+          )
+        }
+        return tilesetBySource.get(source)
+      }
+
+      const targets: Array<StyleTransferMapObject & { id: string }> = []
+      for (const entity of styleable) {
+        const detail = cellsByEntityId.get(entity.id)
+        if (!detail || detail.cells.length === 0 || detail.tilesetSource === undefined) {
+          continue
+        }
+        const tileset = resolveTileset(detail.tilesetSource)
+        if (!tileset) {
+          continue
+        }
+        const kind = groupKindOf(entity.kind)
+        targets.push({
+          id: entity.id,
+          label: `${KIND_ICON[kind] ?? '•'} ${entity.name}`,
+          tilesetImagePath: tileset.imagePath,
+          tileWidth: tileset.tileWidth,
+          tileHeight: tileset.tileHeight,
+          columns: tileset.columns,
+          cells: detail.cells,
+          sharedOutsideCells: detail.sharedOutsideCells
+        })
+      }
+      if (targets.length === 0) {
+        return
+      }
+      // 현재 데이터는 맵당 타일셋이 하나라 첫 대상 기준으로 묶는다(다른 타일셋 대상은 제외).
+      const first = targets[0]
+      const sameTileset = targets.filter(
+        (candidate) => candidate.tilesetImagePath === first.tilesetImagePath
+      )
+      void fetch('/api/style/extract-objects', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tileset_path: first.tilesetImagePath,
+          tile_width: first.tileWidth,
+          tile_height: first.tileHeight,
+          columns: first.columns,
+          objects: sameTileset.map((candidate) => ({
+            id: candidate.id,
+            label: candidate.label,
+            cells: candidate.cells,
+            sharedOutsideCells: candidate.sharedOutsideCells
+          }))
+        })
+      })
+        .then((response) => {
+          if (response.ok) {
+            extractedMapIds.add(mapId)
+          }
+        })
+        .catch(() => undefined)
+    }, 0)
+  }
+
+  const renderTree = (): void => {
+    entityButtons = []
+    const groups: HTMLElement[] = []
+
+    // 게임이 보고한 현재 맵을 트리의 기준으로 삼는다. 그 맵을 game.maps에서 찾으면(=같은 프로젝트)
+    // 기본적으로 그 맵의 요소만 보여준다. 다른 게임 폴더를 열어 매칭이 안 되면 전체를 보여준다.
+    const focusMap =
+      currentMapId !== undefined
+        ? game.maps.find((map) => map.id === currentMapId)
+        : undefined
+    const mapsToShow = focusMap && !showAllMaps ? [focusMap] : game.maps
+
+    // 동기화 상태줄·토글 갱신. focusMap이 있을 때만 토글이 의미가 있다.
+    if (focusMap) {
+      mapFilterToggle.hidden = false
+      mapFilterToggle.textContent = showAllMaps ? '현재 맵만' : '전체 보기'
+      treeSyncLine.replaceChildren(
+        el('span', 'inline-block w-1.5 h-1.5 rounded-full bg-emerald-400 mr-1.5 align-middle'),
+        showAllMaps
+          ? document.createTextNode('전체 맵 표시 중')
+          : el('span', 'text-zinc-300', `현재 맵: ${focusMap.name}`)
+      )
+    } else {
+      mapFilterToggle.hidden = true
+      // 연결 전(undefined)엔 대기 메시지, 매칭 안 되는 프로젝트면 줄을 비운다.
+      treeSyncLine.textContent =
+        currentMapId === undefined ? '게임과 연결 대기 중…' : ''
+    }
+
+    for (const map of mapsToShow) {
+      // 객체도 레이어도 없는 맵만 건너뛴다(예: 파싱 실패). 몬스터만 있는 맵·지형만 있는 맵도 보여준다.
+      if (map.entities.length === 0 && map.layers.length === 0) {
+        continue
+      }
+
+      const group = el('div', 'flex flex-col gap-1')
+      const isCurrent = map.id === currentMapId
+      group.append(
+        el(
+          'div',
+          'text-xs text-zinc-300 font-medium px-1',
+          `🗺 ${map.name}${isCurrent ? ' · 현재 맵' : ''}`
+        )
+      )
+
+      // 같은 종류끼리 접이식 그룹으로 묶는다(쭉 나열하면 길어서 보기 불편하다는 피드백).
+      // NPC 그룹을 맨 위로, 나머지는 맵에 등장한 순서대로.
+      const byKind = new Map<string, GameEntity[]>()
+      for (const entity of map.entities) {
+        const kind = groupKindOf(entity.kind)
+        const list = byKind.get(kind)
+        if (list) {
+          list.push(entity)
+        } else {
+          byKind.set(kind, [entity])
+        }
+      }
+      const kindEntries = [...byKind.entries()].sort(
+        (a, b) => (a[0] === 'npc' ? 0 : 1) - (b[0] === 'npc' ? 0 : 1)
+      )
+
+      // 어떤 엔티티를 생성 대상으로 고를 수 있나: 타일 군집(보기 전용 구조물)은 제외하고,
+      // rpg는 대화 NPC만(profile.npcs 큐레이션과 일치), 그 외 게임(legend-of-lua·분석된 게임)은
+      // 어댑터/분석이 찾은 모든 엔티티가 공용 대사 생성의 대상이다.
+      const isSelectableEntity = (entity: GameEntity): boolean =>
+        !isTileClusterEntity(entity) &&
+        (game.adapter.id === 'my-sample-rpg'
+          ? groupKindOf(entity.kind) === 'npc'
+          : true)
+
+      const selectableCount = map.entities.filter(isSelectableEntity).length
+      for (const [kind, entities] of kindEntries) {
+        const groupKey = `${map.id}:${kind}`
+        // 선택된 NPC가 속한 그룹은 이번 렌더에서만 펼쳐 보인다(접혀 있으면 선택 표시가 가려진다).
+        // Set에는 쓰지 않는다 — 영구 펼침으로 만들면 사용자가 접어도 다음 렌더마다 되돌아간다.
+        const containsSelected =
+          selectedEntity !== undefined && entities.some((entity) => entity === selectedEntity)
+        const expanded = expandedGroups.has(groupKey) || containsSelected
+
+        const headerButton = el('button', ENTITY_GROUP_HEADER) as HTMLButtonElement
+        headerButton.type = 'button'
+        headerButton.setAttribute('aria-expanded', String(expanded))
+        const arrow = el('span', 'w-3 shrink-0 text-[10px] text-zinc-500', expanded ? '▾' : '▸')
+        arrow.setAttribute('aria-hidden', 'true')
+        headerButton.append(
+          arrow,
+          el('span', 'truncate', `${KIND_ICON[kind] ?? '•'} ${KIND_LABEL[kind] ?? kind}`),
+          el('span', 'ml-auto shrink-0 text-[10px] tabular-nums text-zinc-500', String(entities.length))
+        )
+
+        const body = el('div', 'flex flex-col gap-0.5 pl-3')
+        body.id = `entity-group-${groupKey}`.replace(/[^A-Za-z0-9_-]/gu, '-')
+        headerButton.setAttribute('aria-controls', body.id)
+        body.hidden = !expanded
+        // 토글은 이 그룹의 DOM만 만지고 트리를 다시 그리지 않는다 — 선택 상태·버튼 참조가 그대로 유지된다.
+        headerButton.addEventListener('click', () => {
+          const nextExpanded = body.hidden
+          if (nextExpanded) {
+            expandedGroups.add(groupKey)
+          } else {
+            expandedGroups.delete(groupKey)
+          }
+          body.hidden = !nextExpanded
+          arrow.textContent = nextExpanded ? '▾' : '▸'
+          headerButton.setAttribute('aria-expanded', String(nextExpanded))
+        })
+
+        for (const entity of entities) {
+          if (isSelectableEntity(entity)) {
+            // 생성 대상은 클릭 가능한 버튼으로 — 선택하면 그 엔티티로 생성한다.
+            const node = el('button', ENTITY_BASE, entity.name) as HTMLButtonElement
+            node.type = 'button'
+            node.addEventListener('click', () => {
+              selectedEntity = entity
+              // 대상을 바꾸면 이전 생성 결과는 무효 — 새로 생성하게 한다.
+              currentResult = undefined
+              render()
+            })
+            entityButtons.push({ entity, node })
+            body.append(node)
+          } else if (
+            game.adapter.id === 'my-sample-rpg' &&
+            !STYLE_TARGET_EXCLUDED_KINDS.has(groupKindOf(entity.kind))
+          ) {
+            // 타일 구조물·장식 오브젝트: LLM 생성 대상은 아니지만, 클릭하면 그 오브젝트만 스타일 변환한다.
+            const node = el(
+              'button',
+              'flex items-center gap-1 text-left rounded-lg px-2.5 py-2 text-sm text-zinc-400 transition hover:bg-white/[0.06] hover:text-zinc-200'
+            ) as HTMLButtonElement
+            node.type = 'button'
+            node.title = '클릭하면 이 오브젝트를 스타일 변환합니다 (같은 타일을 쓰는 다른 곳도 함께 바뀔 수 있습니다)'
+            node.append(
+              el('span', 'truncate', entity.name),
+              el('span', 'ml-auto shrink-0 text-[10px]', '🎨')
+            )
+            node.addEventListener('click', () => {
+              const target = buildStyleObjectTarget(map, entity)
+              if (target) {
+                styleTransfer.openForMapObject(target)
+              } else {
+                setStatus('이 오브젝트의 타일 정보를 읽지 못해 스타일 변환을 열 수 없습니다.')
+              }
+            })
+            body.append(node)
+          } else {
+            // 몬스터·표지판·포털(및 다른 게임의 구조물)은 맵에 있음을 보여주되(보기 전용), 생성 대상은 아니다.
+            const row = el('div', 'truncate rounded-lg px-2.5 py-2 text-sm text-zinc-400', entity.name)
+            body.append(row)
+          }
+        }
+
+        group.append(headerButton, body)
+      }
+
+      // 요소는 있는데 생성 대상이 하나도 없는 맵(사냥터·동굴 등)에선, 왜 클릭할 게 없는지 알려준다.
+      if (selectableCount === 0 && map.entities.length > 0) {
+        group.append(
+          el('div', 'px-1 text-[11px] text-zinc-500 italic', '생성 대상이 없는 맵 — 위 요소는 보기 전용입니다.')
+        )
+      }
+
+      // "ground" 같은 타일/지형 레이어 — 객체가 아니라 맵 자체의 구성. 보기 전용 정보로 한 줄에 보여준다.
+      if (map.layers.length > 0) {
+        group.append(
+          el('div', 'px-1 pt-0.5 text-[11px] text-zinc-500', `🗂 타일 레이어: ${map.layers.join(' · ')}`)
+        )
+      }
+
+      groups.push(group)
+    }
+
+    if (groups.length === 0) {
+      const message =
+        focusMap && !showAllMaps
+          ? `현재 맵(${focusMap.name})에서 읽을 요소가 없습니다. ‘전체 보기’로 다른 맵을 볼 수 있어요.`
+          : '로드된 맵이 없습니다. "게임 폴더 열기"로 프로젝트를 여세요.'
+      groups.push(el('div', 'text-xs text-zinc-500 leading-relaxed', message))
+    }
+
+    treeList.replaceChildren(...groups)
+  }
+
+  const renderHistory = (): void => {
+    if (history.length === 0) {
+      historyWrap.hidden = true
+      return
+    }
+
+    historyWrap.hidden = false
+    historyList.replaceChildren(
+      ...history.map((entry) => {
+        const active = entry.result === currentResult
+        // truncate: 라벨은 snake_case 강제라 줄바꿈 지점이 없어, 좁은 사이드바에 가로 스크롤을 만든다.
+        const node = el(
+          'button',
+          active
+            ? 'truncate text-left rounded-md px-2.5 py-1.5 text-xs bg-indigo-500/15 text-indigo-200 transition'
+            : 'truncate text-left rounded-md px-2.5 py-1.5 text-xs text-zinc-400 transition hover:bg-white/5 hover:text-zinc-100'
+        ) as HTMLButtonElement
+        node.type = 'button'
+        const mark = entry.result.issues.length === 0 ? '✅' : '⚠️'
+        // 라벨은 LLM/열린 파일에서 온 임의 값이라 textContent로만 넣는다(주입/깨짐 방지).
+        node.textContent = `#${entry.n} ${mark} ${entry.result.label}`
+        node.addEventListener('click', () => {
+          currentResult = entry.result
+          render()
+        })
+        return node
+      })
+    )
+  }
+
+  const renderEvaluation = (): void => {
+    if (!currentResult) {
+      evaluationWrap.hidden = true
+      return
+    }
+
+    evaluationWrap.hidden = false
+    // 자동 Validator 통과율(이번 세션) + 사람 수용률(누적)을 한 줄로(회의의 두 평가 개념).
+    // 둘은 시간 범위가 다르다: validatorPass는 sessionTally(프로젝트 전환 시 초기화), 수용률은
+    // localStorage에 영속되는 평가 전체(누적 acceptance_rate 목표용)라 라벨로 범위를 구분한다.
+    const metrics = buildSessionMetrics(sessionTally, evaluations)
+    const validatorPercent = Math.round(metrics.validatorPassRate * 100)
+    const acceptancePercent = Math.round(metrics.acceptanceRate * 100)
+    acceptanceStat.textContent =
+      `세션 생성 ${metrics.generations} · Validator 통과 ${validatorPercent}%` +
+      (metrics.acceptanceTotal === 0
+        ? ' · 누적 수용 평가 없음'
+        : ` · 누적 수용률 ${acceptancePercent}%${metrics.meetsAcceptanceGoal ? ' ✅' : ''}`)
+
+    // 현재 결과가 이미 평가됐으면(객체 단위로 기억) 그 판정을 보여주고 버튼을 잠근다(중복 집계 방지).
+    const verdict = verdictByResult.get(currentResult)
+    const evaluated = verdict !== undefined
+    const accepted = verdict === 'acceptable'
+    const rejected = verdict === 'not_acceptable'
+    acceptButton.disabled = evaluated
+    rejectButton.disabled = evaluated
+    acceptButton.className = accepted
+      ? 'rounded-lg px-3.5 py-2 bg-emerald-500/15 text-emerald-200 text-sm border border-emerald-500/30'
+      : GHOST_BUTTON
+    rejectButton.className = rejected
+      ? 'rounded-lg px-3.5 py-2 bg-rose-500/15 text-rose-200 text-sm border border-rose-500/30'
+      : GHOST_BUTTON
+
+    // 재생성은 거부된 결과에서만 가능(피드백 루프). 사유 입력은 수락 전까지만 활성.
+    regenerateButton.disabled = !rejected || isGenerating
+    reasonInput.disabled = accepted
+
+    if (accepted) {
+      evaluationVerdict.className = 'text-xs text-emerald-300'
+      evaluationVerdict.textContent = '· 수락됨 — 이제 ‘게임에 적용’할 수 있습니다'
+    } else if (rejected) {
+      evaluationVerdict.className = 'text-xs text-rose-300'
+      evaluationVerdict.textContent = '· 거부됨 — ‘사유로 재생성’하거나 사유를 고쳐 다시 시도하세요'
+    } else {
+      evaluationVerdict.className = 'text-xs text-zinc-500'
+      evaluationVerdict.textContent =
+        iteration > 1 ? `· ${iteration}회차 — 검토 후 수용/거부` : '· 검토 후 수용/거부 (적용은 수락 후)'
+    }
+  }
+
+  // 피드백 루프 상태 초기화(프로젝트 전환 시). 회차·사유 입력·결과별 사유 기억을 비운다.
+  const resetFeedbackLoop = (): void => {
+    iteration = 1
+    reasonInput.value = ''
+    rejectedReasonByResult = new WeakMap<GenerationResult, string>()
+  }
+
+  const runResetEvaluations = (): void => {
+    clearEventEvaluations()
+    evaluations = []
+    // 영속 기록을 비웠으니 현재 결과의 잠금(verdict)·거절 사유도 함께 풀어 정합성을 맞춘다.
+    verdictByResult = new WeakMap<GenerationResult, EventEvaluationVerdict>()
+    rejectedReasonByResult = new WeakMap<GenerationResult, string>()
+    renderEvaluation()
+    render()
+    setStatus('누적 평가 기록을 초기화했습니다.')
+  }
+
+  const runEvaluate = (verdict: EventEvaluationVerdict): void => {
+    if (!currentResult || verdictByResult.has(currentResult)) {
+      return
+    }
+
+    // 거부면 사유를 기록(다음 재생성 입력에 사용). 수용이면 사유는 의미 없음.
+    const reason =
+      verdict === 'not_acceptable' ? reasonInput.value.trim() : ''
+    if (verdict === 'not_acceptable') {
+      rejectedReasonByResult.set(currentResult, reason)
+    }
+
+    evaluations = appendEventEvaluation({
+      event_id: `${currentResult.label || 'generation'}-${evaluations.length + 1}`,
+      event_name: currentResult.label,
+      verdict,
+      reason,
+      evaluated_at: Date.now()
+    })
+    verdictByResult.set(currentResult, verdict)
+    renderEvaluation()
+    // 적용 버튼은 '수락된 결과'에서만 활성 — 평가가 바뀌었으니 다시 그린다.
+    render()
+    const metrics = buildSessionMetrics(sessionTally, evaluations)
+    setStatus(
+      verdict === 'acceptable'
+        ? `수락됨 — 이제 ‘게임에 적용’할 수 있습니다 · 누적 수용률 ${Math.round(metrics.acceptanceRate * 100)}%`
+        : `거부됨${reason ? ` (사유: ${reason})` : ''} — ‘사유로 재생성’으로 고쳐 보세요`
+    )
+  }
+
+  function render(): void {
+    gameLabel.textContent = game.adapter.name
+
+    // 적용 안내: 같은 origin 웹게임/love.js 패널게임은 안내 불필요, 브리지 게임은 연결 상태를
+    // 알려주고, 그 외는 미지원.
+    if (game.adapter.applyMode === 'local-storage' || isWebBuildMode()) {
+      supportNote.hidden = true
+    } else if (game.adapter.applyMode === 'bridge') {
+      supportNote.hidden = false
+      supportNote.textContent =
+        bridgeStatus === 'connected'
+          ? `${game.adapter.name}: 게임 브리지 연결됨 — '게임에 적용'하면 실행 중인 게임에 라이브 반영됩니다.`
+          : `${game.adapter.name}: 게임을 실행하고 브리지를 켜세요(기본 ${bridge.getBaseUrl()}). 연결되면 '게임에 적용'이 활성화됩니다. (또는 설정에서 love.js 웹 빌드 URL을 넣으면 패널에서 바로 플레이됩니다.)`
+    } else {
+      supportNote.hidden = false
+      supportNote.textContent = `${game.adapter.name}: 생성은 되지만 라이브 적용은 아직 지원되지 않습니다. 결과는 미리보기로 확인하세요.`
+    }
+
+    // 엔티티 이름/맵은 열린 TMX에서 온 임의 값이므로 textContent로만 넣는다(주입/깨짐 방지).
+    if (selectedEntity) {
+      targetLine.replaceChildren(
+        document.createTextNode('대상: '),
+        el('span', 'text-indigo-300 font-medium', selectedEntity.name),
+        document.createTextNode(' '),
+        el('span', 'text-zinc-500', `(${selectedEntity.kind} · ${selectedEntity.mapId})`)
+      )
+    } else {
+      targetLine.replaceChildren(
+        el('span', 'text-zinc-400', '왼쪽에서 엔티티를 선택하면 그 대상으로 생성합니다.')
+      )
+    }
+
+    for (const { entity, node } of entityButtons) {
+      // id가 아니라 참조로 비교한다 — id는 맵이 달라도 겹칠 수 있어(같은 TMX 이름·그룹-번호 조합)
+      // '전체 보기'에서 다른 맵의 동명 NPC까지 선택된 것처럼 칠해진다.
+      node.className = entity === selectedEntity ? ENTITY_ACTIVE : ENTITY_BASE
+    }
+
+    if (!currentResult) {
+      validationLine.hidden = true
+    } else if (currentResult.issues.length === 0) {
+      validationLine.hidden = false
+      validationLine.className = 'text-xs text-emerald-300'
+      validationLine.replaceChildren(
+        document.createTextNode('✅ Validator (생성과 분리된 자동 검증): 통과')
+      )
+    } else {
+      validationLine.hidden = false
+      validationLine.className = 'text-xs text-amber-300 flex flex-col gap-0.5'
+      // 이슈 문자열은 Validator가 만든 값이지만 안전하게 textContent(el)로만 넣는다.
+      validationLine.replaceChildren(
+        el('div', 'font-medium', `⚠️ Validator (생성과 분리된 자동 검증): ${currentResult.issues.length}건`),
+        ...currentResult.issues.map((issue) => el('div', 'pl-3 text-amber-300/80', `• ${issue}`))
+      )
+    }
+
+    generateButton.textContent = isGenerating ? '생성 중...' : '생성'
+    generateButton.disabled =
+      isGenerating || apiKey.trim().length === 0 || promptInput.value.trim().length === 0
+    // 피드백 루프: 적용은 '수락된 결과'에서만 가능하다(거부·미평가 결과는 적용 불가).
+    // 같은 origin 웹게임은 apply()로, love.js 패널게임은 iframe postMessage로, 브리지 게임은
+    // 연결돼 있을 때 bridgePayload로 적용한다. 검증(issues)은 적용을 막지 않는다(생성/검증 분리).
+    const accepted =
+      currentResult !== undefined &&
+      verdictByResult.get(currentResult) === 'acceptable'
+    const canApplyLocal = currentResult?.apply != null
+    const canApplyWeb = isWebBuildMode() && currentResult?.bridgePayload != null
+    const canApplyBridge =
+      game.adapter.applyMode === 'bridge' &&
+      !isWebBuildMode() &&
+      bridgeStatus === 'connected' &&
+      currentResult?.bridgePayload != null
+    applyButton.disabled =
+      isGenerating ||
+      !accepted ||
+      (!canApplyLocal && !canApplyWeb && !canApplyBridge)
+    copyButton.disabled = !currentResult || isGenerating
+    exportButton.disabled = !currentResult || isGenerating
+    result.textContent = currentResult ? currentResult.preview : '생성 결과가 여기에 표시됩니다.'
+    renderEvaluation()
+    renderHistory()
+  }
+
+  // feedback이 있으면 재생성(이전 결과를 사유·검증에 맞춰 수정). 없으면 새 생성(1회차부터).
+  const runGenerate = async (feedback?: GenerationFeedback): Promise<void> => {
+    if (isGenerating) {
+      return
+    }
+
+    if (apiKey.trim().length === 0) {
+      setStatus('먼저 Claude(Anthropic) API 키를 입력하세요.')
+      return
+    }
+
+    if (promptInput.value.trim().length === 0) {
+      setStatus('생성할 내용을 자연어 프롬프트에 입력하세요.')
+      return
+    }
+
+    if (!feedback) {
+      iteration = 1 // 새 생성은 1회차부터 시작(재생성은 호출부가 회차를 올려 feedback으로 넘긴다).
+    }
+
+    isGenerating = true
+    // 생성은 비동기다. 도중에 다른 프로젝트를 열거나(runOpenProject) 복귀(runReset)하면, 늦게 도착한
+    // 이 결과를 새 게임에 섞으면 안 된다(히스토리/집계 오염 + 옛 게임에 묶인 apply() 클로저). 시작 시점의
+    // 프로젝트 정체성을 캡처해 커밋 전에 검사한다(runAnalyze의 filesAtStart 가드와 동일).
+    const filesAtStart = currentFiles
+    setStatus(
+      feedback
+        ? `${game.adapter.name} 재생성 중 (${feedback.iteration}회차)...`
+        : `${game.adapter.name}로 생성 중...`
+    )
+    render()
+
+    try {
+      const result = await game.adapter.generate({
+        apiKey: apiKey.trim(),
+        userPrompt: promptInput.value,
+        entity: selectedEntity,
+        profile: game.profile,
+        gameContext: currentAnalysis
+          ? `${currentAnalysis.game_name} (${currentAnalysis.engine}). 콘텐츠 모델: ${currentAnalysis.content_model}`
+          : undefined,
+        feedback
+      })
+      // 생성 중 프로젝트가 바뀌었으면 이 결과는 버린다.
+      if (currentFiles !== filesAtStart) {
+        return
+      }
+      currentResult = result
+      reasonInput.value = '' // 새 결과 → 거절 사유 입력 비우기(이 결과를 새로 검토).
+      historyCounter += 1
+      history = [{ n: historyCounter, result }, ...history].slice(0, HISTORY_LIMIT)
+      // 세션 지표 집계: 생성 1건 + (Validator 통과면) 통과 1건.
+      sessionTally = {
+        generations: sessionTally.generations + 1,
+        validatorPasses: sessionTally.validatorPasses + (result.issues.length === 0 ? 1 : 0)
+      }
+      setStatus(
+        feedback
+          ? `재생성 완료 (${feedback.iteration}회차): ${result.label} — 검토 후 수용/거부`
+          : `생성 완료: ${result.label} — 검토 후 수용/거부`
+      )
+    } catch (error) {
+      // 프로젝트가 바뀐 뒤 도착한 실패는 새 게임의 상태를 건드리지 않는다.
+      if (currentFiles !== filesAtStart) {
+        return
+      }
+      const message = error instanceof Error ? error.message : String(error)
+      setStatus(`생성 실패: ${message}`)
+    } finally {
+      // isGenerating은 이 호출이 소유하므로 항상 해제하고 다시 그린다. 프로젝트가 바뀌었어도 render()는
+      // 현재(=새) 게임 상태를 그대로 반영하므로 안전하다(생성 버튼 disabled 갱신 등).
+      isGenerating = false
+      render()
+    }
+  }
+
+  // 피드백 루프: 거부된 결과를 사유 + 검증 이슈 + 이전 출력으로 다시 생성한다.
+  const runRegenerate = async (): Promise<void> => {
+    if (isGenerating || !currentResult) {
+      return
+    }
+
+    if (verdictByResult.get(currentResult) !== 'not_acceptable') {
+      setStatus('재생성은 거부된 결과에서만 가능합니다. 먼저 사유와 함께 거부하세요.')
+      return
+    }
+
+    const previous = currentResult
+    const reason =
+      rejectedReasonByResult.get(previous) ?? reasonInput.value.trim()
+    iteration += 1
+    await runGenerate({
+      previousOutput: previous.preview,
+      validatorIssues: previous.issues,
+      rejectionReason: reason,
+      iteration
+    })
+  }
+
+  const runApply = async (): Promise<void> => {
+    if (!currentResult) {
+      return
+    }
+
+    // 피드백 루프: 수락된 결과만 적용한다(거부·미평가는 막는다). 버튼도 비활성이지만 방어적으로 가드.
+    if (verdictByResult.get(currentResult) !== 'acceptable') {
+      setStatus('적용은 수락된 결과에서만 됩니다. 결과를 검토하고 👍 수용을 누르세요.')
+      return
+    }
+
+    // 같은 origin 웹게임(my-sample-rpg): localStorage로 적용. 저장 실패할 수 있어 상태로 알린다.
+    if (currentResult.apply) {
+      try {
+        currentResult.apply()
+        setStatus('게임에 적용됨 — 라이브 프리뷰에 즉시 반영됩니다.')
+      } catch (error) {
+        setStatus(`적용 실패: ${error instanceof Error ? error.message : String(error)}`)
+      }
+      return
+    }
+
+    // love.js로 패널에서 플레이 중인 게임: 같은 페이지 iframe이므로 postMessage로 보낸다.
+    // 게임-쪽 love.js 빌드가 'editor:apply' 메시지를 받아 적용한다(docs/legend-of-lua-love-js.md).
+    if (isWebBuildMode() && currentResult.bridgePayload) {
+      iframe.contentWindow?.postMessage(
+        { type: 'editor:apply', payload: currentResult.bridgePayload },
+        '*'
+      )
+      // 게임-쪽 다리(editor_bridge)가 이 대사를 화면 상단 오버레이로 라이브 반영한다(재빌드 없이).
+      setStatus('게임에 적용됨 — love.js 화면 상단에 대사가 표시됩니다 (라이브).')
+      return
+    }
+
+    // 브리지 게임(Love2D 등): 실행 중인 게임의 HTTP 브리지로 전송한다.
+    if (game.adapter.applyMode === 'bridge' && currentResult.bridgePayload) {
+      if (bridgeStatus !== 'connected') {
+        setStatus(
+          `게임 브리지가 연결되지 않았습니다. 게임을 실행하고 브리지(${bridge.getBaseUrl()})를 켜세요.`
+        )
+        return
+      }
+
+      setStatus('실행 중인 게임에 적용 중…')
+      const applyResult = await bridge.apply(currentResult.bridgePayload)
+      setStatus(
+        applyResult.ok
+          ? '게임에 적용됨 — 실행 중인 게임에 라이브 반영되었습니다.'
+          : `적용 실패: ${applyResult.error ?? '게임이 적용을 거부했습니다.'}`
+      )
+    }
+  }
+
+  const runCopy = async (): Promise<void> => {
+    if (!currentResult) {
+      return
+    }
+
+    // clipboard API는 비보안 컨텍스트·권한 거부에서 없거나 reject될 수 있어 방어한다.
+    try {
+      await navigator.clipboard.writeText(currentResult.preview)
+      setStatus('생성 결과를 클립보드에 복사했습니다.')
+    } catch {
+      setStatus('클립보드 복사에 실패했습니다(브라우저 권한/보안 컨텍스트 확인).')
+    }
+  }
+
+  const runClearHistory = (): void => {
+    history = []
+    historyCounter = 0
+    renderHistory()
+    setStatus('생성 히스토리를 비웠습니다.')
+  }
+
+  const runExport = (): void => {
+    if (!currentResult) {
+      return
+    }
+
+    const fileName = `${currentResult.label || 'generated'}.json`
+    const blob = new Blob([currentResult.preview], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = fileName
+    link.click()
+    URL.revokeObjectURL(url)
+    setStatus(`내보냄: ${fileName}`)
+  }
+
+  // 프로젝트가 실제로 바뀌었으면 true — 시작 화면이 "성공 시에만 닫기" 판단에 쓴다.
+  const runOpenProject = async (): Promise<boolean> => {
+    try {
+      const files = await openProjectDirectory()
+      const loaded = loadGame(files)
+
+      if (loaded.maps.length === 0) {
+        setStatus('선택한 폴더에서 .tmx 맵을 찾지 못했습니다.')
+        return false
+      }
+
+      const previousFiles = currentFiles
+      game = loaded
+      currentFiles = files
+      // 새 게임 기준으로 웹빌드 URL을 다시 정한다(예: legend-of-lua면 기본값 /legend-of-lua/).
+      // 이게 없으면 게임만 바뀌고 빈 webBuildUrl이 남아 bridge 모드로 떨어진다.
+      webBuildUrl = resolveWebBuildUrl()
+      webBuildInput.value = webBuildUrl
+      selectedEntity = undefined
+      currentResult = undefined
+      currentAnalysis = undefined
+      // 맵 집중·프리뷰 상태도 프로젝트 단위 — 이전 게임의 맵 id가 새 게임에 묻어 나오지 않게 한다.
+      // (rpg는 게임이 'game:scene-changed'로 다시 보고하고, 미리보기 게임은 syncPreviewToGame이 채운다.)
+      currentMapId = undefined
+      showAllMaps = false
+      selectedPreviewMapId = undefined
+      history = []
+      historyCounter = 0
+      sessionTally = { generations: 0, validatorPasses: 0 }
+ resetFeedbackLoop()
+      // 그룹 펼침 상태도 프로젝트 단위 — 맵 id(tmx 파일명)가 프로젝트끼리 겹쳐서, 안 비우면
+      // 이전 게임에서 펼친 상태가 새 게임 트리에 그대로 묻어 나온다.
+      expandedGroups.clear()
+      renderTree()
+      renderAnalysis()
+      render()
+      syncPreviewToGame()
+      syncBridgeForGame()
+      revokePreviewObjectUrls(previousFiles)
+      // 엔티티(어댑터가 찾은 개체)와 타일 구조물(보기 전용)을 나눠 세서, 수치가 부풀어 보이지 않게 한다.
+      const allEntities = game.maps.flatMap((map) => map.entities)
+      const tileCount = allEntities.filter(isTileClusterEntity).length
+      const entityCount = allEntities.length - tileCount
+      setStatus(
+        `프로젝트 로드: ${game.adapter.name} · 맵 ${game.maps.length}개 · 엔티티 ${entityCount}개` +
+          `${tileCount > 0 ? ` · 구조물 ${tileCount}개` : ''}${parseErrorNote()}`
+      )
+      // 토큰이 있으면 LLM이 이 게임을 자동 분석한다(네 아이디어: 열면 LLM이 이해).
+      if (apiKey.trim().length > 0) {
+        void runAnalyze()
+      }
+      return true
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        return false
+      }
+      setStatus(error instanceof Error ? error.message : String(error))
+      return false
+    }
+  }
+
+  const runReset = (): void => {
+    const previousFiles = currentFiles
+    game = loadGame(initialFiles)
+    currentFiles = initialFiles
+    // 초기(복귀) 게임 기준으로 웹빌드 URL을 다시 정한다 — 폴더 열기와 동일한 이유.
+    webBuildUrl = resolveWebBuildUrl()
+    webBuildInput.value = webBuildUrl
+    selectedEntity = undefined
+    currentResult = undefined
+    currentAnalysis = undefined
+    currentMapId = undefined
+    showAllMaps = false
+    selectedPreviewMapId = undefined
+    history = []
+    historyCounter = 0
+    sessionTally = { generations: 0, validatorPasses: 0 }
+ resetFeedbackLoop()
+    expandedGroups.clear()
+    renderTree()
+    renderTree()
+    renderAnalysis()
+    render()
+    syncPreviewToGame()
+    syncBridgeForGame()
+    revokePreviewObjectUrls(previousFiles)
+    setStatus(`내 게임으로 복귀했습니다.${parseErrorNote()}`)
+  }
+
+  // 감지된 provider의 모델 목록으로 드롭다운을 채우고, 현재 선택값을 맞춘다.
+  const populateModelSelect = (provider: LlmProvider): void => {
+    const current = getProviderModel(provider)
+    const models = PROVIDER_MODELS[provider]
+    // 저장된 값이 목록에 없으면(예: 옛 커스텀) 맨 앞에 추가해 선택을 보존한다.
+    const options = models.includes(current) ? models : [current, ...models]
+    modelSelect.replaceChildren(
+      ...options.map((modelId) => {
+        const option = el('option', '', modelId) as HTMLOptionElement
+        option.value = modelId
+        return option
+      })
+    )
+    modelSelect.value = current
+  }
+
+  // 입력한 키의 provider를 감지해 모델 배지·드롭다운을 갱신하고, /v1/models로 유효성을 확인해 피드백한다.
+  let apiKeyCheckSeq = 0
+  const refreshApiKeyStatus = async (): Promise<void> => {
+    const key = apiKey.trim()
+    const provider = detectProvider(key)
+    if (provider) {
+      populateModelSelect(provider)
+      modelBadge.textContent = `${PROVIDER_LABEL[provider]} · ${getProviderModel(provider)}`
+    }
+    if (key.length === 0) {
+      apiKeyStatus.className = 'text-xs text-zinc-500'
+      apiKeyStatus.textContent = '키를 입력하세요.'
+      return
+    }
+    const seq = ++apiKeyCheckSeq
+    apiKeyStatus.className = 'text-xs text-zinc-400'
+    apiKeyStatus.textContent = '🔍 확인 중...'
+    const check = await validateApiKey(key)
+    // 확인 중 더 최신 입력이 있었으면 이 결과는 버린다(레이스 방지).
+    if (seq !== apiKeyCheckSeq) {
+      return
+    }
+    apiKeyStatus.className =
+      check.status === 'valid'
+        ? 'text-xs text-emerald-300'
+        : check.status === 'invalid'
+          ? 'text-xs text-rose-300'
+          : 'text-xs text-amber-300'
+    const icon =
+      check.status === 'valid' ? '✓' : check.status === 'invalid' ? '✗' : 'ℹ'
+    apiKeyStatus.textContent = `${icon} ${check.message}`
+  }
+
+  let apiKeyDebounce: ReturnType<typeof setTimeout> | undefined
+  apiKeyInput.addEventListener('input', () => {
+    apiKey = apiKeyInput.value
+    // 저장이 막혀도(프라이빗 모드 등) 입력·생성 흐름은 끊기지 않게 한다. 키는 메모리에 유지된다.
+    const persisted = writeLocalStorage(API_KEY_STORAGE_KEY, apiKey)
+    render()
+    if (!persisted && apiKey.length > 0) {
+      setStatus('API 키를 저장하지 못했습니다(브라우저 저장소 차단). 이번 세션에만 사용됩니다.')
+    }
+    if (apiKeyDebounce !== undefined) {
+      clearTimeout(apiKeyDebounce)
+    }
+    apiKeyDebounce = setTimeout(() => {
+      void refreshApiKeyStatus()
+    }, 500)
+  })
+  // 모델 선택 → 현재 provider에 적용하고 저장. (키가 정하는 게 아니라 사용자가 고른다)
+  modelSelect.addEventListener('change', () => {
+    const provider = detectProvider(apiKey) ?? 'anthropic'
+    setProviderModel(provider, modelSelect.value)
+    writeLocalStorage(`${MODEL_STORAGE_PREFIX}${provider}`, modelSelect.value)
+    const detected = detectProvider(apiKey)
+    if (detected) {
+      modelBadge.textContent = `${PROVIDER_LABEL[detected]} · ${getProviderModel(detected)}`
+    }
+  })
+
+  // 저장된 모델(provider별)을 복원한 뒤, 저장돼 있던 키가 있으면 검증해 배지·모델·상태를 채운다.
+  for (const provider of ['anthropic', 'openai'] as const) {
+    const storedModel = readLocalStorage(`${MODEL_STORAGE_PREFIX}${provider}`)
+    if (storedModel) {
+      setProviderModel(provider, storedModel)
+    }
+  }
+  // 키가 없어도 기본 provider 모델 목록은 채워 둔다(빈 드롭다운 방지).
+  populateModelSelect(detectProvider(apiKey) ?? 'anthropic')
+  void refreshApiKeyStatus()
+  resetButton.addEventListener('click', runReset)
+  generateButton.addEventListener('click', () => {
+    void runGenerate()
+  })
+  // 프롬프트가 비면 생성 버튼도 비활성(눌러보고 실패하는 대신). 전체 re-render 없이 버튼만 갱신.
+  promptInput.addEventListener('input', () => {
+    generateButton.disabled =
+      isGenerating || apiKey.trim().length === 0 || promptInput.value.trim().length === 0
+  })
+  // ⌘/Ctrl+Enter로 빠르게 생성(데모 흐름용). runGenerate가 자체 가드(키·프롬프트·생성중)를 가진다.
+  promptInput.addEventListener('keydown', (event) => {
+    // 한글 IME 조합 중의 Enter(후보 확정)는 가로채지 않는다 — 에디터 전체가 한국어 입력이다.
+    if (event.isComposing) {
+      return
+    }
+    if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+      event.preventDefault()
+      void runGenerate()
+    }
+  })
+  applyButton.addEventListener('click', () => {
+    void runApply()
+  })
+  copyButton.addEventListener('click', () => {
+    void runCopy()
+  })
+  clearHistoryButton.addEventListener('click', runClearHistory)
+  acceptButton.addEventListener('click', () => {
+    runEvaluate('acceptable')
+  })
+  rejectButton.addEventListener('click', () => {
+    runEvaluate('not_acceptable')
+  })
+  regenerateButton.addEventListener('click', () => {
+    void runRegenerate()
+  })
+  // 사유 입력에서 Enter로 바로 거부(아직 미평가일 때). 이미 거부됐으면 Enter로 재생성.
+  reasonInput.addEventListener('keydown', (event) => {
+    if (event.isComposing || event.key !== 'Enter') {
+      return
+    }
+    event.preventDefault()
+    if (currentResult && verdictByResult.get(currentResult) === 'not_acceptable') {
+      void runRegenerate()
+    } else {
+      runEvaluate('not_acceptable')
+    }
+  })
+  resetEvaluationsButton.addEventListener('click', runResetEvaluations)
+  exportButton.addEventListener('click', runExport)
+  // 폴더 열기/분석은 결과가 중앙(분석 패널·상태줄)에 나오므로, 설정 모달을 닫아 그걸 가리지 않게 한다.
+  openButton.addEventListener('click', () => {
+    closeSettings()
+    void runOpenProject()
+  })
+  analyzeButton.addEventListener('click', () => {
+    closeSettings()
+    void runAnalyze()
+  })
+  popoutButton.addEventListener('click', () => {
+    // 별도 창으로 띄울 때도 현재 패널이 보여주는 게임(rpg면 내 게임, 웹빌드면 love.js 게임)을 연다.
+    window.open(
+      isWebBuildMode() ? webBuildUrl : gamePreviewUrl,
+      'game-window',
+      'width=1280,height=720'
+    )
+  })
+  reloadButton.addEventListener('click', () => {
+    if (isRpgPreviewMode()) {
+      iframe.src = gamePreviewUrl
+      return
+    }
+
+    // love.js 플레이 모드: iframe 게임을 다시 로드한다.
+    if (isWebBuildMode()) {
+      iframe.src = webBuildUrl
+      return
+    }
+
+    // 맵 프리뷰 모드: 현재 맵을 다시 렌더한다.
+    if (selectedPreviewMapId) {
+      void renderMapPreview(selectedPreviewMapId)
+    }
+  })
+  // 현재 맵만 ↔ 전체 맵 토글. 엔티티 버튼 강조는 render()가, 프리뷰 바의 맵 버튼 강조는
+  // updateMapSwitcherActive가 다시 입힌다('전체' 버튼과 같은 상태를 공유하므로 함께 갱신).
+  mapFilterToggle.addEventListener('click', () => {
+    showAllMaps = !showAllMaps
+    renderTree()
+    render()
+    updateMapSwitcherActive()
+  })
+  // 라이브 게임(iframe)이 맵을 바꾸면 그 맵의 요소만 트리에 보여준다. 게임은 bootstrapScene에서
+  // 부모(에디터)로 'game:scene-changed'를 쏜다(초기 로드·포털 이동·맵 버튼 모두 포함).
+  window.addEventListener('message', (event) => {
+    // 게임 iframe에서 온 메시지만 신뢰한다(브라우저 확장 등 다른 출처 무시). rpg가 아닌 모드에선
+    // 이전/숨은 rpg 게임의 늦은 보고가 외부 게임의 맵 집중(currentMapId)을 가로채지 못하게 무시한다
+    // (외부 게임에선 맵 버튼이 currentMapId의 소유자다).
+    if (!isRpgPreviewMode() || event.source !== iframe.contentWindow) {
+      return
+    }
+    const data = event.data as { type?: unknown; sceneId?: unknown } | null
+    if (
+      !data ||
+      data.type !== 'game:scene-changed' ||
+      typeof data.sceneId !== 'string'
+    ) {
+      return
+    }
+    // 복귀(리로드 없음) 시 트리 집중을 복원할 수 있게, 중복 보고라도 마지막 씬은 기억해 둔다.
+    lastRpgSceneId = data.sceneId
+    if (data.sceneId === currentMapId) {
+      return
+    }
+    currentMapId = data.sceneId
+    // 게임이 새 맵으로 가면 자동으로 그 맵에 다시 집중한다(전체 보기 해제).
+    showAllMaps = false
+    renderTree()
+    render()
+    // 프리뷰 바의 씬 버튼 강조도 게임이 보고한 현재 맵을 따라간다.
+    updateMapSwitcherActive()
+    // 맵 인식 시점의 자동 누끼 추출 — 백그라운드라 UI를 막지 않는다.
+    extractMapObjectsInBackground(currentMapId)
+  })
+
+  renderTree()
+  renderAnalysis()
+  render()
+  // 프리뷰·브리지 동기화와 포커스는 여기서 하지 않는다 — 시작 화면(프로젝트 선택)에서 선택한
+  // 뒤에 startEditing/runOpenProject가 수행한다. 선택 전엔 게임이 자동 실행되지 않는다.
+  if (game.parseErrors.length > 0) {
+    setStatus(`기본 맵 일부를 읽지 못했습니다${parseErrorNote()}`)
+  }
+}

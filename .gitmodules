@@ -1,0 +1,4 @@
+[submodule "src/games/legend-of-lua"]
+	path = src/games/legend-of-lua
+	url = https://github.com/inchichi/legend-of-lua.git
+	branch = llm-integration
