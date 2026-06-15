@@ -191,6 +191,54 @@ describe('createCharacterControllerRuntime', () => {
     })
   })
 
+  it('lets a manually-placed idle npc talk (lua-free) and cycles its dialogue lines', () => {
+    const runtime = createCharacterControllerRuntime()
+    const player = createInitialPlayerCharacter({ mapWidth: 32, mapHeight: 20 })
+    const npc = createNpcCharacter({
+      id: 'placed_npc_1',
+      appearanceType: 'character_wizard_purple',
+      position: { x: 6, y: 9 },
+      collisionSize: { width: 1, height: 1 },
+      controller: createIdleNpcCharacterController({
+        dialogueLines: ['첫 번째 줄', '두 번째 줄'],
+        messageDurationMilliseconds: 2000
+      })
+    })
+
+    runtime.syncCharacters([npc])
+
+    expect(runtime.canReceiveInteraction(npc)).toBe(true)
+    expect(
+      runtime.handleInteraction({ targetCharacter: npc, sourceCharacter: player })
+    ).toEqual({ kind: 'message', message: '첫 번째 줄', durationMilliseconds: 2000 })
+    // 다음 상호작용은 다음 줄로 순환한다.
+    expect(
+      runtime.handleInteraction({ targetCharacter: npc, sourceCharacter: player })
+    ).toEqual({ kind: 'message', message: '두 번째 줄', durationMilliseconds: 2000 })
+    expect(
+      runtime.handleInteraction({ targetCharacter: npc, sourceCharacter: player })
+    ).toEqual({ kind: 'message', message: '첫 번째 줄', durationMilliseconds: 2000 })
+  })
+
+  it('treats a dialogue-less idle npc as non-interactive', () => {
+    const runtime = createCharacterControllerRuntime()
+    const npc = createNpcCharacter({
+      id: 'silent_npc',
+      appearanceType: 'character_villager_flower_dress',
+      position: { x: 3, y: 3 },
+      collisionSize: { width: 1, height: 1 },
+      controller: createIdleNpcCharacterController()
+    })
+
+    expect(runtime.canReceiveInteraction(npc)).toBe(false)
+    expect(
+      runtime.handleInteraction({
+        targetCharacter: npc,
+        sourceCharacter: createInitialPlayerCharacter({ mapWidth: 32, mapHeight: 20 })
+      })
+    ).toBeUndefined()
+  })
+
   it('ignores defeated monster corpses for interaction', () => {
     const runtime = createCharacterControllerRuntime()
     const monster = createNpcCharacter({

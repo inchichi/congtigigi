@@ -46,7 +46,10 @@ import {
 } from './createStyleTransferModal'
 import { createStyleRevertControl } from './createStyleRevertControl'
 import { createExternalSpriteStyler } from './createExternalSpriteStyler'
-import { createPlacementPalette } from './createPlacementPalette'
+import {
+  createPlacementPalette,
+  type NpcPaletteContext
+} from './createPlacementPalette'
 import type {
   GameEntity,
   GenerationFeedback,
@@ -378,7 +381,51 @@ export const createEditorApp = ({
   })
   // 외부 게임(Love2D 등) 스프라이트 직접 스타일 — my-sample-rpg 에셋과 분리된 /ext/* 경로.
   const externalStyler = createExternalSpriteStyler()
-  // 마우스 에셋 배치: 현재 맵 타일셋(타일 팔레트)·게임 통신·현재 맵 id를 팔레트에 공급한다.
+  // NPC 탭 외형 목록 — tiny-dungeon-16의 캐릭터 타일(appearanceType)과 한국어 표시 이름.
+  // tileId는 .tsx에서 type으로 역해석하므로(아래) 시트가 바뀌어도 따라간다. 몬스터는 제외.
+  const NPC_APPEARANCE_OPTIONS: { appearanceType: string; label: string }[] = [
+    { appearanceType: 'character_villager_brown_tunic', label: '마을 주민 (갈색 튜닉)' },
+    { appearanceType: 'character_villager_flower_dress', label: '마을 주민 (꽃무늬 드레스)' },
+    { appearanceType: 'character_commoner_tan_tunic', label: '평민 (베이지 튜닉)' },
+    { appearanceType: 'character_bearded_apron_man', label: '앞치마 아저씨' },
+    { appearanceType: 'character_elder_gray_hair', label: '노인 (백발)' },
+    { appearanceType: 'character_wizard_purple', label: '마법사 (보라)' },
+    { appearanceType: 'character_ranger_green', label: '레인저 (초록)' },
+    { appearanceType: 'character_adventurer_brown_hair', label: '모험가 (갈색 머리)' },
+    { appearanceType: 'character_knight_open_helmet', label: '기사 (열린 투구)' },
+    { appearanceType: 'character_knight_closed_helmet', label: '기사 (닫힌 투구)' },
+    { appearanceType: 'character_knight_gray_helmet', label: '기사 (회색 투구)' }
+  ]
+  // NPC 탭 컨텍스트 — 캐릭터 타일셋(tiny-dungeon-16) 이미지/격자 + 외형 목록. NPC는 rpg 전용이라
+  // 현재 맵이 my-sample-rpg 에셋 맵일 때만(resolveCurrentTileset 기준) 제공한다.
+  const resolveNpcPaletteContext = (): NpcPaletteContext | undefined => {
+    if (resolveCurrentTileset() === undefined) {
+      return undefined
+    }
+    const tsxFile = currentFiles.find((file) => file.name === NPC_TILESET_TSX)
+    const info = tsxFile ? extractTmxTilesetImageInfo(tsxFile.text) : undefined
+    if (!tsxFile || !info) {
+      return undefined
+    }
+    const imagePath = resolveRelativePath(tsxFile.path, info.imageSource)
+    if (!imagePath.startsWith('src/games/my-sample-rpg/assets/')) {
+      return undefined
+    }
+    const appearances = NPC_APPEARANCE_OPTIONS.flatMap((option) => {
+      const tileId = extractTilesetTileIdByType(tsxFile.text, option.appearanceType)
+      return tileId === undefined
+        ? []
+        : [{ appearanceType: option.appearanceType, tileId, label: option.label }]
+    })
+    return {
+      tilesetImageUrl: `/${imagePath}`,
+      columns: info.columns,
+      tileWidth: info.tileWidth,
+      tileHeight: info.tileHeight,
+      appearances
+    }
+  }
+  // 마우스 에셋 배치: 현재 맵 타일셋(타일 팔레트)·NPC 외형·게임 통신·현재 맵 id를 팔레트에 공급한다.
   const placementPalette = createPlacementPalette({
     getCurrentMapId: () => currentMapId,
     sendToGame: (message) => iframe.contentWindow?.postMessage(message, '*'),
@@ -393,7 +440,8 @@ export const createEditorApp = ({
             tileHeight: tileset.tileHeight
           }
         : undefined
-    }
+    },
+    getNpcPaletteContext: resolveNpcPaletteContext
   })
   const headerRight = el('div', 'flex items-center gap-3')
   headerRight.append(muteButton, styleTransfer.openButton, styleRevert.button, externalStyler.button, placementPalette.button, settingsButton, connection)
@@ -2089,6 +2137,8 @@ export const createEditorApp = ({
       render()
       syncPreviewToGame()
       syncBridgeForGame()
+      // 배치 팔레트의 캐시된 타일/오브젝트/NPC 그리드는 이전 게임 것 — 새 컨텍스트로 다시 만들게 무효화.
+      placementPalette.invalidate()
       revokePreviewObjectUrls(previousFiles)
       // 엔티티(어댑터가 찾은 개체)와 타일 구조물(보기 전용)을 나눠 세서, 수치가 부풀어 보이지 않게 한다.
       const allEntities = game.maps.flatMap((map) => map.entities)
@@ -2133,6 +2183,7 @@ export const createEditorApp = ({
     render()
     syncPreviewToGame()
     syncBridgeForGame()
+    placementPalette.invalidate()
     revokePreviewObjectUrls(previousFiles)
     setStatus(`내 게임으로 복귀했습니다.${parseErrorNote()}`)
   }

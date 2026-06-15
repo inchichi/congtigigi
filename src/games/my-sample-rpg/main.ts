@@ -68,6 +68,10 @@ import {
   PENDING_PLACEMENTS_STORAGE_KEY,
   type PlacementTemplate
 } from '../../editor/placementStore'
+import {
+  PENDING_NPCS_STORAGE_KEY,
+  type NpcWireTemplate
+} from '../../editor/npcStore'
 import type { AudioSettings } from './rendering/createPauseMenuOverlay'
 import type {
   SceneTransitionRequest
@@ -94,10 +98,13 @@ type SceneRenderer = {
     targetCharacterId: string
     source: string
   }) => { didApply: boolean; targetCharacterId?: string }
-  // 마우스 에셋 배치(에디터 배치 모드).
+  // 마우스 에셋 배치(에디터 배치 모드). NPC 템플릿(kind:'npc')도 같은 채널로 전달된다.
   setPlacementMode: (mode: 'off' | 'place' | 'erase') => void
-  setPlacementTemplate: (template: PlacementTemplate | null) => void
+  setPlacementTemplate: (
+    template: PlacementTemplate | NpcWireTemplate | null
+  ) => void
   refreshPlacements: () => void
+  refreshNpcs: () => void
 }
 
 // 배경음악(BGM) 전역 사용 여부. false면 어떤 씬에서도 BGM을 재생하지 않는다(효과음은 그대로).
@@ -903,6 +910,12 @@ window.addEventListener('storage', (event) => {
     return
   }
 
+  // NPC 변경(에디터의 전체 지우기 등)도 즉시 스폰/디스폰으로 반영한다.
+  if (event.key === PENDING_NPCS_STORAGE_KEY) {
+    activeSceneRenderer?.refreshNpcs()
+    return
+  }
+
   if (event.key !== PENDING_EVENTS_STORAGE_KEY) {
     return
   }
@@ -947,8 +960,9 @@ window.addEventListener('message', (event) => {
     return
   }
   if (data.type === 'editor:placement-template') {
+    // 타일/오브젝트 배치 템플릿 또는 NPC 와이어 템플릿(kind:'npc') — 렌더러가 kind로 분기한다.
     activeSceneRenderer?.setPlacementTemplate(
-      (data.template as PlacementTemplate | null) ?? null
+      (data.template as PlacementTemplate | NpcWireTemplate | null) ?? null
     )
     return
   }
