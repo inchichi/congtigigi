@@ -46,6 +46,7 @@ import {
 } from './createStyleTransferModal'
 import { createStyleRevertControl } from './createStyleRevertControl'
 import { createExternalSpriteStyler } from './createExternalSpriteStyler'
+import { createPlacementPalette } from './createPlacementPalette'
 import type {
   GameEntity,
   GenerationFeedback,
@@ -316,11 +317,86 @@ export const createEditorApp = ({
   // 되돌리기 컨트롤(전체/선택 복원)과 같은 백엔드(originals/)를 공유하므로, 적용/되돌리기 후
   // 되돌리기 버튼의 활성 카운트가 즉시 갱신되도록 콜백을 연결한다.
   const styleRevert = createStyleRevertControl()
-  const styleTransfer = createStyleTransferModal({ onAssetChanged: styleRevert.refresh })
+  // 현재 맵의 첫 타일셋 해석(에셋 경로 + 슬라이스 URL + 격자). 타일 스타일/배치 팔레트가 공유.
+  // my-sample-rpg 에셋 타일셋이 아니면 undefined(타일 기능 비활성).
+  const resolveCurrentTileset = ():
+    | {
+        tilesetSource: string
+        tilesetImagePath: string
+        tilesetImageUrl: string
+        columns: number
+        tileWidth: number
+        tileHeight: number
+      }
+    | undefined => {
+    if (currentMapId === undefined) {
+      return undefined
+    }
+    const map = game.maps.find((candidate) => candidate.id === currentMapId)
+    const mapFile = map ? currentFiles.find((file) => file.path === map.file) : undefined
+    if (!mapFile) {
+      return undefined
+    }
+    const tilesetTag = mapFile.text.match(/<tileset\b[^>]*>/)
+    const sourceMatch = tilesetTag?.[0].match(/\bsource="([^"]+)"/)
+    if (!sourceMatch) {
+      return undefined
+    }
+    const tsxFile = findFileByRelativeSource(currentFiles, mapFile.path, sourceMatch[1])
+    const info = tsxFile ? extractTmxTilesetImageInfo(tsxFile.text) : undefined
+    if (!tsxFile || !info) {
+      return undefined
+    }
+    const imagePath = resolveRelativePath(tsxFile.path, info.imageSource)
+    if (!imagePath.startsWith('src/games/my-sample-rpg/assets/')) {
+      return undefined
+    }
+    return {
+      tilesetSource: sourceMatch[1],
+      tilesetImagePath: imagePath,
+      tilesetImageUrl: `/${imagePath}`,
+      columns: info.columns,
+      tileWidth: info.tileWidth,
+      tileHeight: info.tileHeight
+    }
+  }
+  // AdaIN 스타일 트랜스퍼 — '타일' 탭이 현재 맵 타일셋의 타일을 골라 스타일을 입힌다.
+  const styleTransfer = createStyleTransferModal({
+    onAssetChanged: styleRevert.refresh,
+    getTileStyleTarget: () => {
+      const tileset = resolveCurrentTileset()
+      return tileset
+        ? {
+            tilesetImagePath: tileset.tilesetImagePath,
+            tilesetImageUrl: tileset.tilesetImageUrl,
+            columns: tileset.columns,
+            tileWidth: tileset.tileWidth,
+            tileHeight: tileset.tileHeight
+          }
+        : undefined
+    }
+  })
   // 외부 게임(Love2D 등) 스프라이트 직접 스타일 — my-sample-rpg 에셋과 분리된 /ext/* 경로.
   const externalStyler = createExternalSpriteStyler()
+  // 마우스 에셋 배치: 현재 맵 타일셋(타일 팔레트)·게임 통신·현재 맵 id를 팔레트에 공급한다.
+  const placementPalette = createPlacementPalette({
+    getCurrentMapId: () => currentMapId,
+    sendToGame: (message) => iframe.contentWindow?.postMessage(message, '*'),
+    getTilePaletteContext: () => {
+      const tileset = resolveCurrentTileset()
+      return tileset
+        ? {
+            tilesetSource: tileset.tilesetSource,
+            tilesetImageUrl: tileset.tilesetImageUrl,
+            columns: tileset.columns,
+            tileWidth: tileset.tileWidth,
+            tileHeight: tileset.tileHeight
+          }
+        : undefined
+    }
+  })
   const headerRight = el('div', 'flex items-center gap-3')
-  headerRight.append(muteButton, styleTransfer.openButton, styleRevert.button, externalStyler.button, settingsButton, connection)
+  headerRight.append(muteButton, styleTransfer.openButton, styleRevert.button, externalStyler.button, placementPalette.button, settingsButton, connection)
   header.append(brand, headerRight)
 
   // LLM 챗 스타일 배치: 가운데가 라이브 게임(위 가득) + 프롬프트(아래), 오른쪽이 생성 결과.
@@ -1023,7 +1099,7 @@ export const createEditorApp = ({
     })()
   })
 
-  root.append(header, body, settingsBackdrop, styleTransfer.backdrop, styleRevert.backdrop, externalStyler.backdrop, landingBackdrop)
+  root.append(header, body, settingsBackdrop, styleTransfer.backdrop, styleRevert.backdrop, externalStyler.backdrop, placementPalette.backdrop, placementPalette.banner, landingBackdrop)
   mountElement.append(root)
 
   // ---------- behavior ----------

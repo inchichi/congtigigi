@@ -77,7 +77,17 @@ export type StyleTransferAssetTarget = {
   monsterKey?: string
 }
 
-type ContentMode = 'file' | 'asset' | 'object' | 'extracted'
+type ContentMode = 'file' | 'asset' | 'object' | 'extracted' | 'tile'
+
+// '타일' 탭: 현재 맵 타일셋에서 타일 하나를 골라 스타일을 입힌다(타일셋 패치 = 그 타일을
+// 쓰는 모든 곳이 함께 바뀜). createEditorApp이 현재 맵 타일셋 정보를 공급한다.
+export type TileStyleContext = {
+  tilesetImagePath: string // 에셋 상대 경로(서비스 API용, 예: src/games/.../town-32.png)
+  tilesetImageUrl: string // 썸네일 슬라이스용 URL
+  columns: number
+  tileWidth: number
+  tileHeight: number
+}
 
 // 자동 추출된 오브젝트(서비스 GET /extracted-objects의 사이드카 메타).
 type ExtractedObject = {
@@ -104,6 +114,8 @@ export interface StyleTransferModal {
 export type CreateStyleTransferModalInput = {
   // 적용/되돌리기로 에셋의 스타일 상태가 바뀐 뒤 호출 — 헤더 '스타일 되돌리기' 카운트 갱신용.
   onAssetChanged?: () => void
+  // '타일' 탭용 — 현재 맵의 타일셋 정보(없으면 타일 탭이 비활성 안내).
+  getTileStyleTarget?: () => TileStyleContext | undefined
 }
 
 // 이미지 한 장 선택용 파일 입력 + 썸네일. 새 파일을 고르면 이전 미리보기 URL을 해제한다.
@@ -154,7 +166,7 @@ const createImagePicker = (): {
 export const createStyleTransferModal = (
   input: CreateStyleTransferModalInput = {}
 ): StyleTransferModal => {
-  const { onAssetChanged } = input
+  const { onAssetChanged, getTileStyleTarget } = input
   const openButton = el('button', 'rounded-lg px-2.5 py-1 text-sm bg-white/[0.04] border border-white/10 text-zinc-300 transition hover:bg-white/[0.08] hover:text-zinc-100', '🎨 스타일 변환')
   openButton.type = 'button'
 
@@ -194,10 +206,13 @@ export const createStyleTransferModal = (
   fileTab.type = 'button'
   const assetTab = el('button', MODE_TAB, '게임 에셋')
   assetTab.type = 'button'
+  const tileTab = el('button', MODE_TAB, '타일')
+  tileTab.type = 'button'
+  tileTab.title = '현재 맵 타일셋의 타일 하나를 골라 스타일 적용(그 타일을 쓰는 모든 곳이 함께 바뀜)'
   const extractedTab = el('button', MODE_TAB, '추출 오브젝트')
   extractedTab.type = 'button'
   extractedTab.title = '맵 인식 시 자동으로 누끼 추출된 오브젝트들'
-  modeTabs.append(fileTab, assetTab, extractedTab)
+  modeTabs.append(fileTab, assetTab, tileTab, extractedTab)
   contentHead.append(el('div', LABEL, '콘텐츠 이미지'), modeTabs)
 
   const contentPicker = createImagePicker()
@@ -243,6 +258,10 @@ export const createStyleTransferModal = (
     }
   })
   extractedPicker.node.style.display = 'none'
+  // 타일 모드: 현재 맵 타일셋을 CSS background-position으로 슬라이스한 타일 그리드.
+  const tileGridNode = el('div', 'flex flex-wrap gap-0.5 max-h-44 overflow-y-auto bg-black/30 p-1 rounded-lg')
+  tileGridNode.style.display = 'none'
+  let tileGridBuilt = false
   // 그리드(게임 에셋/추출) 다중 선택 툴바 — 모두 선택/해제 + 선택 개수. 그리드 모드에만 표시.
   const batchToolbar = el('div', 'flex items-center justify-between gap-2')
   batchToolbar.style.display = 'none'
@@ -253,7 +272,7 @@ export const createStyleTransferModal = (
   // openForAsset(몬스터 시트 등)이 표시하는 안내 문구 — 그 외 모드에선 숨김.
   const assetNote = el('div', 'text-xs text-amber-300/90 leading-relaxed')
   assetNote.style.display = 'none'
-  contentCard.append(contentHead, objectBanner, assetNote, batchToolbar, contentPicker.input, assetPicker.node, extractedPicker.node, contentPicker.thumb, objectPreview)
+  contentCard.append(contentHead, objectBanner, assetNote, batchToolbar, contentPicker.input, assetPicker.node, extractedPicker.node, tileGridNode, contentPicker.thumb, objectPreview)
   const setAssetNote = (text: string): void => {
     assetNote.textContent = text
     assetNote.style.display = text ? 'block' : 'none'
@@ -377,8 +396,9 @@ export const createStyleTransferModal = (
 
   const syncButtons = (): void => {
     const busy = isRunning || isApplying || isReverting || isBatchRunning
+    // 오브젝트·타일 모드는 mapObject(타일 셀)가 콘텐츠, 그 외는 업로드/선택한 파일이 콘텐츠.
     const hasContent =
-      contentMode === 'object' ? mapObject !== undefined : contentPicker.getFile() !== undefined
+      mapObject !== undefined || contentPicker.getFile() !== undefined
     const hasStyle = stylePicker.getFile() !== undefined
     // 그리드에서 2개 이상 선택하면 일괄 버튼을, 1개 이하면 단일 변환 버튼을 쓴다.
     const batchCountSel = currentSelection().length
@@ -397,7 +417,7 @@ export const createStyleTransferModal = (
     if (contentMode === 'asset') {
       return assetPath
     }
-    if (contentMode === 'object') {
+    if (contentMode === 'object' || contentMode === 'tile') {
       return mapObject?.tilesetImagePath
     }
     if (contentMode === 'extracted') {
@@ -452,9 +472,10 @@ export const createStyleTransferModal = (
   stylePicker.onChange(syncButtons)
 
   const setContentMode = (mode: ContentMode): void => {
+    const modeChanged = mode !== contentMode
     // 모드가 실제로 바뀔 때만 콘텐츠 상태를 리셋한다 — 탭 전환 후 이전 모드의 파일/선택이
     // 입력으로 남아 UI와 실제 입력이 어긋나는 사고 방지.
-    if (mode !== contentMode) {
+    if (modeChanged) {
       contentPicker.setFile(undefined)
       assetPath = undefined
       assetMonsterKey = undefined
@@ -465,11 +486,14 @@ export const createStyleTransferModal = (
       selectedExtractedKeys = []
     }
     contentMode = mode
-    if (mode !== 'object') {
+    // object는 openForMapObject가 mapObject를 세팅·유지한다. tile은 그리드 클릭으로 세팅하므로
+    // 모드가 "실제로 바뀔 때만" 비워서, 타일 탭 재클릭이 선택을 지우지 않게 한다.
+    if (modeChanged && mode !== 'object') {
       mapObject = undefined
     }
     fileTab.className = mode === 'file' ? MODE_TAB_ACTIVE : MODE_TAB
     assetTab.className = mode === 'asset' ? MODE_TAB_ACTIVE : MODE_TAB
+    tileTab.className = mode === 'tile' ? MODE_TAB_ACTIVE : MODE_TAB
     extractedTab.className = mode === 'extracted' ? MODE_TAB_ACTIVE : MODE_TAB
     modeTabs.style.display = mode === 'object' ? 'none' : 'flex'
     objectBanner.style.display = mode === 'object' ? 'flex' : 'none'
@@ -477,10 +501,14 @@ export const createStyleTransferModal = (
     contentPicker.input.style.display = mode === 'file' ? 'block' : 'none'
     assetPicker.node.style.display = mode === 'asset' ? 'grid' : 'none'
     extractedPicker.node.style.display = mode === 'extracted' ? 'grid' : 'none'
+    tileGridNode.style.display = mode === 'tile' ? 'flex' : 'none'
     contentPicker.thumb.style.display =
-      mode !== 'object' && contentPicker.getFile() ? 'block' : 'none'
+      mode !== 'object' && mode !== 'tile' && contentPicker.getFile() ? 'block' : 'none'
     // 안내 문구는 openForAsset이 모드 설정 직후 다시 채운다(여기선 일단 비운다).
     setAssetNote('')
+    if (mode === 'tile') {
+      buildTileGrid()
+    }
     clearResult()
     updateBatchToolbar()
     void refreshRevertState()
@@ -490,6 +518,92 @@ export const createStyleTransferModal = (
   fileTab.addEventListener('click', () => {
     setContentMode('file')
   })
+  tileTab.addEventListener('click', () => {
+    setContentMode('tile')
+  })
+
+  // ---------- 타일 모드: 타일셋 슬라이스 그리드에서 타일 하나를 골라 1셀 오브젝트로 변환 ----------
+  const buildTileGrid = (): void => {
+    if (tileGridBuilt) {
+      return
+    }
+    const ctx = getTileStyleTarget?.()
+    tileGridNode.replaceChildren()
+    if (!ctx) {
+      tileGridNode.append(el('div', 'text-xs text-zinc-500 p-2', '현재 맵의 타일셋을 찾지 못했습니다.'))
+      return
+    }
+    const probe = new Image()
+    probe.onload = () => {
+      const rows = Math.max(1, Math.floor(probe.naturalHeight / ctx.tileHeight))
+      const count = rows * ctx.columns
+      for (let tileId = 0; tileId < count; tileId += 1) {
+        const cell = el('button', 'shrink-0 rounded-sm border border-transparent hover:border-indigo-400/60 [image-rendering:pixelated]') as HTMLButtonElement
+        cell.type = 'button'
+        cell.style.width = `${ctx.tileWidth}px`
+        cell.style.height = `${ctx.tileHeight}px`
+        cell.style.backgroundImage = `url(${ctx.tilesetImageUrl})`
+        cell.style.backgroundRepeat = 'no-repeat'
+        cell.style.backgroundPosition = `-${(tileId % ctx.columns) * ctx.tileWidth}px -${Math.floor(tileId / ctx.columns) * ctx.tileHeight}px`
+        cell.title = `타일 #${tileId}`
+        cell.addEventListener('click', () => {
+          for (const other of tileGridNode.children) {
+            (other as HTMLElement).classList.remove('ring-2', 'ring-indigo-400/70')
+          }
+          cell.classList.add('ring-2', 'ring-indigo-400/70')
+          selectTile(ctx, tileId)
+        })
+        tileGridNode.append(cell)
+      }
+      tileGridBuilt = true
+    }
+    probe.onerror = () => {
+      tileGridNode.append(el('div', 'text-xs text-rose-300 p-2', '타일셋 이미지를 불러오지 못했습니다.'))
+    }
+    probe.src = ctx.tilesetImageUrl
+  }
+
+  // 고른 타일을 1셀 mapObject로 만들어 기존 오브젝트 변환·적용(타일셋 패치) 경로를 그대로 탄다.
+  const selectTile = (ctx: TileStyleContext, tileId: number): void => {
+    mapObject = {
+      label: `타일 #${tileId}`,
+      tilesetImagePath: ctx.tilesetImagePath,
+      tileWidth: ctx.tileWidth,
+      tileHeight: ctx.tileHeight,
+      columns: ctx.columns,
+      cells: [{ col: 0, row: 0, tileId }],
+      sharedOutsideCells: 0
+    }
+    // 미리보기: 고른 타일을 잘라 보여준다(objectPreview 재사용).
+    const canvas = document.createElement('canvas')
+    canvas.width = ctx.tileWidth
+    canvas.height = ctx.tileHeight
+    const context = canvas.getContext('2d')
+    const probe = new Image()
+    probe.onload = () => {
+      if (!context) {
+        return
+      }
+      context.imageSmoothingEnabled = false
+      context.drawImage(
+        probe,
+        (tileId % ctx.columns) * ctx.tileWidth,
+        Math.floor(tileId / ctx.columns) * ctx.tileHeight,
+        ctx.tileWidth,
+        ctx.tileHeight,
+        0,
+        0,
+        ctx.tileWidth,
+        ctx.tileHeight
+      )
+      objectPreview.src = canvas.toDataURL()
+      objectPreview.style.display = 'block'
+    }
+    probe.src = ctx.tilesetImageUrl
+    clearResult()
+    void refreshRevertState()
+    syncButtons()
+  }
 
   // ---------- 게임 에셋 모드: 서비스의 PNG 목록을 썸네일 그리드로 ----------
   // 썸네일 캐시버스트 — 적용/되돌리기로 같은 경로 파일이 바뀌어도 새 이미지를 받게.
@@ -719,11 +833,12 @@ export const createStyleTransferModal = (
   const runTransfer = async (): Promise<void> => {
     const styleFile = stylePicker.getFile()
     const contentFile = contentPicker.getFile()
+    // object·tile 모드는 mapObject(타일 셀)가 콘텐츠다 — 둘 다 /stylize-object 경로로 처리한다.
     const target = mapObject
-    if (isRunning || !styleFile || (contentMode !== 'object' && !contentFile)) {
+    if (isRunning || !styleFile) {
       return
     }
-    if (contentMode === 'object' && !target) {
+    if (target === undefined && !contentFile) {
       return
     }
     // 적용 대상·세대를 await 이전(동기 구간)에 캡처한다.
@@ -738,8 +853,8 @@ export const createStyleTransferModal = (
     syncButtons()
     setStatus('변환 중... (CPU에서 수 초 걸릴 수 있습니다)')
     try {
-      if (contentMode === 'object') {
-        await runObjectTransfer(target as StyleTransferMapObject, styleFile, seq)
+      if (target !== undefined) {
+        await runObjectTransfer(target, styleFile, seq)
       } else {
         await runImageTransfer(contentFile as File, styleFile, applyContext, seq)
       }

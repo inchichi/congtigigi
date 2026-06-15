@@ -3,6 +3,7 @@ import {
   Application,
   AnimatedSprite,
   Container,
+  type FederatedPointerEvent,
   Graphics,
   NineSliceSprite,
   Rectangle,
@@ -14,6 +15,13 @@ import {
 } from 'pixi.js'
 
 import { loadTextureSafe } from './loadTextureSafe'
+import {
+  addPlacement,
+  loadPlacementsForMap,
+  removePlacement,
+  type PlacedItem,
+  type PlacementTemplate
+} from '../../../editor/placementStore'
 
 import {
   PLAYER_CHARACTER_ID,
@@ -938,6 +946,9 @@ export const createPixiTiledMapView = async ({
     targetCharacterId: string
     source: string
   }) => ApplyEventDraftResult
+  setPlacementMode: (mode: 'off' | 'place' | 'erase') => void
+  setPlacementTemplate: (template: PlacementTemplate | null) => void
+  refreshPlacements: () => void
 }> => {
   const app = new Application()
   let cameraZoom = CAMERA_DEFAULT_ZOOM
@@ -6047,6 +6058,103 @@ export const createPixiTiledMapView = async ({
   questTrackerOverlay.syncFrame()
   handleVisibilityChange()
 
+  // ── 마우스 에셋 배치(에디터 배치 모드) ──
+  // 에디터가 배치 모드+놓을 항목을 postMessage로 켜면, 게임 캔버스 클릭이 그 칸에 배치를 만든다.
+  // 배치 데이터는 맵별 localStorage(placementStore)에 저장돼 새로고침·재접속에도 유지된다.
+  let placementMode: 'off' | 'place' | 'erase' = 'off'
+  let placementTemplate: PlacementTemplate | null = null
+  let placementSprites: Sprite[] = []
+
+  const textureForPlacement = async (
+    item: PlacedItem
+  ): Promise<Texture | undefined> => {
+    if (item.kind === 'tile' && item.tileId !== undefined) {
+      // 맵에 타일셋이 하나면 source가 안 맞아도 그걸로 폴백.
+      const tileset =
+        map.tilesets.find((candidate) => candidate.source === item.tilesetSource) ??
+        map.tilesets[0]
+      const resources = tileset ? tilesetResources.get(tileset.source) : undefined
+      return resources?.tileTextures[item.tileId]
+    }
+    if (item.kind === 'object' && item.imageUrl) {
+      return await loadTextureSafe(item.imageUrl)
+    }
+    return undefined
+  }
+
+  const renderPlacements = async (items: PlacedItem[]): Promise<void> => {
+    for (const sprite of placementSprites) {
+      sprite.parent?.removeChild(sprite)
+      sprite.destroy()
+    }
+    placementSprites = []
+    if (!depthSortedLayer) {
+      return
+    }
+    for (const item of items) {
+      const texture = await textureForPlacement(item)
+      if (!texture) {
+        continue
+      }
+      const sprite = new Sprite(texture)
+      sprite.position.set(item.col * map.tileWidth, item.row * map.tileHeight)
+      // 자기 아래 가장자리 기준 깊이정렬 — 캐릭터/지붕과 같은 규칙으로 자연스럽게 겹친다.
+      sprite.zIndex = item.row * map.tileHeight + (texture.height || map.tileHeight) + 0.6
+      depthSortedLayer.addChild(sprite)
+      placementSprites.push(sprite)
+    }
+    depthSortedLayer.sortChildren()
+  }
+
+  const refreshPlacements = (): void => {
+    void renderPlacements(loadPlacementsForMap(sceneId))
+  }
+
+  app.stage.eventMode = 'static'
+  app.stage.hitArea = app.screen
+  const erasePlacementAt = (col: number, row: number): void => {
+    const items = loadPlacementsForMap(sceneId)
+    // 마지막(위) 것부터 — 같은 칸 앵커의 배치를 하나 지운다.
+    const hit = [...items].reverse().find((it) => it.col === col && it.row === row)
+    if (hit) {
+      removePlacement(sceneId, hit.id)
+      refreshPlacements()
+    }
+  }
+  const handleStagePointerDown = (event: FederatedPointerEvent): void => {
+    if (placementMode === 'off') {
+      return
+    }
+    const local = world.toLocal(event.global) // 카메라 줌/스크롤이 반영된 맵 픽셀 좌표.
+    const col = Math.floor(local.x / map.tileWidth)
+    const row = Math.floor(local.y / map.tileHeight)
+    if (col < 0 || col >= map.width || row < 0 || row >= map.height) {
+      return
+    }
+    // 우클릭(button 2)은 모드와 무관하게 그 칸의 배치를 지운다(배치 중에도 바로 삭제).
+    if (event.button === 2) {
+      erasePlacementAt(col, row)
+      return
+    }
+    if (placementMode === 'place' && placementTemplate) {
+      addPlacement(sceneId, placementTemplate, col, row)
+      refreshPlacements()
+    } else if (placementMode === 'erase') {
+      erasePlacementAt(col, row)
+    }
+  }
+  app.stage.on('pointerdown', handleStagePointerDown)
+  // 배치 모드에서 우클릭 시 브라우저 컨텍스트 메뉴를 막아 '우클릭 삭제'가 정상 동작하게 한다.
+  const handleCanvasContextMenu = (event: MouseEvent): void => {
+    if (placementMode !== 'off') {
+      event.preventDefault()
+    }
+  }
+  app.canvas.addEventListener('contextmenu', handleCanvasContextMenu)
+
+  // 저장된 배치를 부팅 시 그린다(맵별).
+  refreshPlacements()
+
   const destroy = () => {
     if (isDestroyed) {
       return
@@ -6059,6 +6167,8 @@ export const createPixiTiledMapView = async ({
     window.removeEventListener('resize', handleWindowResize)
     viewportElement.removeEventListener('wheel', handleViewportWheel)
     document.removeEventListener('visibilitychange', handleVisibilityChange)
+    app.stage.off('pointerdown', handleStagePointerDown)
+    app.canvas.removeEventListener('contextmenu', handleCanvasContextMenu)
     app.ticker.remove(updateCharacters)
     app.ticker.remove(mapOverlay.syncFrame)
     app.ticker.remove(playerHudOverlay.syncFrame)
@@ -6124,7 +6234,14 @@ export const createPixiTiledMapView = async ({
     destroy,
     updateAudioSettings: updateCurrentAudioSettings,
     applyEventDraft,
-    applyLuaScript
+    applyLuaScript,
+    setPlacementMode: (mode: 'off' | 'place' | 'erase') => {
+      placementMode = mode
+    },
+    setPlacementTemplate: (template: PlacementTemplate | null) => {
+      placementTemplate = template
+    },
+    refreshPlacements
   }
 }
 
