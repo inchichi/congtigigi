@@ -169,15 +169,40 @@ export const rpgAdapter: GameAdapter = {
 
 // 그룹 이름 → 엔티티 종류. 맵마다 그룹 이름의 대소문자·단복수가 제각각(NPCs/npc/Npc...)이라
 // 소문자로 정규화해 매칭하고, 모르는 그룹은 그룹 이름 자체를 종류로 쓴다(트리에서 카테고리로 묶임).
+// 알 수 없는 그룹은 그룹 이름이 그대로 트리에 영문으로 노출돼 직관성이 떨어진다(예: 'transitions').
+// 흔한 그룹 이름을 에디터가 아는 종류(label·icon·카테고리가 붙는)로 정규화해 한눈에 읽히게 한다.
 const LEGEND_KIND_BY_GROUP: Record<string, string> = {
   enemies: 'enemy',
   enemy: 'enemy',
+  monsters: 'enemy',
+  monster: 'enemy',
   npcs: 'npc',
   npc: 'npc',
   characters: 'npc',
+  character: 'npc',
   chests: 'chest',
   chest: 'chest',
-  loot: 'loot'
+  loot: 'loot',
+  items: 'loot',
+  item: 'loot',
+  // 맵 전환/포털 류 — 영문 'transitions'가 그대로 보이던 그룹을 '포털'로 정규화한다.
+  transitions: 'portal',
+  transition: 'portal',
+  portals: 'portal',
+  portal: 'portal',
+  doors: 'portal',
+  door: 'portal',
+  warps: 'portal',
+  warp: 'portal',
+  // 지형·장식 류.
+  trees: 'tree',
+  tree: 'tree',
+  props: 'prop',
+  prop: 'prop',
+  signs: 'sign',
+  sign: 'sign',
+  buildings: 'building',
+  building: 'building'
 }
 
 // 엔티티가 아니라 충돌·경계 같은 구조용 도형이 든 그룹은 트리에서 제외한다(NPC는 보이게 하되

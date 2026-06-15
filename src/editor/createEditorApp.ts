@@ -84,6 +84,7 @@ const MODEL_STORAGE_PREFIX = 'my-sample-rpg:model:'
 const KIND_ICON: Record<string, EditorIconName> = {
   npc: 'npc',
   monster: 'monster',
+  enemy: 'monster',
   sign: 'sign',
   portal: 'portal',
   chest: 'chest',
@@ -110,6 +111,7 @@ const KIND_ICON: Record<string, EditorIconName> = {
 const KIND_LABEL: Record<string, string> = {
   npc: 'NPC',
   monster: '몬스터',
+  enemy: '몬스터',
   sign: '표지판',
   portal: '포털',
   chest: '상자',
@@ -139,6 +141,7 @@ const CATEGORY_OF: Record<string, string> = {
   npc: '인물',
   character: '인물',
   monster: '인물',
+  enemy: '인물',
   building: '건축물',
   sign: '건축물',
   portal: '건축물',
@@ -866,11 +869,30 @@ export const createEditorApp = ({
   // 패딩 8px만 남겨 게임 주변 프레임 느낌을 준다.
   // 게임이 패널 안을 꽉 채우게 — 프레임은 패널의 둥근 테두리만으로 충분하다.
   // items-end: 게임 창을 바닥 기준으로 정렬해, 넘치는 부분이 위쪽(맵의 빈 어두운 띠)부터 잘리게 한다.
+  // ---------- 게임에 맞춰 프리뷰 iframe 소스 결정 ----------
+  // love.js 웹빌드가 있는 게임(legend-of-lua)은 그 빌드를, 그 외(my-sample-rpg)는 기본 게임 URL을
+  // iframe에 띄운다. 이전에 설정에서 저장한 웹빌드 URL(localStorage)이 있으면 그것을 우선한다.
+  const WEB_BUILD_URL_STORAGE_KEY = 'my-sample-rpg:web-build-url'
+  const previewSrcForGame = (): string => {
+    const stored = (readLocalStorage(WEB_BUILD_URL_STORAGE_KEY) ?? '').trim()
+    const webBuild =
+      stored.length > 0 ? stored : (game.adapter.defaultWebBuildUrl ?? '').trim()
+    return webBuild.length > 0 ? webBuild : gamePreviewUrl
+  }
   const previewStage = el('div', 'relative flex-1 min-h-0 flex items-end justify-center overflow-hidden bg-[#181818]')
   const iframe = el('iframe', 'shrink-0 border-0 bg-black') as HTMLIFrameElement
-  iframe.src = gamePreviewUrl
+  iframe.src = previewSrcForGame()
   iframe.title = '게임 프리뷰'
   previewStage.append(iframe)
+  // love.js 빌드는 wasm·게임 데이터를 받느라 첫 로드에 시간이 걸린다 — 빈 화면 대신 로딩 안내를
+  // 띄우고, iframe load 이벤트에서 지운다.
+  const previewLoading = el(
+    'div',
+    'absolute inset-0 z-10 flex items-center justify-center text-[13px] text-[#ead8b6] bg-[#181818]/85 pointer-events-none',
+    '🎮 게임 로딩 중…'
+  )
+  previewLoading.style.display = 'none'
+  previewStage.append(previewLoading)
   // 표시 전용: 스테이지 크기가 바뀔 때마다 iframe을 16:9 비율의 cover 크기로 다시 맞춘다.
   // TOP_TRIM: 마을 맵 위쪽의 빈 어두운 띠가 헤더 아래에 보이지 않도록, 게임 창을 살짝 키워
   // 그만큼을 위에서 잘라낸다(바닥 정렬이라 잘리는 쪽은 항상 위). 캐릭터·카메라는 그대로다.
@@ -890,28 +912,66 @@ export const createEditorApp = ({
     connection.className = 'h-7 flex items-center gap-1.5 text-[11px] rounded-full px-2.5 bg-[#72d36b]/10 border border-[#72d36b]/50 text-[#9fe296]'
     connectionDot.className = 'w-2 h-2 rounded-full bg-[#72d36b] shadow-[0_0_6px_rgba(114,211,107,0.8)]'
     connectionLabel.textContent = 'AI 연결됨'
+    previewLoading.style.display = 'none'
   })
-  // iframe 정의 후 맵 버튼을 채운다 — 클릭하면 게임에 씬 전환 메시지를 보낸다.
-  const sceneButtons = previewScenes.map((scene) => {
-    const button = el('button', SCENE_TAB) as HTMLButtonElement
-    button.append(editorIcon(scene.icon, 12), el('span', '', scene.label))
-    button.type = 'button'
-    button.addEventListener('click', () => {
-      iframe.contentWindow?.postMessage(
-        { type: 'editor:switch-scene', sceneId: scene.id },
-        '*'
-      )
-    })
-    return { id: scene.id, button }
-  })
-  mapSwitcher.append(...sceneButtons.map((scene) => scene.button))
-  // 게임이 보고한 현재 맵의 탭을 금색으로 강조한다(표시 전용). 연결 전엔 기본 맵(town).
+
+  // 게임이 바뀌면(폴더 열기/복귀) 프리뷰 iframe을 그 게임 URL로 다시 가리킨다. URL이 같으면
+  // 불필요한 재로드를 피한다(같은 게임 재선택 등).
+  const syncPreviewToGame = (): void => {
+    const src = previewSrcForGame()
+    if (iframe.src === new URL(src, location.href).href) {
+      return
+    }
+    previewLoading.style.display = 'flex'
+    iframe.src = src
+  }
+  // 상단 맵/씬 버튼은 로드된 게임에 맞춰 구성한다:
+  // - my-sample-rpg: 큐레이션된 씬(마을/사냥터/동굴) + 아이콘, 'editor:switch-scene' 전송
+  //   (게임이 'game:scene-changed'로 되보고 → currentMapId 갱신).
+  // - 그 외(legend-of-lua 등): 실제 맵 목록(game.maps), 'editor:goto-map' 전송. 되보고가 없으므로
+  //   버튼이 currentMapId의 주인 — 클릭 시 직접 집중·강조한다.
+  let mapSwitcherButtons: Array<{ id: string; button: HTMLButtonElement }> = []
+  // 게임이 보고/선택한 현재 맵의 탭을 금색으로 강조한다(표시 전용). rpg는 연결 전 기본 맵(town).
   const updateSceneTabs = (): void => {
-    const activeId = currentMapId ?? 'town'
-    for (const { id, button } of sceneButtons) {
+    const activeId =
+      currentMapId ?? (game.adapter.id === 'my-sample-rpg' ? 'town' : undefined)
+    for (const { id, button } of mapSwitcherButtons) {
       button.className = id === activeId ? SCENE_TAB_ACTIVE : SCENE_TAB
     }
   }
+  const renderMapSwitcher = (): void => {
+    const isRpg = game.adapter.id === 'my-sample-rpg'
+    const entries: Array<{ id: string; label: string; icon: EditorIconName }> = isRpg
+      ? previewScenes
+      : game.maps.map((map) => ({ id: map.id, label: map.name, icon: 'map' as const }))
+    mapSwitcherButtons = entries.map((entry) => {
+      const button = el('button', SCENE_TAB) as HTMLButtonElement
+      button.append(editorIcon(entry.icon, 12), el('span', '', entry.label))
+      button.type = 'button'
+      button.addEventListener('click', () => {
+        if (isRpg) {
+          iframe.contentWindow?.postMessage(
+            { type: 'editor:switch-scene', sceneId: entry.id },
+            '*'
+          )
+          return
+        }
+        currentMapId = entry.id
+        showAllMaps = false
+        iframe.contentWindow?.postMessage(
+          { type: 'editor:goto-map', mapId: entry.id, mapName: entry.label },
+          '*'
+        )
+        renderTree()
+        render()
+        updateSceneTabs()
+      })
+      return { id: entry.id, button }
+    })
+    mapSwitcher.replaceChildren(...mapSwitcherButtons.map((b) => b.button))
+    updateSceneTabs()
+  }
+  renderMapSwitcher()
   // 진행 단계 바 — RPG 퀘스트 진행도처럼 ①~⑤ 번호 캡슐 + 화살표.
   const FLOW_STEPS = ['선택', '작성', '생성', '확인', '적용']
   const stepBar = el('div', 'flex flex-wrap items-center gap-1.5')
@@ -1850,6 +1910,11 @@ export const createEditorApp = ({
 
       game = loaded
       currentFiles = files
+      // 새 게임에 맞춰 프리뷰 iframe을 다시 가리키고(예: legend-of-lua면 love.js 빌드), 상단 맵/씬
+      // 버튼도 그 게임의 실제 맵으로 다시 구성한다.
+      syncPreviewToGame()
+      currentMapId = undefined
+      renderMapSwitcher()
       selectedEntity = undefined
       currentResult = undefined
       currentAnalysis = undefined
@@ -1885,6 +1950,10 @@ export const createEditorApp = ({
   const runReset = (): void => {
     game = loadGame(initialFiles)
     currentFiles = initialFiles
+    // 내 게임으로 복귀 — 프리뷰도 기본 게임 URL로, 맵/씬 버튼도 다시 구성한다.
+    syncPreviewToGame()
+    currentMapId = undefined
+    renderMapSwitcher()
     selectedEntity = undefined
     currentResult = undefined
     currentAnalysis = undefined
@@ -2048,10 +2117,11 @@ export const createEditorApp = ({
     void runAnalyze()
   })
   popoutButton.addEventListener('click', () => {
-    window.open(gamePreviewUrl, 'game-window', 'width=1280,height=720')
+    window.open(previewSrcForGame(), 'game-window', 'width=1280,height=720')
   })
   reloadButton.addEventListener('click', () => {
-    iframe.src = gamePreviewUrl
+    previewLoading.style.display = 'flex'
+    iframe.src = previewSrcForGame()
   })
   // 현재 맵만 ↔ 전체 맵 토글. 트리만 다시 그리되, 보이는 버튼의 선택 강조는 render()가 다시 입힌다.
   mapFilterToggle.addEventListener('click', () => {
