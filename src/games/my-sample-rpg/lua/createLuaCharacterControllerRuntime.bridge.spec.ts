@@ -8,6 +8,8 @@ import {
   createNpcCharacter
 } from '../characterState'
 import { createLuaCharacterControllerRuntime } from './createLuaCharacterControllerRuntime'
+import { serializeToLuaDataModule } from './questCatalogLua'
+import { QUEST_DEFINITIONS } from '../questLog'
 
 const LUA_MODULE_JS_URL = new URL(
   '../../../../public/vendor/lua/lua-5.3.6.mjs',
@@ -476,6 +478,25 @@ end
         { kind: 'request-scene-transition', sceneId: 'cave', x: 96, y: 128 },
         { kind: 'play-sound', soundId: 'levelUp' }
       ])
+    } finally {
+      runtime.destroy()
+    }
+  })
+
+  it('round-trips the quest catalog through Lua data (Phase 5 golden equality)', async () => {
+    const runtime = await createBridgeRuntime({
+      source: createControllerModuleSource(`
+function controller.step(id, dt, x, y)
+  return 0, 0
+end
+`)
+    })
+
+    try {
+      // 실제 퀘스트 카탈로그를 Lua 데이터 모듈로 직렬화 → Lua 로 다시 읽어 마샬링 → 원본과 동일.
+      const luaSource = serializeToLuaDataModule(QUEST_DEFINITIONS)
+      const loaded = runtime.loadDataModule(luaSource)
+      expect(loaded).toEqual(QUEST_DEFINITIONS)
     } finally {
       runtime.destroy()
     }

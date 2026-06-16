@@ -129,6 +129,8 @@ export type LuaCharacterControllerRuntime = {
   getActiveErrorMessages: () => string[]
   updateScript: (scriptId: string, script: LuaControllerScriptSource) => void
   pushSnapshot: (snapshot: LuaRuntimeSnapshot) => void
+  // Phase 5: 테이블을 반환하는 Lua 데이터 모듈을 실행해 그 값을 마샬링(JSON→JS)해 돌려준다.
+  loadDataModule: (source: string) => unknown
   destroy: () => void
 }
 
@@ -178,6 +180,8 @@ const LUA_CONTROLLER_SET_SNAPSHOT_NUMBER_HELPER_FUNCTION_NAME =
 const LUA_CONTROLLER_SET_SNAPSHOT_BOOLEAN_HELPER_FUNCTION_NAME =
   '__engine_set_snapshot_boolean'
 const LUA_CONTROLLER_DRAIN_EVENTS_FUNCTION_NAME = '__engine_drain_events_json'
+// Phase 5: 임의의 Lua 데이터 모듈(테이블 반환)을 실행해 JSON 으로 마샬링한다(Lua→TS 데이터 읽기).
+const LUA_CONTROLLER_LOAD_DATA_MODULE_FUNCTION_NAME = '__engine_load_data_module_json'
 const LUA_CONTROLLER_RUNTIME_HOST_API_SOURCE = `
 local runtime = {
   current_character_id = nil,
@@ -757,6 +761,86 @@ function ${LUA_CONTROLLER_PUBLIC_API_NAME}.audio.play_sound(sound_id)
     sound_id = tostring(sound_id)
   }
 end
+
+-- Phase 5: 임의 Lua 값(테이블/문자열/숫자/불리언/nil)을 JSON 으로 인코딩한다.
+-- 빈 테이블은 배열([])로, 1..n 연속 정수 키면 배열, 그 외엔 객체로 본다.
+local function encode_lua_value(value)
+  local value_type = type(value)
+
+  if value == nil then
+    return 'null'
+  end
+
+  if value_type == 'boolean' then
+    return value and 'true' or 'false'
+  end
+
+  if value_type == 'number' then
+    if
+      value == math.floor(value)
+      and value ~= math.huge
+      and value ~= -math.huge
+    then
+      return string.format('%d', math.floor(value))
+    end
+    return tostring(value)
+  end
+
+  if value_type == 'string' then
+    return escape_json_string(value)
+  end
+
+  if value_type == 'table' then
+    local count = 0
+    for _ in pairs(value) do
+      count = count + 1
+    end
+
+    if count == 0 then
+      return '[]'
+    end
+
+    local is_array = true
+    for index = 1, count do
+      if value[index] == nil then
+        is_array = false
+        break
+      end
+    end
+
+    local parts = {}
+    if is_array then
+      for index = 1, count do
+        parts[index] = encode_lua_value(value[index])
+      end
+      return '[' .. table.concat(parts, ',') .. ']'
+    end
+
+    for key, entry in pairs(value) do
+      parts[#parts + 1] =
+        escape_json_string(tostring(key)) .. ':' .. encode_lua_value(entry)
+    end
+    return '{' .. table.concat(parts, ',') .. '}'
+  end
+
+  return 'null'
+end
+
+function ${LUA_CONTROLLER_LOAD_DATA_MODULE_FUNCTION_NAME}(source, chunk_name)
+  local chunk, load_error = load(source, chunk_name)
+
+  if type(chunk) ~= 'function' then
+    error('Lua data module syntax error: ' .. tostring(load_error))
+  end
+
+  local results = table.pack(pcall(chunk))
+
+  if not results[1] then
+    error(results[2])
+  end
+
+  return encode_lua_value(results[2])
+end
 `
 
 export const createLuaCharacterControllerRuntime = async ({
@@ -1017,6 +1101,16 @@ export const createLuaCharacterControllerRuntime = async ({
       } catch (error) {
         reportLuaRuntimeError(lastLoggedErrorByKey, 'runtime:push-snapshot', error)
       }
+    },
+    loadDataModule: (source) => {
+      const json = callLuaFunctionForString(
+        lua,
+        luaState,
+        LUA_CONTROLLER_LOAD_DATA_MODULE_FUNCTION_NAME,
+        [source, 'data-module']
+      )
+
+      return json ? (JSON.parse(json) as unknown) : null
     },
     destroy: () => {
       if (isDestroyed) {
