@@ -26,6 +26,7 @@ import {
   type LuaControllerInteractionResponse,
   type LuaControllerRuntimeEvent
 } from './luaControllerApi'
+import { parseLuaControllerRuntimeEvents } from './luaRuntimeEventMarshaling'
 
 export type LuaControllerScriptSource = {
   source: string
@@ -197,6 +198,22 @@ local function encode_runtime_event(event)
       .. ',"message":'
       .. escape_json_string(event.message)
       .. ',"durationMilliseconds":'
+      .. tostring(event.duration_milliseconds)
+      .. '}'
+  end
+
+  if event.kind == 'show-npc-dialogue' then
+    local encoded_lines = {}
+
+    for index = 1, #event.lines do
+      encoded_lines[index] = escape_json_string(event.lines[index])
+    end
+
+    return '{"kind":"show-npc-dialogue","characterId":'
+      .. escape_json_string(event.character_id)
+      .. ',"lines":['
+      .. table.concat(encoded_lines, ',')
+      .. '],"durationMilliseconds":'
       .. tostring(event.duration_milliseconds)
       .. '}'
   end
@@ -491,6 +508,33 @@ function ${LUA_CONTROLLER_PUBLIC_API_NAME}.ui.show_message(message, duration_sec
     kind = 'show-character-message',
     character_id = require_current_character_id(),
     message = normalized_message,
+    duration_milliseconds = get_duration_milliseconds(duration_seconds)
+  }
+end
+
+function ${LUA_CONTROLLER_PUBLIC_API_NAME}.ui.show_dialogue(lines, duration_seconds)
+  if type(lines) ~= 'table' then
+    return
+  end
+
+  local normalized_lines = {}
+
+  for index = 1, #lines do
+    local line = lines[index]
+
+    if line ~= nil and tostring(line) ~= '' then
+      normalized_lines[#normalized_lines + 1] = tostring(line)
+    end
+  end
+
+  if #normalized_lines == 0 then
+    return
+  end
+
+  runtime.queued_events[#runtime.queued_events + 1] = {
+    kind = 'show-npc-dialogue',
+    character_id = require_current_character_id(),
+    lines = normalized_lines,
     duration_milliseconds = get_duration_milliseconds(duration_seconds)
   }
 end
@@ -1418,39 +1462,6 @@ const readLuaNumber = (
   }
 
   return lua._lua_tonumberx(luaState, index, 0)
-}
-
-const parseLuaControllerRuntimeEvents = (
-  serializedEvents: string
-): LuaControllerRuntimeEvent[] => {
-  const parsedEvents = JSON.parse(serializedEvents) as unknown
-
-  if (!Array.isArray(parsedEvents)) {
-    throw new Error('Lua runtime event drain did not return an array.')
-  }
-
-  return parsedEvents.flatMap((parsedEvent) => {
-    if (
-      typeof parsedEvent !== 'object' ||
-      parsedEvent === null ||
-      parsedEvent.kind !== 'show-character-message' ||
-      typeof parsedEvent.characterId !== 'string' ||
-      typeof parsedEvent.message !== 'string' ||
-      typeof parsedEvent.durationMilliseconds !== 'number' ||
-      !Number.isFinite(parsedEvent.durationMilliseconds)
-    ) {
-      throw new Error('Lua runtime event drain returned an invalid event.')
-    }
-
-    return [
-      {
-        kind: 'show-character-message',
-        characterId: parsedEvent.characterId,
-        message: parsedEvent.message,
-        durationMilliseconds: parsedEvent.durationMilliseconds
-      }
-    ]
-  })
 }
 
 const getOptionalScriptSource = (

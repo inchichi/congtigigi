@@ -45,9 +45,14 @@ type CreateNpcDialogueOverlayInput = {
   mountElement: HTMLElement
 }
 
-const GOLD = '#d9b375' // 옅은 금색
-const GOLD_BRIGHT = '#f3d99a'
-const BOX_BG = 'rgba(14, 11, 16, 0.92)'
+// 게임 HUD/상점과 통일: 양피지 크림 패널 + 얇은 갈색 테두리 + 진갈색 글자(NeoDunggeunmo).
+const PARCHMENT = '#fff9ee'
+const PARCHMENT_DEEP = '#f7ecd4'
+const BORDER_BROWN = 'rgba(111, 89, 58, 0.5)'
+const BORDER_BROWN_SOFT = 'rgba(111, 89, 58, 0.3)'
+const TEXT_DARK = '#2e2313'
+const LABEL_BROWN = '#6b5534'
+const BOX_BG = 'rgba(255, 249, 238, 0.96)'
 
 export const createNpcDialogueOverlay = ({
   mountElement
@@ -69,11 +74,10 @@ export const createNpcDialogueOverlay = ({
     zIndex: '70',
     display: 'none',
     pointerEvents: 'none',
-    // 하단 가독성용 그라데이션 + 살짝 비네트
+    // 하단을 살짝 어둡게 깔아 초상화·대화창을 바닥에 앉힌다(과하지 않게).
     background:
-      'radial-gradient(120% 90% at 8% 100%, rgba(0,0,0,0.55) 0%, rgba(0,0,0,0) 55%),' +
-      'linear-gradient(to top, rgba(0,0,0,0.78) 0%, rgba(0,0,0,0.28) 26%, rgba(0,0,0,0) 46%)',
-    fontFamily: "'Galmuri11', 'Pretendard', system-ui, sans-serif",
+      'linear-gradient(to top, rgba(0,0,0,0.4) 0%, rgba(0,0,0,0.12) 24%, rgba(0,0,0,0) 42%)',
+    fontFamily: "'NeoDunggeunmo', 'Jersey 25', monospace",
     userSelect: 'none'
   } as CSSStyleDeclaration)
 
@@ -98,16 +102,16 @@ export const createNpcDialogueOverlay = ({
     left: '50%',
     transform: 'translateX(-50%)',
     bottom: 'calc(4% + 1px)', // 대사창 상단 테두리 위에 걸치게
-    padding: '8px 34px',
-    color: '#2a1d0c',
-    fontWeight: '800',
+    padding: '7px 30px',
+    color: TEXT_DARK,
+    fontWeight: '700',
     fontSize: 'clamp(15px, 2.4vh, 26px)',
-    letterSpacing: '0.5px',
-    background: `linear-gradient(180deg, ${GOLD_BRIGHT} 0%, ${GOLD} 100%)`,
-    border: '2px solid rgba(255, 246, 214, 0.85)',
-    borderRadius: '999px',
+    letterSpacing: '0.04em',
+    background: `linear-gradient(180deg, ${PARCHMENT} 0%, ${PARCHMENT_DEEP} 100%)`,
+    border: `1px solid ${BORDER_BROWN}`,
+    borderRadius: '6px',
     boxShadow:
-      '0 4px 14px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.7)',
+      `0 0 0 1px ${BORDER_BROWN_SOFT}, 0 4px 10px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.75)`,
     whiteSpace: 'nowrap',
     pointerEvents: 'none'
   } as CSSStyleDeclaration)
@@ -122,12 +126,12 @@ export const createNpcDialogueOverlay = ({
     boxSizing: 'border-box',
     padding: 'clamp(18px, 3.2vh, 34px) clamp(26px, 4vw, 52px)',
     background: BOX_BG,
-    border: `2px solid ${GOLD}`,
-    borderRadius: '14px',
+    border: `1px solid ${BORDER_BROWN}`,
+    borderRadius: '8px',
     boxShadow:
-      `inset 0 0 0 4px rgba(0,0,0,0.55), inset 0 0 0 6px ${GOLD}, ` +
-      '0 10px 30px rgba(0,0,0,0.55)',
-    color: '#f6ecd6',
+      `0 0 0 1px ${BORDER_BROWN_SOFT}, inset 0 1px 0 rgba(255,255,255,0.7), ` +
+      '0 14px 30px rgba(0,0,0,0.4)',
+    color: TEXT_DARK,
     cursor: 'pointer',
     pointerEvents: 'auto'
   } as CSSStyleDeclaration)
@@ -137,7 +141,7 @@ export const createNpcDialogueOverlay = ({
     fontSize: 'clamp(15px, 2.6vh, 28px)',
     lineHeight: '1.6',
     whiteSpace: 'pre-wrap',
-    textShadow: '0 2px 4px rgba(0,0,0,0.6)',
+    color: TEXT_DARK,
     // 초상화와 겹치지 않도록 왼쪽 여백을 살짝 둔다.
     paddingLeft: 'clamp(0px, 6vw, 90px)'
   } as CSSStyleDeclaration)
@@ -148,7 +152,7 @@ export const createNpcDialogueOverlay = ({
     position: 'absolute',
     right: 'clamp(16px, 2vw, 28px)',
     bottom: 'clamp(10px, 1.4vh, 18px)',
-    color: GOLD_BRIGHT,
+    color: LABEL_BROWN,
     fontSize: 'clamp(13px, 1.8vh, 20px)',
     pointerEvents: 'none'
   } as CSSStyleDeclaration)
@@ -234,7 +238,13 @@ export const createNpcDialogueOverlay = ({
     lines = validLines
     lineIndex = 0
     onComplete = input.onComplete
-    portrait.src = input.portraitUrl
+    if (input.portraitUrl) {
+      portrait.src = input.portraitUrl
+      portrait.style.display = ''
+    } else {
+      portrait.removeAttribute('src')
+      portrait.style.display = 'none'
+    }
     nameBanner.textContent = input.name
     nameBanner.style.display = input.name.trim().length > 0 ? '' : 'none'
     renderCurrentLine()

@@ -3,6 +3,7 @@ import caveMapXml from './assets/maps/cave.tmx?raw'
 import townMapXml from './assets/maps/town.tmx?raw'
 import replyWithMessageControllerLua from './assets/lua/reply-with-message.lua?raw'
 import wanderNearHomeControllerLua from './assets/lua/wander-near-home.lua?raw'
+import vnDialogueControllerLua from './assets/lua/vn-dialogue.lua?raw'
 import huntingGroundMusicUrl from './assets/sounds/전투브금.mp3'
 import townMusicUrl from './assets/sounds/브금5.mp3'
 import questFinUrl from './assets/tilesets/quest_fin.png'
@@ -145,12 +146,16 @@ const tinyDungeonTileset = parseTiledTileset({
 const characterSpriteScale = 2
 const replyWithMessageScriptId = 'reply-with-message'
 const wanderNearHomeScriptId = 'wander-near-home'
+const vnDialogueScriptId = 'vn-dialogue'
 const availableLuaControllerScriptsById: Record<string, { source: string }> = {
   [replyWithMessageScriptId]: {
     source: replyWithMessageControllerLua
   },
   [wanderNearHomeScriptId]: {
     source: wanderNearHomeControllerLua
+  },
+  [vnDialogueScriptId]: {
+    source: vnDialogueControllerLua
   }
 }
 const sceneMaps: Record<SceneId, typeof parsedTownMap> = {
@@ -869,6 +874,16 @@ if (import.meta.hot) {
     }
 
     activeControllerRuntime.updateLuaControllerScript(wanderNearHomeScriptId, {
+      source: nextModule.default
+    })
+  })
+
+  import.meta.hot.accept('./assets/lua/vn-dialogue.lua?raw', (nextModule) => {
+    if (!nextModule || !activeControllerRuntime) {
+      return
+    }
+
+    activeControllerRuntime.updateLuaControllerScript(vnDialogueScriptId, {
       source: nextModule.default
     })
   })

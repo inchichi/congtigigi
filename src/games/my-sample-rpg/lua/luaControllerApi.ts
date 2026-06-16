@@ -69,7 +69,18 @@ export type LuaControllerShowCharacterMessageEvent = {
   durationMilliseconds: number
 }
 
-export type LuaControllerRuntimeEvent = LuaControllerShowCharacterMessageEvent
+// Lua 컨트롤러가 engine.ui.show_dialogue 로 비주얼노벨 대화창을 요청할 때 내보내는 이벤트.
+// 대사 줄 목록은 Lua 가 소유하고, 초상화/이름 같은 표현은 렌더러가 캐릭터에서 채운다.
+export type LuaControllerShowNpcDialogueEvent = {
+  kind: 'show-npc-dialogue'
+  characterId: string
+  lines: string[]
+  durationMilliseconds: number
+}
+
+export type LuaControllerRuntimeEvent =
+  | LuaControllerShowCharacterMessageEvent
+  | LuaControllerShowNpcDialogueEvent
 
 export type LuaControllerInteractionResponse = {
   message: string

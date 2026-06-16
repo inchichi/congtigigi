@@ -10,9 +10,17 @@ export type ShowCharacterMessageGameEvent = {
   durationMilliseconds: number
 }
 
+export type ShowNpcDialogueGameEvent = {
+  kind: 'show-npc-dialogue'
+  characterId: string
+  lines: string[]
+  durationMilliseconds: number
+}
+
 export type GameEvent =
   | InteractionRequestedGameEvent
   | ShowCharacterMessageGameEvent
+  | ShowNpcDialogueGameEvent
 
 export type GameEventQueue = {
   enqueue: (event: GameEvent) => void

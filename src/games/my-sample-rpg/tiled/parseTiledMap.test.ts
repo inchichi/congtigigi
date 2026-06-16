@@ -124,7 +124,7 @@ describe('parseTiledMap', () => {
       visible: true,
       properties: {
         type: 'character_bearded_apron_man',
-        'controller.scriptId': 'reply-with-message',
+        'controller.scriptId': 'vn-dialogue',
         'controller.messageDurationSeconds': 2.8,
         'controller.dialogueLines': [
           '힘세고 강한 아침, 만일 내게 물어보면 I AM 대장장이.',

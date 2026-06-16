@@ -1,8 +1,14 @@
 import type { CharacterState } from '../characterState'
 import type {
   GameEvent,
-  ShowCharacterMessageGameEvent
+  ShowCharacterMessageGameEvent,
+  ShowNpcDialogueGameEvent
 } from '../events/createGameEventQueue'
+
+// 상호작용 처리 후 렌더러로 넘기는 표시용 이벤트(말풍선 또는 비주얼노벨 대화창).
+type InteractionDisplayEvent =
+  | ShowCharacterMessageGameEvent
+  | ShowNpcDialogueGameEvent
 import type {
   CharacterControllerRuntime,
   CharacterInteractionResponse
@@ -26,10 +32,11 @@ export const processInteractionEvents = ({
   controllerRuntime,
   now,
   interactionLockUntilByCharacterPair
-}: ProcessInteractionEventsInput): ShowCharacterMessageGameEvent[] => {
-  const emittedEvents = events.filter(
-    (event): event is ShowCharacterMessageGameEvent =>
-      event.kind === 'show-character-message'
+}: ProcessInteractionEventsInput): InteractionDisplayEvent[] => {
+  const emittedEvents: InteractionDisplayEvent[] = events.filter(
+    (event): event is InteractionDisplayEvent =>
+      event.kind === 'show-character-message' ||
+      event.kind === 'show-npc-dialogue'
   )
 
   for (const event of events) {
@@ -115,7 +122,7 @@ const createShowCharacterMessageEvent = (
 })
 
 const getMaxMessageEventDuration = (
-  events: ShowCharacterMessageGameEvent[]
+  events: InteractionDisplayEvent[]
 ): number =>
   events.reduce(
     (maxDurationMilliseconds, event) =>

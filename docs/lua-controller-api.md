@@ -59,6 +59,21 @@ Rules:
 - Lua does not render the bubble directly
 - the runtime converts this request into a shared game event, and TypeScript decides how to render it
 
+### `engine.ui.show_dialogue`
+
+```lua
+engine.ui.show_dialogue(lines, duration_seconds)
+```
+
+Rules:
+
+- requests a full visual-novel dialogue panel for the current controller's character, instead of a head-top bubble
+- `lines` must be a table (array) of strings; empty/whitespace-only entries are dropped, and the call is ignored if nothing remains
+- `duration_seconds` is optional and only controls the interaction re-trigger lock (the panel itself stays open until the player advances/closes it)
+- Lua owns the dialogue content; TypeScript fills the portrait/name from the character and decides presentation
+- the runtime converts this into a shared `show-npc-dialogue` game event
+- portraits are bound on the TypeScript side per character id; a character with no registered portrait still shows the panel with text only
+
 ## Controller Module Shape
 
 Each Lua controller script must return one controller table.

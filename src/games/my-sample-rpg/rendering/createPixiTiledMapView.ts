@@ -165,6 +165,8 @@ import { createPlayerStatOverlay } from './createPlayerStatOverlay'
 import { createPlayerSkillOverlay } from './createPlayerSkillOverlay'
 import { createNpcDialogueOverlay } from './createNpcDialogueOverlay'
 import blacksmithPortraitUrl from '../assets/portraits/blacksmith-mozarchan.png'
+import potionMerchantPortraitUrl from '../assets/portraits/potion-merchant.png'
+import santaPortraitUrl from '../assets/portraits/santa.png'
 import type { MonsterAnimationTextures } from './monsterAnimationTextures'
 import { loadMonsterPigAnimationTextures } from './loadMonsterPigAnimationTextures'
 import { loadMonsterSlimeAnimationTextures } from './loadMonsterSlimeAnimationTextures'
@@ -500,20 +502,11 @@ const POTION_SHOP_NPC_ID = 'potion_merchant'
 // 비주얼노벨 대화창을 쓰는 NPC → 초상화 이미지. 여기 등록된 NPC 는 머리 위 말풍선 대신
 // 하단 대화창으로 대사를 보여준다. (우선 대장장이 모차르찬부터)
 const NPC_PORTRAITS: Record<string, string> = {
-  [BLACKSMITH_SHOP_NPC_ID]: blacksmithPortraitUrl
+  [BLACKSMITH_SHOP_NPC_ID]: blacksmithPortraitUrl,
+  [POTION_SHOP_NPC_ID]: potionMerchantPortraitUrl,
+  santa: santaPortraitUrl
 }
 
-// 캐릭터의 Lua 컨트롤러 config 에 실린 대사 목록을 안전하게 읽는다.
-const getNpcDialogueLines = (character: CharacterState): string[] => {
-  if (character.controller.kind !== 'lua') {
-    return []
-  }
-  const value = character.controller.config.dialogueLines
-  if (Array.isArray(value)) {
-    return value.filter((line): line is string => typeof line === 'string')
-  }
-  return []
-}
 const SIGN_POST_APPEARANCE_TYPE = 'sign_inn'
 const MONSTER_PIG_APPEARANCE_TYPE = 'monster_pig'
 const MONSTER_SLIME_APPEARANCE_TYPE = 'monster_slime'
@@ -5616,33 +5609,29 @@ export const createPixiTiledMapView = async ({
       })
 
       for (const event of emittedEvents) {
-        if (event.kind !== 'show-character-message') {
-          continue
-        }
-
-        if (event.characterId === POTION_SHOP_NPC_ID) {
-          hideCharacterMessage(event.characterId)
-          setPotionShopOpen(true)
-          continue
-        }
-
-        const npcPortraitUrl = NPC_PORTRAITS[event.characterId]
-        if (npcPortraitUrl) {
-          // 비주얼노벨 대화창으로 표시: 머리 위 말풍선은 숨기고, 대화가 다 끝나면(대장장이) 상점을 연다.
+        if (event.kind === 'show-npc-dialogue') {
+          // Lua 컨트롤러(vn-dialogue)가 요청한 비주얼노벨 대화창. 대사는 Lua 가 보내고,
+          // 초상화/이름은 캐릭터에서 채운다. 대화가 다 끝나면 해당 NPC 의 상점을 연다.
           hideCharacterMessage(event.characterId)
           if (!npcDialogueOverlay.isOpen()) {
             const portraitCharacter = getCharacterStateById(event.characterId)
-            const dialogueLines = getNpcDialogueLines(portraitCharacter)
-            npcDialogueOverlay.show({
-              portraitUrl: npcPortraitUrl,
-              name: portraitCharacter.displayText ?? '',
-              lines: dialogueLines.length > 0 ? dialogueLines : [event.message],
-              onComplete:
-                event.characterId === BLACKSMITH_SHOP_NPC_ID
-                  ? () => setBlacksmithShopOpen(true)
+            const openShopOnComplete =
+              event.characterId === BLACKSMITH_SHOP_NPC_ID
+                ? () => setBlacksmithShopOpen(true)
+                : event.characterId === POTION_SHOP_NPC_ID
+                  ? () => setPotionShopOpen(true)
                   : undefined
+            npcDialogueOverlay.show({
+              portraitUrl: NPC_PORTRAITS[event.characterId] ?? '',
+              name: portraitCharacter.displayText ?? '',
+              lines: event.lines,
+              onComplete: openShopOnComplete
             })
           }
+          continue
+        }
+
+        if (event.kind !== 'show-character-message') {
           continue
         }
 
@@ -5665,9 +5654,6 @@ export const createPixiTiledMapView = async ({
           )
         }
 
-        if (event.characterId === BLACKSMITH_SHOP_NPC_ID) {
-          setBlacksmithShopOpen(true)
-        }
       }
 
       pruneExpiredCharacterMessages(now)

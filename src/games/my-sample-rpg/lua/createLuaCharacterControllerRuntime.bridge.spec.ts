@@ -10,11 +10,11 @@ import {
 import { createLuaCharacterControllerRuntime } from './createLuaCharacterControllerRuntime'
 
 const LUA_MODULE_JS_URL = new URL(
-  '../../../public/vendor/lua/lua-5.3.6.mjs',
+  '../../../../public/vendor/lua/lua-5.3.6.mjs',
   import.meta.url
 )
 const LUA_MODULE_WASM_URL = new URL(
-  '../../../public/vendor/lua/lua-5.3.6.wasm',
+  '../../../../public/vendor/lua/lua-5.3.6.wasm',
   import.meta.url
 )
 const BRIDGE_SCRIPT_ID = 'bridge-test'
@@ -220,6 +220,88 @@ end
           characterId: character.id,
           message: 'Hello, player!',
           durationMilliseconds: 2250
+        }
+      ])
+    } finally {
+      runtime.destroy()
+    }
+  })
+
+  it('drains a show-npc-dialogue event emitted through engine.ui.show_dialogue', async () => {
+    const runtime = await createBridgeRuntime({
+      source: createControllerModuleSource(`
+function controller.register(id, home_x, home_y, radius)
+end
+
+function controller.step(id, dt, x, y)
+  return 0, 0
+end
+
+function controller.interact(id, source_id)
+  engine.ui.show_dialogue({ "첫 번째 줄", "", "두 번째 줄" }, 2.8)
+end
+`)
+    })
+    const character = createBridgeCharacter()
+    const player = createInitialPlayerCharacter({
+      mapWidth: 20,
+      mapHeight: 20
+    })
+
+    try {
+      runtime.attachCharacter(character, character.controller)
+
+      expect(
+        runtime.handleInteraction(character, character.controller, player)
+      ).toBeUndefined()
+      // 빈 줄은 걸러지고, 대사 묶음 전체가 한 이벤트로 전달된다.
+      expect(runtime.drainEvents()).toEqual([
+        {
+          kind: 'show-npc-dialogue',
+          characterId: character.id,
+          lines: ['첫 번째 줄', '두 번째 줄'],
+          durationMilliseconds: 2800
+        }
+      ])
+    } finally {
+      runtime.destroy()
+    }
+  })
+
+  it('round-trips quotes, newlines, and multi-byte characters through event marshaling', async () => {
+    const runtime = await createBridgeRuntime({
+      source: createControllerModuleSource(`
+function controller.register(id, home_x, home_y, radius)
+end
+
+function controller.step(id, dt, x, y)
+  return 0, 0
+end
+
+function controller.interact(id, source_id)
+  engine.ui.show_message("\\"인용\\" / 줄1\\n줄2 / \\\\끝", 1.5)
+end
+`)
+    })
+    const character = createBridgeCharacter()
+    const player = createInitialPlayerCharacter({
+      mapWidth: 20,
+      mapHeight: 20
+    })
+
+    try {
+      runtime.attachCharacter(character, character.controller)
+
+      expect(
+        runtime.handleInteraction(character, character.controller, player)
+      ).toBeUndefined()
+      // 따옴표/개행/역슬래시/한글이 Lua→JSON→JS 왕복에서 그대로 보존된다.
+      expect(runtime.drainEvents()).toEqual([
+        {
+          kind: 'show-character-message',
+          characterId: character.id,
+          message: '"인용" / 줄1\n줄2 / \\끝',
+          durationMilliseconds: 1500
         }
       ])
     } finally {
