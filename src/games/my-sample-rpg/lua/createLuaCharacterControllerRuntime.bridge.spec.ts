@@ -10,6 +10,15 @@ import {
 import { createLuaCharacterControllerRuntime } from './createLuaCharacterControllerRuntime'
 import { serializeToLuaDataModule } from './questCatalogLua'
 import { QUEST_DEFINITIONS } from '../questLog'
+import {
+  MONSTER_REWARDS_LUA,
+  createLuaMonsterRewards
+} from '../monsterRewardsLua'
+import {
+  getMonsterExperienceDropAmount,
+  getMonsterGoldDropAmount,
+  getMonsterSkillPointDropAmount
+} from '../monsterRewards'
 
 const LUA_MODULE_JS_URL = new URL(
   '../../../../public/vendor/lua/lua-5.3.6.mjs',
@@ -497,6 +506,41 @@ end
       const luaSource = serializeToLuaDataModule(QUEST_DEFINITIONS)
       const loaded = runtime.loadDataModule(luaSource)
       expect(loaded).toEqual(QUEST_DEFINITIONS)
+    } finally {
+      runtime.destroy()
+    }
+  })
+
+  it('runs monster-reward game rules in Lua with parity to the TS reference', async () => {
+    const runtime = await createBridgeRuntime({
+      source: createControllerModuleSource(`
+function controller.step(id, dt, x, y)
+  return 0, 0
+end
+`)
+    })
+
+    try {
+      // (1) 규칙이 실제로 Lua 에서 실행됨을 직접 확인(폴백 우회).
+      expect(
+        runtime.loadDataModule(`${MONSTER_REWARDS_LUA}\nreturn monster_gold_drop(7)`)
+      ).toBe(10 + 7 * 4)
+
+      // (2) 호스트 호출부가 쓰는 팩토리가 TS 기준과 모든 레벨에서 동일.
+      const luaRewards = createLuaMonsterRewards((source) =>
+        runtime.loadDataModule(source)
+      )
+      for (const level of [1, 2, 5, 10, 20, 50]) {
+        expect(luaRewards.getMonsterGoldDropAmount(level)).toBe(
+          getMonsterGoldDropAmount(level)
+        )
+        expect(luaRewards.getMonsterExperienceDropAmount(level)).toBe(
+          getMonsterExperienceDropAmount(level)
+        )
+        expect(luaRewards.getMonsterSkillPointDropAmount(level)).toBe(
+          getMonsterSkillPointDropAmount(level)
+        )
+      }
     } finally {
       runtime.destroy()
     }

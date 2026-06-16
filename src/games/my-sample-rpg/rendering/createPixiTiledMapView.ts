@@ -127,11 +127,7 @@ import {
   isMonsterDefeated,
   type MonsterCombatState
 } from '../monsterCombat'
-import {
-  getMonsterExperienceDropAmount,
-  getMonsterGoldDropAmount,
-  getMonsterSkillPointDropAmount
-} from '../monsterRewards'
+import { createLuaMonsterRewards } from '../monsterRewardsLua'
 import { resolveCharacterInteractionTarget } from '../interaction/resolveCharacterInteractionTarget'
 import {
   createMapPortalsFromEventLayers,
@@ -1127,6 +1123,10 @@ export const createPixiTiledMapView = async ({
   let currentQuestLog = questLog
   // Phase 2 읽기 채널: 마지막으로 Lua 에 밀어넣은 스냅샷(변경 시에만 재푸시하기 위한 dirty 체크).
   let lastPushedSnapshotJson = ''
+  // 게임 규칙(몬스터 보상)을 Lua 로 실행한다(Lua 불가 시 TS 폴백). 호출부 시그니처는 동일.
+  const monsterRewards = createLuaMonsterRewards((source) =>
+    controllerRuntime.loadDataModule(source)
+  )
   let currentBlacksmithInventory = merchantInventory
   let currentPotionMerchantInventory = potionMerchantInventory
   let playerAttackStartedAtMilliseconds: number | undefined
@@ -4410,7 +4410,7 @@ export const createPixiTiledMapView = async ({
       monsterContactDamageLockedUntilById.delete(characterId)
       monsterPigAnimationModes.delete(characterId)
       monsterPigBehaviorStates.delete(characterId)
-      const experienceReward = getMonsterExperienceDropAmount(
+      const experienceReward = monsterRewards.getMonsterExperienceDropAmount(
         character.level ?? 1
       )
       grantPlayerExperienceReward(experienceReward)
@@ -4422,7 +4422,7 @@ export const createPixiTiledMapView = async ({
           character.position.y * map.tileHeight +
           (character.collisionSize.height * map.tileHeight) / 2
       }
-      const skillPointReward = getMonsterSkillPointDropAmount(
+      const skillPointReward = monsterRewards.getMonsterSkillPointDropAmount(
         character.level ?? 1
       )
       Object.assign(
@@ -4438,7 +4438,7 @@ export const createPixiTiledMapView = async ({
       } else {
         spawnMonsterGoldDrop(
           characterId,
-          getMonsterGoldDropAmount(character.level ?? 1),
+          monsterRewards.getMonsterGoldDropAmount(character.level ?? 1),
           dropPosition,
           now
         )
