@@ -164,6 +164,7 @@ import { createPlayerInventoryOverlay } from './createPlayerInventoryOverlay'
 import { createPlayerStatOverlay } from './createPlayerStatOverlay'
 import { createPlayerSkillOverlay } from './createPlayerSkillOverlay'
 import { createNpcDialogueOverlay } from './createNpcDialogueOverlay'
+import { buildLuaRuntimeSnapshot } from '../lua/buildLuaRuntimeSnapshot'
 import blacksmithPortraitUrl from '../assets/portraits/blacksmith-mozarchan.png'
 import potionMerchantPortraitUrl from '../assets/portraits/potion-merchant.png'
 import santaPortraitUrl from '../assets/portraits/santa.png'
@@ -1123,6 +1124,8 @@ export const createPixiTiledMapView = async ({
   let currentPlayerControlBindings = playerControlBindings
   const triggeredSkillSlotIndexes = new Set<number>()
   let currentQuestLog = questLog
+  // Phase 2 읽기 채널: 마지막으로 Lua 에 밀어넣은 스냅샷(변경 시에만 재푸시하기 위한 dirty 체크).
+  let lastPushedSnapshotJson = ''
   let currentBlacksmithInventory = merchantInventory
   let currentPotionMerchantInventory = potionMerchantInventory
   let playerAttackStartedAtMilliseconds: number | undefined
@@ -5594,6 +5597,19 @@ export const createPixiTiledMapView = async ({
       resolveMonsterEquipmentDropPickups()
       syncActiveMonsterGoldDrops(now)
       syncActiveMonsterEquipmentDrops(now)
+
+      // Phase 2 읽기 채널: 게임의 권위 있는 상태를 Lua 가 읽도록(변경 시에만) 밀어넣는다.
+      const runtimeSnapshot = buildLuaRuntimeSnapshot({
+        questLog: currentQuestLog,
+        inventory: currentPlayerInventory,
+        profile: playerProfile,
+        sceneId
+      })
+      const runtimeSnapshotJson = JSON.stringify(runtimeSnapshot)
+      if (runtimeSnapshotJson !== lastPushedSnapshotJson) {
+        controllerRuntime.pushSnapshot(runtimeSnapshot)
+        lastPushedSnapshotJson = runtimeSnapshotJson
+      }
 
       const interactionEvents = handleQuestInteractionEvents(
         gameEventQueue.drain(),

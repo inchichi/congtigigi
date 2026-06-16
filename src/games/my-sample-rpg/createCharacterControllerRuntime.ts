@@ -7,7 +7,8 @@ import {
 } from './characterState'
 import type {
   LuaCharacterControllerRuntime,
-  LuaControllerScriptSource
+  LuaControllerScriptSource,
+  LuaRuntimeSnapshot
 } from './lua/createLuaCharacterControllerRuntime'
 import type { LuaControllerRuntimeEvent } from './lua/luaControllerApi'
 
@@ -51,6 +52,7 @@ export type CharacterControllerRuntime = {
     scriptId: string,
     script: LuaControllerScriptSource
   ) => void
+  pushSnapshot: (snapshot: LuaRuntimeSnapshot) => void
   destroy: () => void
 }
 
@@ -144,6 +146,9 @@ export const createCharacterControllerRuntime = ({
     getRuntimeWarnings: () => luaControllerRuntime?.getActiveErrorMessages() ?? [],
     updateLuaControllerScript: (scriptId, script) => {
       luaControllerRuntime?.updateScript(scriptId, script)
+    },
+    pushSnapshot: (snapshot) => {
+      luaControllerRuntime?.pushSnapshot(snapshot)
     },
     destroy: () => {
       if (isDestroyed) {

@@ -309,6 +309,100 @@ end
     }
   })
 
+  it('reads a host-pushed snapshot through engine quest/inventory/player/scene queries', async () => {
+    const runtime = await createBridgeRuntime({
+      source: createControllerModuleSource(`
+function controller.register(id, home_x, home_y, radius)
+end
+
+function controller.step(id, dt, x, y)
+  return 0, 0
+end
+
+function controller.interact(id, source_id)
+  local status = engine.quest.get_status("q001")
+  local unlocked = engine.quest.is_unlocked("q001")
+  local potions = engine.inventory.get_item_count("potion_hp")
+  local stats = engine.player.get_stats()
+  local scene = engine.scene.get_current_id()
+  engine.ui.show_message(
+    status
+      .. "/" .. tostring(unlocked)
+      .. "/" .. string.format("%d", potions)
+      .. "/" .. stats.name
+      .. "/lv" .. string.format("%d", stats.level)
+      .. "/" .. scene,
+    1.0
+  )
+end
+`)
+    })
+    const character = createBridgeCharacter()
+    const player = createInitialPlayerCharacter({ mapWidth: 20, mapHeight: 20 })
+
+    try {
+      runtime.attachCharacter(character, character.controller)
+      runtime.pushSnapshot({
+        strings: { 'q:status:q001': 'active', 'p:name': '리븐', 'scene:id': 'town' },
+        numbers: { 'inv:potion_hp': 3, 'p:level': 7 },
+        booleans: { 'q:unlocked:q001': true }
+      })
+
+      expect(
+        runtime.handleInteraction(character, character.controller, player)
+      ).toBeUndefined()
+      expect(runtime.drainEvents()).toEqual([
+        {
+          kind: 'show-character-message',
+          characterId: character.id,
+          message: 'active/true/3/리븐/lv7/town',
+          durationMilliseconds: 1000
+        }
+      ])
+    } finally {
+      runtime.destroy()
+    }
+  })
+
+  it('returns snapshot defaults when nothing has been pushed', async () => {
+    const runtime = await createBridgeRuntime({
+      source: createControllerModuleSource(`
+function controller.step(id, dt, x, y)
+  return 0, 0
+end
+
+function controller.interact(id, source_id)
+  engine.ui.show_message(
+    engine.quest.get_status("q001")
+      .. "/" .. tostring(engine.quest.is_unlocked("q001"))
+      .. "/" .. string.format("%d", engine.inventory.get_item_count("potion_hp"))
+      .. "/[" .. engine.scene.get_current_id() .. "]",
+    1.0
+  )
+end
+`)
+    })
+    const character = createBridgeCharacter()
+    const player = createInitialPlayerCharacter({ mapWidth: 20, mapHeight: 20 })
+
+    try {
+      runtime.attachCharacter(character, character.controller)
+      expect(
+        runtime.handleInteraction(character, character.controller, player)
+      ).toBeUndefined()
+      expect(runtime.drainEvents()).toEqual([
+        {
+          kind: 'show-character-message',
+          characterId: character.id,
+          message: 'not_started/false/0/[]',
+          durationMilliseconds: 1000
+        }
+      ])
+    } finally {
+      runtime.destroy()
+    }
+  })
+
   it('exposes TMX-backed controller config through engine.self', async () => {
     const runtime = await createBridgeRuntime({
       source: createControllerModuleSource(`

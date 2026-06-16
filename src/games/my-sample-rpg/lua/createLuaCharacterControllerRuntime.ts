@@ -93,6 +93,15 @@ type LuaModule = {
   UTF8ToString: (pointer: number) => string
 }
 
+// Phase 2 읽기 채널: 호스트가 Lua 에 밀어넣는 전역 스냅샷. 평면 키 → 타입별 값.
+// 키 규약: 'q:status:<questId>', 'q:unlocked:<questId>', 'q:obj:<questId>:<objId>',
+// 'inv:<itemId>', 'p:name'|'p:level'|'p:hp'|'p:max_hp'|'p:gold', 'scene:id'.
+export type LuaRuntimeSnapshot = {
+  strings: Record<string, string>
+  numbers: Record<string, number>
+  booleans: Record<string, boolean>
+}
+
 export type LuaCharacterControllerRuntime = {
   attachCharacter: (
     character: CharacterState,
@@ -119,6 +128,7 @@ export type LuaCharacterControllerRuntime = {
   drainEvents: () => LuaControllerRuntimeEvent[]
   getActiveErrorMessages: () => string[]
   updateScript: (scriptId: string, script: LuaControllerScriptSource) => void
+  pushSnapshot: (snapshot: LuaRuntimeSnapshot) => void
   destroy: () => void
 }
 
@@ -159,6 +169,14 @@ const LUA_CONTROLLER_APPEND_CONFIG_BOOLEAN_LIST_ITEM_HELPER_FUNCTION_NAME =
   '__engine_append_controller_config_boolean_list_item'
 const LUA_CONTROLLER_REMOVE_CONFIG_HELPER_FUNCTION_NAME =
   '__engine_remove_controller_config'
+// Phase 2: 호스트→Lua 전역 스냅샷(읽기 채널). config 주입과 같은 typed-setter 방식.
+const LUA_CONTROLLER_RESET_SNAPSHOT_HELPER_FUNCTION_NAME = '__engine_reset_snapshot'
+const LUA_CONTROLLER_SET_SNAPSHOT_STRING_HELPER_FUNCTION_NAME =
+  '__engine_set_snapshot_string'
+const LUA_CONTROLLER_SET_SNAPSHOT_NUMBER_HELPER_FUNCTION_NAME =
+  '__engine_set_snapshot_number'
+const LUA_CONTROLLER_SET_SNAPSHOT_BOOLEAN_HELPER_FUNCTION_NAME =
+  '__engine_set_snapshot_boolean'
 const LUA_CONTROLLER_DRAIN_EVENTS_FUNCTION_NAME = '__engine_drain_events_json'
 const LUA_CONTROLLER_RUNTIME_HOST_API_SOURCE = `
 local runtime = {
@@ -166,7 +184,8 @@ local runtime = {
   current_source_character_id = nil,
   queued_events = {},
   controllers_by_script_id = {},
-  controller_config_by_character_id = {}
+  controller_config_by_character_id = {},
+  snapshot = {}
 }
 
 local function escape_json_string(value)
@@ -538,6 +557,71 @@ function ${LUA_CONTROLLER_PUBLIC_API_NAME}.ui.show_dialogue(lines, duration_seco
     duration_milliseconds = get_duration_milliseconds(duration_seconds)
   }
 end
+
+-- Phase 2 읽기 채널: 호스트가 매 변경 시 전역 스냅샷(평면 키)을 밀어넣고, Lua 는 그걸 읽는다.
+function ${LUA_CONTROLLER_RESET_SNAPSHOT_HELPER_FUNCTION_NAME}()
+  runtime.snapshot = {}
+end
+
+function ${LUA_CONTROLLER_SET_SNAPSHOT_STRING_HELPER_FUNCTION_NAME}(key, value)
+  runtime.snapshot[key] = tostring(value)
+end
+
+function ${LUA_CONTROLLER_SET_SNAPSHOT_NUMBER_HELPER_FUNCTION_NAME}(key, value)
+  runtime.snapshot[key] = value
+end
+
+function ${LUA_CONTROLLER_SET_SNAPSHOT_BOOLEAN_HELPER_FUNCTION_NAME}(key, numeric_boolean)
+  runtime.snapshot[key] = numeric_boolean ~= 0
+end
+
+${LUA_CONTROLLER_PUBLIC_API_NAME}.quest = ${LUA_CONTROLLER_PUBLIC_API_NAME}.quest or {}
+${LUA_CONTROLLER_PUBLIC_API_NAME}.inventory = ${LUA_CONTROLLER_PUBLIC_API_NAME}.inventory or {}
+${LUA_CONTROLLER_PUBLIC_API_NAME}.player = ${LUA_CONTROLLER_PUBLIC_API_NAME}.player or {}
+${LUA_CONTROLLER_PUBLIC_API_NAME}.scene = ${LUA_CONTROLLER_PUBLIC_API_NAME}.scene or {}
+
+function ${LUA_CONTROLLER_PUBLIC_API_NAME}.quest.get_status(quest_id)
+  local value = runtime.snapshot['q:status:' .. tostring(quest_id)]
+  if type(value) == 'string' then
+    return value
+  end
+  return 'not_started'
+end
+
+function ${LUA_CONTROLLER_PUBLIC_API_NAME}.quest.is_unlocked(quest_id)
+  return runtime.snapshot['q:unlocked:' .. tostring(quest_id)] == true
+end
+
+function ${LUA_CONTROLLER_PUBLIC_API_NAME}.quest.get_objective(quest_id, objective_id)
+  local value =
+    runtime.snapshot['q:obj:' .. tostring(quest_id) .. ':' .. tostring(objective_id)]
+  if type(value) == 'number' then
+    return value
+  end
+  return 0
+end
+
+function ${LUA_CONTROLLER_PUBLIC_API_NAME}.inventory.get_item_count(item_id)
+  local value = runtime.snapshot['inv:' .. tostring(item_id)]
+  if type(value) == 'number' then
+    return value
+  end
+  return 0
+end
+
+function ${LUA_CONTROLLER_PUBLIC_API_NAME}.player.get_stats()
+  return {
+    name = runtime.snapshot['p:name'] or '',
+    level = runtime.snapshot['p:level'] or 0,
+    hp = runtime.snapshot['p:hp'] or 0,
+    max_hp = runtime.snapshot['p:max_hp'] or 0,
+    gold = runtime.snapshot['p:gold'] or 0
+  }
+end
+
+function ${LUA_CONTROLLER_PUBLIC_API_NAME}.scene.get_current_id()
+  return runtime.snapshot['scene:id'] or ''
+end
 `
 
 export const createLuaCharacterControllerRuntime = async ({
@@ -787,6 +871,18 @@ export const createLuaCharacterControllerRuntime = async ({
         })
       }
     },
+    pushSnapshot: (snapshot) => {
+      if (isDestroyed) {
+        return
+      }
+
+      try {
+        syncSnapshotToState(lua, luaState, snapshot)
+        clearLoggedError(lastLoggedErrorByKey, 'runtime:push-snapshot')
+      } catch (error) {
+        reportLuaRuntimeError(lastLoggedErrorByKey, 'runtime:push-snapshot', error)
+      }
+    },
     destroy: () => {
       if (isDestroyed) {
         return
@@ -960,6 +1056,38 @@ const syncControllerConfigToState = (
 
   for (const [configKey, configValue] of Object.entries(config)) {
     pushControllerConfigValueToState(lua, luaState, characterId, configKey, configValue)
+  }
+}
+
+// Phase 2: 전역 스냅샷을 Lua 로 밀어넣는다(읽기 채널). config 와 동일한 typed-setter 호출.
+const syncSnapshotToState = (
+  lua: LuaModule,
+  luaState: number,
+  snapshot: LuaRuntimeSnapshot
+) => {
+  callLuaFunction(lua, luaState, LUA_CONTROLLER_RESET_SNAPSHOT_HELPER_FUNCTION_NAME, [])
+
+  for (const [key, value] of Object.entries(snapshot.strings)) {
+    callLuaFunction(lua, luaState, LUA_CONTROLLER_SET_SNAPSHOT_STRING_HELPER_FUNCTION_NAME, [
+      key,
+      value
+    ])
+  }
+
+  for (const [key, value] of Object.entries(snapshot.numbers)) {
+    callLuaFunction(lua, luaState, LUA_CONTROLLER_SET_SNAPSHOT_NUMBER_HELPER_FUNCTION_NAME, [
+      key,
+      value
+    ])
+  }
+
+  for (const [key, value] of Object.entries(snapshot.booleans)) {
+    callLuaFunction(
+      lua,
+      luaState,
+      LUA_CONTROLLER_SET_SNAPSHOT_BOOLEAN_HELPER_FUNCTION_NAME,
+      [key, value ? 1 : 0]
+    )
   }
 }
 
