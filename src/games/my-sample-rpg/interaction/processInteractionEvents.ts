@@ -1,18 +1,18 @@
 import type { CharacterState } from '../characterState'
 import type {
   GameEvent,
-  ShowCharacterMessageGameEvent,
-  ShowNpcDialogueGameEvent
+  ShowCharacterMessageGameEvent
 } from '../events/createGameEventQueue'
 
-// 상호작용 처리 후 렌더러로 넘기는 표시용 이벤트(말풍선 또는 비주얼노벨 대화창).
-type InteractionDisplayEvent =
-  | ShowCharacterMessageGameEvent
-  | ShowNpcDialogueGameEvent
+import type { LuaControllerRuntimeEvent } from '../lua/luaControllerApi'
 import type {
   CharacterControllerRuntime,
   CharacterInteractionResponse
 } from '../createCharacterControllerRuntime'
+
+// 상호작용 처리 후 렌더러로 넘기는 이벤트: 표시용(말풍선/대화창) + Phase 3 액션(request-*/set-config).
+// 런타임 이벤트 유니온과 동일하다(렌더러가 kind 로 분기해 표시 또는 reducer 적용).
+type InteractionEmittedEvent = LuaControllerRuntimeEvent
 import { resolveCharacterInteractionTarget } from './resolveCharacterInteractionTarget'
 
 type ProcessInteractionEventsInput = {
@@ -32,11 +32,10 @@ export const processInteractionEvents = ({
   controllerRuntime,
   now,
   interactionLockUntilByCharacterPair
-}: ProcessInteractionEventsInput): InteractionDisplayEvent[] => {
-  const emittedEvents: InteractionDisplayEvent[] = events.filter(
-    (event): event is InteractionDisplayEvent =>
-      event.kind === 'show-character-message' ||
-      event.kind === 'show-npc-dialogue'
+}: ProcessInteractionEventsInput): InteractionEmittedEvent[] => {
+  const emittedEvents: InteractionEmittedEvent[] = events.filter(
+    (event): event is InteractionEmittedEvent =>
+      event.kind !== 'interaction-requested'
   )
 
   for (const event of events) {
@@ -122,11 +121,14 @@ const createShowCharacterMessageEvent = (
 })
 
 const getMaxMessageEventDuration = (
-  events: InteractionDisplayEvent[]
+  events: InteractionEmittedEvent[]
 ): number =>
   events.reduce(
     (maxDurationMilliseconds, event) =>
-      Math.max(maxDurationMilliseconds, event.durationMilliseconds),
+      Math.max(
+        maxDurationMilliseconds,
+        'durationMilliseconds' in event ? event.durationMilliseconds : 0
+      ),
     0
   )
 

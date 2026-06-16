@@ -59,7 +59,40 @@ const EVENT_PARSERS: Record<string, RuntimeEventParser> = {
     }
 
     return event
-  }
+  },
+  'request-quest-start': (raw) =>
+    typeof raw.questId === 'string'
+      ? { kind: 'request-quest-start', questId: raw.questId }
+      : undefined,
+  'request-quest-progress': (raw) =>
+    typeof raw.questId === 'string' &&
+    typeof raw.objectiveId === 'string' &&
+    isFiniteNumber(raw.amount)
+      ? {
+          kind: 'request-quest-progress',
+          questId: raw.questId,
+          objectiveId: raw.objectiveId,
+          amount: raw.amount
+        }
+      : undefined,
+  'request-quest-complete': (raw) =>
+    typeof raw.questId === 'string'
+      ? { kind: 'request-quest-complete', questId: raw.questId }
+      : undefined,
+  'request-inventory-add': (raw) =>
+    typeof raw.itemId === 'string' && isFiniteNumber(raw.quantity)
+      ? { kind: 'request-inventory-add', itemId: raw.itemId, quantity: raw.quantity }
+      : undefined,
+  'request-inventory-remove': (raw) =>
+    typeof raw.itemId === 'string' && isFiniteNumber(raw.quantity)
+      ? { kind: 'request-inventory-remove', itemId: raw.itemId, quantity: raw.quantity }
+      : undefined,
+  'set-config': (raw) =>
+    typeof raw.characterId === 'string' &&
+    typeof raw.key === 'string' &&
+    typeof raw.value === 'string'
+      ? { kind: 'set-config', characterId: raw.characterId, key: raw.key, value: raw.value }
+      : undefined
 }
 
 export const parseLuaControllerRuntimeEvents = (

@@ -237,6 +237,42 @@ local function encode_runtime_event(event)
       .. '}'
   end
 
+  if event.kind == 'request-quest-start' then
+    return '{"kind":"request-quest-start","questId":'
+      .. escape_json_string(event.quest_id) .. '}'
+  end
+
+  if event.kind == 'request-quest-progress' then
+    return '{"kind":"request-quest-progress","questId":'
+      .. escape_json_string(event.quest_id)
+      .. ',"objectiveId":' .. escape_json_string(event.objective_id)
+      .. ',"amount":' .. tostring(event.amount) .. '}'
+  end
+
+  if event.kind == 'request-quest-complete' then
+    return '{"kind":"request-quest-complete","questId":'
+      .. escape_json_string(event.quest_id) .. '}'
+  end
+
+  if event.kind == 'request-inventory-add' then
+    return '{"kind":"request-inventory-add","itemId":'
+      .. escape_json_string(event.item_id)
+      .. ',"quantity":' .. tostring(event.quantity) .. '}'
+  end
+
+  if event.kind == 'request-inventory-remove' then
+    return '{"kind":"request-inventory-remove","itemId":'
+      .. escape_json_string(event.item_id)
+      .. ',"quantity":' .. tostring(event.quantity) .. '}'
+  end
+
+  if event.kind == 'set-config' then
+    return '{"kind":"set-config","characterId":'
+      .. escape_json_string(event.character_id)
+      .. ',"key":' .. escape_json_string(event.key)
+      .. ',"value":' .. escape_json_string(event.value) .. '}'
+  end
+
   error('Unsupported engine runtime event kind: ' .. tostring(event.kind))
 end
 
@@ -621,6 +657,73 @@ end
 
 function ${LUA_CONTROLLER_PUBLIC_API_NAME}.scene.get_current_id()
   return runtime.snapshot['scene:id'] or ''
+end
+
+-- Phase 3 쓰기 채널: 정수 수량/증가량 정규화(유효하지 않으면 1).
+local function get_event_amount(value)
+  if
+    type(value) == 'number'
+    and value == value
+    and value ~= math.huge
+    and value ~= -math.huge
+  then
+    return math.floor(value)
+  end
+  return 1
+end
+
+function ${LUA_CONTROLLER_PUBLIC_API_NAME}.quest.request_start(quest_id)
+  if quest_id == nil then return end
+  runtime.queued_events[#runtime.queued_events + 1] = {
+    kind = 'request-quest-start',
+    quest_id = tostring(quest_id)
+  }
+end
+
+function ${LUA_CONTROLLER_PUBLIC_API_NAME}.quest.request_progress(quest_id, objective_id, amount)
+  if quest_id == nil or objective_id == nil then return end
+  runtime.queued_events[#runtime.queued_events + 1] = {
+    kind = 'request-quest-progress',
+    quest_id = tostring(quest_id),
+    objective_id = tostring(objective_id),
+    amount = get_event_amount(amount)
+  }
+end
+
+function ${LUA_CONTROLLER_PUBLIC_API_NAME}.quest.request_complete(quest_id)
+  if quest_id == nil then return end
+  runtime.queued_events[#runtime.queued_events + 1] = {
+    kind = 'request-quest-complete',
+    quest_id = tostring(quest_id)
+  }
+end
+
+function ${LUA_CONTROLLER_PUBLIC_API_NAME}.inventory.request_add(item_id, quantity)
+  if item_id == nil then return end
+  runtime.queued_events[#runtime.queued_events + 1] = {
+    kind = 'request-inventory-add',
+    item_id = tostring(item_id),
+    quantity = get_event_amount(quantity)
+  }
+end
+
+function ${LUA_CONTROLLER_PUBLIC_API_NAME}.inventory.request_remove(item_id, quantity)
+  if item_id == nil then return end
+  runtime.queued_events[#runtime.queued_events + 1] = {
+    kind = 'request-inventory-remove',
+    item_id = tostring(item_id),
+    quantity = get_event_amount(quantity)
+  }
+end
+
+function ${LUA_CONTROLLER_PUBLIC_API_NAME}.self.set_config(key, value)
+  if key == nil then return end
+  runtime.queued_events[#runtime.queued_events + 1] = {
+    kind = 'set-config',
+    character_id = require_current_character_id(),
+    key = tostring(key),
+    value = tostring(value)
+  }
 end
 `
 

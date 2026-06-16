@@ -403,6 +403,54 @@ end
     }
   })
 
+  it('emits Phase 3 action events through the write-channel engine APIs', async () => {
+    const runtime = await createBridgeRuntime({
+      source: createControllerModuleSource(`
+function controller.step(id, dt, x, y)
+  return 0, 0
+end
+
+function controller.interact(id, source_id)
+  engine.quest.request_start("q001")
+  engine.quest.request_progress("q001", "defeat-slimes", 2)
+  engine.quest.request_complete("q001")
+  engine.inventory.request_add("potion_hp", 3)
+  engine.inventory.request_remove("gold_coin", 1)
+  engine.self.set_config("already_greeted", "true")
+end
+`)
+    })
+    const character = createBridgeCharacter()
+    const player = createInitialPlayerCharacter({ mapWidth: 20, mapHeight: 20 })
+
+    try {
+      runtime.attachCharacter(character, character.controller)
+      expect(
+        runtime.handleInteraction(character, character.controller, player)
+      ).toBeUndefined()
+      expect(runtime.drainEvents()).toEqual([
+        { kind: 'request-quest-start', questId: 'q001' },
+        {
+          kind: 'request-quest-progress',
+          questId: 'q001',
+          objectiveId: 'defeat-slimes',
+          amount: 2
+        },
+        { kind: 'request-quest-complete', questId: 'q001' },
+        { kind: 'request-inventory-add', itemId: 'potion_hp', quantity: 3 },
+        { kind: 'request-inventory-remove', itemId: 'gold_coin', quantity: 1 },
+        {
+          kind: 'set-config',
+          characterId: character.id,
+          key: 'already_greeted',
+          value: 'true'
+        }
+      ])
+    } finally {
+      runtime.destroy()
+    }
+  })
+
   it('exposes TMX-backed controller config through engine.self', async () => {
     const runtime = await createBridgeRuntime({
       source: createControllerModuleSource(`

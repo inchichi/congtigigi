@@ -78,9 +78,49 @@ export type LuaControllerShowNpcDialogueEvent = {
   durationMilliseconds: number
 }
 
+// Phase 3 쓰기 채널: Lua 가 호스트에 상태 변경을 "요청"하는 액션 이벤트.
+// 실제 적용(APPLY)은 호스트의 기존 순수 reducer 가 담당한다(Lua=요청, TS=적용).
+export type LuaControllerRequestQuestStartEvent = {
+  kind: 'request-quest-start'
+  questId: string
+}
+export type LuaControllerRequestQuestProgressEvent = {
+  kind: 'request-quest-progress'
+  questId: string
+  objectiveId: string
+  amount: number
+}
+export type LuaControllerRequestQuestCompleteEvent = {
+  kind: 'request-quest-complete'
+  questId: string
+}
+export type LuaControllerRequestInventoryAddEvent = {
+  kind: 'request-inventory-add'
+  itemId: string
+  quantity: number
+}
+export type LuaControllerRequestInventoryRemoveEvent = {
+  kind: 'request-inventory-remove'
+  itemId: string
+  quantity: number
+}
+// NPC 별 플래그를 호스트가 보관해 다음 상호작용/리로드에서 get_controller_config 로 읽게 한다.
+export type LuaControllerSetConfigEvent = {
+  kind: 'set-config'
+  characterId: string
+  key: string
+  value: string
+}
+
 export type LuaControllerRuntimeEvent =
   | LuaControllerShowCharacterMessageEvent
   | LuaControllerShowNpcDialogueEvent
+  | LuaControllerRequestQuestStartEvent
+  | LuaControllerRequestQuestProgressEvent
+  | LuaControllerRequestQuestCompleteEvent
+  | LuaControllerRequestInventoryAddEvent
+  | LuaControllerRequestInventoryRemoveEvent
+  | LuaControllerSetConfigEvent
 
 export type LuaControllerInteractionResponse = {
   message: string

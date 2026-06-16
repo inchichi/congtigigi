@@ -17,10 +17,26 @@ export type ShowNpcDialogueGameEvent = {
   durationMilliseconds: number
 }
 
+// Phase 3 액션 이벤트는 Lua 런타임 계약과 동일하므로 거기서 가져와 중복 정의를 피한다.
+import type {
+  LuaControllerRequestQuestStartEvent,
+  LuaControllerRequestQuestProgressEvent,
+  LuaControllerRequestQuestCompleteEvent,
+  LuaControllerRequestInventoryAddEvent,
+  LuaControllerRequestInventoryRemoveEvent,
+  LuaControllerSetConfigEvent
+} from '../lua/luaControllerApi'
+
 export type GameEvent =
   | InteractionRequestedGameEvent
   | ShowCharacterMessageGameEvent
   | ShowNpcDialogueGameEvent
+  | LuaControllerRequestQuestStartEvent
+  | LuaControllerRequestQuestProgressEvent
+  | LuaControllerRequestQuestCompleteEvent
+  | LuaControllerRequestInventoryAddEvent
+  | LuaControllerRequestInventoryRemoveEvent
+  | LuaControllerSetConfigEvent
 
 export type GameEventQueue = {
   enqueue: (event: GameEvent) => void

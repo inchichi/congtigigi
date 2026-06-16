@@ -100,6 +100,7 @@ import {
   getQuestNpcBadgeKindForNpc,
   recordItemUseQuestProgress,
   recordMonsterDefeatQuestProgress,
+  recordQuestObjectiveProgress,
   recordShopOpenQuestProgress,
   recordTalkQuestProgress,
   startQuest,
@@ -4938,6 +4939,66 @@ export const createPixiTiledMapView = async ({
     onPlayerInventoryChange(currentPlayerInventory)
   }
 
+  // Phase 3 쓰기 채널 적용기: Lua 가 요청한 액션을 기존 상태 변경 경로로 반영한다.
+  const grantInventoryItem = (itemId: string, quantity: number) => {
+    if (itemId.length === 0 || quantity <= 0) {
+      return
+    }
+    const slotIndex = findFirstEmptyPlayerInventorySlotIndex(currentPlayerInventory)
+    if (slotIndex === undefined) {
+      return
+    }
+    const label = getPlayerEquipmentItemDefinitionById(itemId)?.label ?? itemId
+    currentPlayerInventory = setPlayerInventorySlot({
+      inventory: currentPlayerInventory,
+      slotIndex,
+      item: { id: itemId, label, quantity }
+    })
+    onPlayerInventoryChange(currentPlayerInventory)
+  }
+
+  const removeInventoryItem = (itemId: string, quantity: number) => {
+    if (itemId.length === 0 || quantity <= 0) {
+      return
+    }
+    let remaining = quantity
+    const nextSlots = currentPlayerInventory.slots.map((slot) => {
+      if (!slot || slot.id !== itemId || remaining <= 0) {
+        return slot
+      }
+      const taken = Math.min(slot.quantity, remaining)
+      remaining -= taken
+      const nextQuantity = slot.quantity - taken
+      return nextQuantity > 0 ? { ...slot, quantity: nextQuantity } : undefined
+    })
+    currentPlayerInventory = { ...currentPlayerInventory, slots: nextSlots }
+    onPlayerInventoryChange(currentPlayerInventory)
+  }
+
+  // set-config: NPC 별 플래그를 컨트롤러 config 에 보관하고 재동기화한다(다음 상호작용에서
+  // get_controller_config 로 읽힌다). config 변경은 attachment 키를 바꿔 재부착을 유발한다.
+  const applyNpcConfigUpdate = (
+    characterId: string,
+    key: string,
+    value: string
+  ) => {
+    const character = characterStates.find((entry) => entry.id === characterId)
+    if (!character || character.controller.kind !== 'lua') {
+      return
+    }
+    const nextCharacter: CharacterState = {
+      ...character,
+      controller: {
+        ...character.controller,
+        config: { ...character.controller.config, [key]: value }
+      }
+    }
+    characterStates = characterStates.map((entry) =>
+      entry.id === characterId ? nextCharacter : entry
+    )
+    controllerRuntime.syncCharacters(characterStates)
+  }
+
   const applyEventDraft = (
     draft: HolidayDialogueEventSpec,
     input?: ApplyEventDraftInput
@@ -5625,6 +5686,41 @@ export const createPixiTiledMapView = async ({
       })
 
       for (const event of emittedEvents) {
+        // Phase 3 쓰기 채널: Lua 가 요청한 액션을 기존 순수 reducer 로 적용한다(Lua=요청, TS=적용).
+        if (event.kind === 'request-quest-start') {
+          setQuestLog(startQuest(currentQuestLog, event.questId))
+          continue
+        }
+        if (event.kind === 'request-quest-progress') {
+          setQuestLog(
+            recordQuestObjectiveProgress(
+              currentQuestLog,
+              event.questId,
+              event.objectiveId,
+              event.amount
+            )
+          )
+          continue
+        }
+        if (event.kind === 'request-quest-complete') {
+          const completion = completeQuest(currentQuestLog, event.questId)
+          setQuestLog(completion.nextQuestLog)
+          grantQuestCompletionRewards(completion)
+          continue
+        }
+        if (event.kind === 'request-inventory-add') {
+          grantInventoryItem(event.itemId, event.quantity)
+          continue
+        }
+        if (event.kind === 'request-inventory-remove') {
+          removeInventoryItem(event.itemId, event.quantity)
+          continue
+        }
+        if (event.kind === 'set-config') {
+          applyNpcConfigUpdate(event.characterId, event.key, event.value)
+          continue
+        }
+
         if (event.kind === 'show-npc-dialogue') {
           // Lua 컨트롤러(vn-dialogue)가 요청한 비주얼노벨 대화창. 대사는 Lua 가 보내고,
           // 초상화/이름은 캐릭터에서 채운다. 대화가 다 끝나면 해당 NPC 의 상점을 연다.
