@@ -64,6 +64,14 @@ import {
   loadPendingEvents,
   PENDING_EVENTS_STORAGE_KEY
 } from '../../editor/pendingEvents'
+import {
+  PENDING_PLACEMENTS_STORAGE_KEY,
+  type PlacementTemplate
+} from '../../editor/placementStore'
+import {
+  PENDING_NPCS_STORAGE_KEY,
+  type NpcWireTemplate
+} from '../../editor/npcStore'
 import type { AudioSettings } from './rendering/createPauseMenuOverlay'
 import type {
   SceneTransitionRequest
@@ -90,7 +98,18 @@ type SceneRenderer = {
     targetCharacterId: string
     source: string
   }) => { didApply: boolean; targetCharacterId?: string }
+  // 마우스 에셋 배치(에디터 배치 모드). NPC 템플릿(kind:'npc')도 같은 채널로 전달된다.
+  setPlacementMode: (mode: 'off' | 'place' | 'erase') => void
+  setPlacementTemplate: (
+    template: PlacementTemplate | NpcWireTemplate | null
+  ) => void
+  refreshPlacements: () => void
+  refreshNpcs: () => void
 }
+
+// 배경음악(BGM) 전역 사용 여부. false면 어떤 씬에서도 BGM을 재생하지 않는다(효과음은 그대로).
+// 저장된 볼륨 설정과 무관하게 코드에서 끄는 스위치 — 다시 켜려면 true로 바꾸면 된다.
+const BGM_ENABLED = false
 
 const AUDIO_SETTINGS_STORAGE_KEY = 'my-sample-rpg:audio-settings'
 const EVENT_DRAFT_MODE_STORAGE_KEY = 'my-sample-rpg:event-draft-mode'
@@ -365,6 +384,14 @@ const destroyActiveScene = () => {
 }
 
 const playSceneMusic = (sceneId: SceneId) => {
+  // BGM이 꺼져 있으면 오디오를 만들지도 재생하지도 않는다(파일 로드도 생략).
+  if (!BGM_ENABLED) {
+    activeSceneMusic?.pause()
+    activeSceneMusic = undefined
+    activeSceneMusicUrl = ''
+    return
+  }
+
   const musicUrl = sceneMusicUrls[sceneId]
 
   if (activeSceneMusic && activeSceneMusicUrl === musicUrl) {
@@ -877,6 +904,18 @@ if (import.meta.hot) {
 // 에디터(별도 page/iframe)가 이벤트를 저장하면 같은 origin의 다른 문서에서 storage 이벤트가
 // 발생한다. 게임 프리뷰가 열려 있으면 새로고침 없이 즉시 적용한다.
 window.addEventListener('storage', (event) => {
+  // 배치 변경(에디터의 전체 지우기 등)은 게임이 즉시 다시 그린다.
+  if (event.key === PENDING_PLACEMENTS_STORAGE_KEY) {
+    activeSceneRenderer?.refreshPlacements()
+    return
+  }
+
+  // NPC 변경(에디터의 전체 지우기 등)도 즉시 스폰/디스폰으로 반영한다.
+  if (event.key === PENDING_NPCS_STORAGE_KEY) {
+    activeSceneRenderer?.refreshNpcs()
+    return
+  }
+
   if (event.key !== PENDING_EVENTS_STORAGE_KEY) {
     return
   }
@@ -900,9 +939,31 @@ window.addEventListener('visibilitychange', () => {
 
 // 에디터 프리뷰(부모 창)의 메시지 처리: 씬 전환 + 음소거 토글.
 window.addEventListener('message', (event) => {
-  const data = event.data as { type?: unknown; sceneId?: unknown; isMuted?: unknown } | null
+  const data = event.data as {
+    type?: unknown
+    sceneId?: unknown
+    isMuted?: unknown
+    mode?: unknown
+    template?: unknown
+  } | null
 
   if (!data) {
+    return
+  }
+
+  // 마우스 배치: 모드/놓을 항목을 게임 렌더러에 전달.
+  if (data.type === 'editor:placement-mode') {
+    const mode = data.mode
+    if (mode === 'off' || mode === 'place' || mode === 'erase') {
+      activeSceneRenderer?.setPlacementMode(mode)
+    }
+    return
+  }
+  if (data.type === 'editor:placement-template') {
+    // 타일/오브젝트 배치 템플릿 또는 NPC 와이어 템플릿(kind:'npc') — 렌더러가 kind로 분기한다.
+    activeSceneRenderer?.setPlacementTemplate(
+      (data.template as PlacementTemplate | NpcWireTemplate | null) ?? null
+    )
     return
   }
 

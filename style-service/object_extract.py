@@ -141,6 +141,17 @@ def read_png(key: str) -> bytes:
     return path.read_bytes()
 
 
+def read_meta(key: str) -> dict:
+    """사이드카 메타(cells/tilesetPath/columns/tileWidth/tileHeight 등)를 읽는다 —
+    일괄 처리에서 여러 오브젝트를 한 타일셋 이미지에 메모리상 누적 패치할 때 쓴다."""
+    if not _SAFE_KEY_PATTERN.match(key):
+        raise ValueError(f"올바르지 않은 오브젝트 키입니다: {key}")
+    meta_file = _meta_path(key)
+    if not meta_file.is_file():
+        raise FileNotFoundError(f"추출된 오브젝트가 없습니다: {key}")
+    return json.loads(meta_file.read_text(encoding="utf-8"))
+
+
 def apply_styled_object(key: str, styled_png: bytes) -> dict:
     """스타일 적용된 오브젝트 PNG를 사이드카의 셀 정보로 타일셋에 역패치하고,
     기존 백업/원본 시드 경로(asset_store.backup_and_write)로 게임 에셋에 반영한다."""

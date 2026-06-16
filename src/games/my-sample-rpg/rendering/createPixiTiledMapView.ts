@@ -3,6 +3,7 @@ import {
   Application,
   AnimatedSprite,
   Container,
+  type FederatedPointerEvent,
   Graphics,
   NineSliceSprite,
   Rectangle,
@@ -14,10 +15,25 @@ import {
 } from 'pixi.js'
 
 import { loadTextureSafe } from './loadTextureSafe'
+import {
+  addPlacement,
+  loadPlacementsForMap,
+  removePlacement,
+  type PlacedItem,
+  type PlacementTemplate
+} from '../../../editor/placementStore'
+import {
+  addNpc,
+  loadNpcsForMap,
+  removeNpc,
+  type NpcWireTemplate
+} from '../../../editor/npcStore'
 
 import {
   PLAYER_CHARACTER_ID,
+  createIdleNpcCharacterController,
   createLuaCharacterController,
+  createNpcCharacter,
   moveCharacterState
 } from '../characterState'
 import type {
@@ -938,6 +954,12 @@ export const createPixiTiledMapView = async ({
     targetCharacterId: string
     source: string
   }) => ApplyEventDraftResult
+  setPlacementMode: (mode: 'off' | 'place' | 'erase') => void
+  setPlacementTemplate: (
+    template: PlacementTemplate | NpcWireTemplate | null
+  ) => void
+  refreshPlacements: () => void
+  refreshNpcs: () => void
 }> => {
   const app = new Application()
   let cameraZoom = CAMERA_DEFAULT_ZOOM
@@ -6047,6 +6069,281 @@ export const createPixiTiledMapView = async ({
   questTrackerOverlay.syncFrame()
   handleVisibilityChange()
 
+  // ── 마우스 에셋 배치(에디터 배치 모드) ──
+  // 에디터가 배치 모드+놓을 항목을 postMessage로 켜면, 게임 캔버스 클릭이 그 칸에 배치를 만든다.
+  // 배치 데이터는 맵별 localStorage(placementStore)에 저장돼 새로고침·재접속에도 유지된다.
+  let placementMode: 'off' | 'place' | 'erase' = 'off'
+  // 타일/오브젝트 배치 템플릿 또는 NPC 와이어 템플릿(kind로 구분).
+  let placementTemplate: PlacementTemplate | NpcWireTemplate | null = null
+  let placementSprites: Sprite[] = []
+  // 수기 배치 NPC는 정적 스프라이트가 아니라 게임의 CharacterState로 스폰된다(이동 차단 + 대사).
+  // 스폰한 NPC의 id 집합 — 저장소와 비교(reconcile)해 추가/삭제를 반영한다.
+  const placedNpcIds = new Set<string>()
+
+  const textureForPlacement = async (
+    item: PlacedItem
+  ): Promise<Texture | undefined> => {
+    if (item.kind === 'tile' && item.tileId !== undefined) {
+      // 맵에 타일셋이 하나면 source가 안 맞아도 그걸로 폴백.
+      const tileset =
+        map.tilesets.find((candidate) => candidate.source === item.tilesetSource) ??
+        map.tilesets[0]
+      const resources = tileset ? tilesetResources.get(tileset.source) : undefined
+      return resources?.tileTextures[item.tileId]
+    }
+    if (item.kind === 'object' && item.imageUrl) {
+      return await loadTextureSafe(item.imageUrl)
+    }
+    return undefined
+  }
+
+  const renderPlacements = async (items: PlacedItem[]): Promise<void> => {
+    for (const sprite of placementSprites) {
+      sprite.parent?.removeChild(sprite)
+      sprite.destroy()
+    }
+    placementSprites = []
+    if (!depthSortedLayer) {
+      return
+    }
+    for (const item of items) {
+      const texture = await textureForPlacement(item)
+      if (!texture) {
+        continue
+      }
+      const sprite = new Sprite(texture)
+      sprite.position.set(item.col * map.tileWidth, item.row * map.tileHeight)
+      // 지우기 히트테스트에서 어느 배치인지 역추적하기 위해 배치 id를 표식으로 단다.
+      sprite.label = item.id
+      // 자기 아래 가장자리 기준 깊이정렬 — 캐릭터/지붕과 같은 규칙으로 자연스럽게 겹친다.
+      sprite.zIndex = item.row * map.tileHeight + (texture.height || map.tileHeight) + 0.6
+      depthSortedLayer.addChild(sprite)
+      placementSprites.push(sprite)
+    }
+    depthSortedLayer.sortChildren()
+  }
+
+  const refreshPlacements = (): void => {
+    void renderPlacements(loadPlacementsForMap(sceneId))
+  }
+
+  // ── 수기 배치 NPC(에디터 NPC 탭) ──
+  // 외형(appearanceType)을 텍스처로 풀어 최소 캐릭터 렌더 노드를 만든다(플레이어/몬스터 부속 없음).
+  // 부팅 캐릭터 빌드 루프의 비(非)플레이어·비몬스터 경로만 옮긴 것. renderedCharacters에 등록해야
+  // syncCharacterSprite가 매 틱 위치/깊이를 잡는다(엔트리가 없으면 throw).
+  const createRenderedNpcNode = (character: CharacterState): void => {
+    if (!depthSortedLayer) {
+      return
+    }
+    const resolved = resolveCharacterTexture(
+      character.appearanceType,
+      characterTilesetResources.tileTextures,
+      characterSpriteSheet.tileset,
+      map.tilesets,
+      tilesetResources,
+      map.tileWidth
+    )
+    const container = new Container()
+    container.label = `character:${character.id}:container`
+    container.sortableChildren = true
+    const sprite = new Sprite(resolved.texture)
+    sprite.label = `character:${character.id}`
+    sprite.scale.set(resolved.renderScale)
+    sprite.roundPixels = true
+    sprite.zIndex = 10
+    container.addChild(sprite)
+    const displayLabel =
+      character.displayText === undefined
+        ? undefined
+        : new Text({ style: PLAYER_NAME_BADGE_STYLE, text: character.displayText })
+    if (displayLabel) {
+      displayLabel.label = `character:${character.id}:display-label`
+      displayLabel.roundPixels = true
+      displayLabel.zIndex = 16
+      container.addChild(displayLabel)
+    }
+    renderedCharacters.set(character.id, {
+      container,
+      sprite,
+      renderScale: resolved.renderScale,
+      displayLabel
+    })
+    depthSortedLayer.addChild(container)
+  }
+
+  const despawnPlacedNpc = (id: string): void => {
+    const renderNode = renderedCharacters.get(id)
+    if (renderNode) {
+      renderNode.container.parent?.removeChild(renderNode.container)
+      renderNode.container.destroy({ children: true })
+      renderedCharacters.delete(id)
+    }
+    characterStates = characterStates.filter((character) => character.id !== id)
+    placedNpcIds.delete(id)
+    // 이 NPC를 대상으로 한 상호작용 잠금 항목 정리 — 같은 id는 다시 안 생기므로 죽은 항목(장기 세션 누수 방지).
+    for (const lockKey of [...interactionLockUntilByCharacterPair.keys()]) {
+      if (lockKey.endsWith(`:${id}`) || lockKey.endsWith(`:${id}:quest`)) {
+        interactionLockUntilByCharacterPair.delete(lockKey)
+      }
+    }
+  }
+
+  // 저장소(npcStore)의 NPC 목록과 현재 스폰 상태를 맞춘다 — 새 항목은 스폰, 사라진 항목은 디스폰.
+  // 반복 호출(부팅·storage·클릭)해도 같은 id를 두 번 스폰하지 않도록 placedNpcIds로 가드한다.
+  const refreshNpcs = (): void => {
+    const stored = loadNpcsForMap(sceneId)
+    const storedById = new Map(stored.map((npc) => [npc.id, npc] as const))
+    let changed = false
+
+    for (const id of [...placedNpcIds]) {
+      if (!storedById.has(id)) {
+        despawnPlacedNpc(id)
+        changed = true
+      }
+    }
+
+    for (const npc of stored) {
+      if (placedNpcIds.has(npc.id)) {
+        continue
+      }
+      const character = createNpcCharacter({
+        id: npc.id,
+        appearanceType: npc.appearanceType,
+        position: { x: npc.col, y: npc.row },
+        collisionSize: { width: 1, height: 1 },
+        displayText: npc.name,
+        controller: createIdleNpcCharacterController({
+          dialogueLines: npc.dialogueLines
+        })
+      })
+      try {
+        // 외형이 캐릭터 시트에 없으면 resolveCharacterTexture가 throw — 그 NPC만 건너뛴다.
+        createRenderedNpcNode(character)
+      } catch (error) {
+        console.warn(`[npc] 외형을 해석하지 못해 건너뜀: ${npc.appearanceType}`, error)
+        continue
+      }
+      characterStates = [...characterStates, character]
+      placedNpcIds.add(npc.id)
+      syncCharacterSprite(character)
+      changed = true
+    }
+
+    if (changed) {
+      // 컨트롤러 부착(대사 NPC 상호작용 활성)·충돌 반영을 즉시 갱신.
+      controllerRuntime.syncCharacters(characterStates)
+    }
+  }
+
+  // 배치 NPC를 클릭 지점(스프라이트 픽셀 영역)으로 맞혀 지운다. 맞으면 true(이후 배치 지우기 생략).
+  const eraseNpcAtPoint = (x: number, y: number): boolean => {
+    for (const id of [...placedNpcIds].reverse()) {
+      const renderNode = renderedCharacters.get(id)
+      if (!renderNode) {
+        continue
+      }
+      const left = renderNode.container.x
+      const top = renderNode.container.y
+      if (
+        x >= left &&
+        x < left + renderNode.sprite.width &&
+        y >= top &&
+        y < top + renderNode.sprite.height
+      ) {
+        removeNpc(sceneId, id)
+        refreshNpcs()
+        return true
+      }
+    }
+    return false
+  }
+
+  app.stage.eventMode = 'static'
+  app.stage.hitArea = app.screen
+  const eraseAtPoint = (x: number, y: number): void => {
+    // 칸 앵커가 아니라 스프라이트의 실제 픽셀 영역으로 맞힌다. 오브젝트는 여러 칸을 덮으므로
+    // 가운데/아래를 클릭해도 지워진다(타일은 1칸이라 그대로 동작). 위(나중에 그린)것부터 검사.
+    for (let i = placementSprites.length - 1; i >= 0; i -= 1) {
+      const sprite = placementSprites[i]
+      const left = sprite.x
+      const top = sprite.y
+      if (x >= left && x < left + sprite.width && y >= top && y < top + sprite.height) {
+        const id = typeof sprite.label === 'string' ? sprite.label : ''
+        if (id) {
+          removePlacement(sceneId, id)
+          refreshPlacements()
+        }
+        return
+      }
+    }
+  }
+  const handleStagePointerDown = (event: FederatedPointerEvent): void => {
+    if (placementMode === 'off') {
+      return
+    }
+    const local = world.toLocal(event.global) // 카메라 줌/스크롤이 반영된 맵 픽셀 좌표.
+    const col = Math.floor(local.x / map.tileWidth)
+    const row = Math.floor(local.y / map.tileHeight)
+    if (col < 0 || col >= map.width || row < 0 || row >= map.height) {
+      return
+    }
+    // 우클릭(button 2)은 모드와 무관하게 클릭 지점의 배치를 지운다(배치 중에도 바로 삭제).
+    // NPC를 먼저 맞혀보고(기능 엔티티), 없으면 타일/오브젝트 배치를 지운다.
+    if (event.button === 2) {
+      if (eraseNpcAtPoint(local.x, local.y)) {
+        return
+      }
+      eraseAtPoint(local.x, local.y)
+      return
+    }
+    if (placementMode === 'place' && placementTemplate) {
+      if (placementTemplate.kind === 'npc') {
+        // 이동 차단 캐릭터(플레이어/다른 NPC/몬스터)와 겹치는 칸에 차단 NPC를 놓으면 서로 갇혀
+        // 빠져나올 수 없으므로 막는다(특히 플레이어 자기 칸에 놓으면 소프트락).
+        const targetRect: CollisionRect = { x: col, y: row, width: 1, height: 1 }
+        const overlapsBlocker = getBlockingCollisionRects('').some((rect) =>
+          doCollisionRectsIntersect(targetRect, rect)
+        )
+        if (overlapsBlocker) {
+          console.warn('[npc] 다른 캐릭터(플레이어 포함)와 겹치는 칸에는 NPC를 놓을 수 없습니다.')
+          return
+        }
+        // NPC는 기능 엔티티 — 저장 후 게임의 CharacterState로 스폰한다(저장소엔 NpcTemplate 필드만).
+        addNpc(
+          sceneId,
+          {
+            appearanceType: placementTemplate.appearanceType,
+            name: placementTemplate.name,
+            dialogueLines: placementTemplate.dialogueLines
+          },
+          col,
+          row
+        )
+        refreshNpcs()
+      } else {
+        addPlacement(sceneId, placementTemplate, col, row)
+        refreshPlacements()
+      }
+    } else if (placementMode === 'erase') {
+      if (eraseNpcAtPoint(local.x, local.y)) {
+        return
+      }
+      eraseAtPoint(local.x, local.y)
+    }
+  }
+  app.stage.on('pointerdown', handleStagePointerDown)
+  // 배치 모드에서 우클릭 시 브라우저 컨텍스트 메뉴를 막아 '우클릭 삭제'가 정상 동작하게 한다.
+  const handleCanvasContextMenu = (event: MouseEvent): void => {
+    if (placementMode !== 'off') {
+      event.preventDefault()
+    }
+  }
+  app.canvas.addEventListener('contextmenu', handleCanvasContextMenu)
+
+  // 저장된 배치/NPC를 부팅 시 반영한다(맵별).
+  refreshPlacements()
+  refreshNpcs()
+
   const destroy = () => {
     if (isDestroyed) {
       return
@@ -6059,6 +6356,8 @@ export const createPixiTiledMapView = async ({
     window.removeEventListener('resize', handleWindowResize)
     viewportElement.removeEventListener('wheel', handleViewportWheel)
     document.removeEventListener('visibilitychange', handleVisibilityChange)
+    app.stage.off('pointerdown', handleStagePointerDown)
+    app.canvas.removeEventListener('contextmenu', handleCanvasContextMenu)
     app.ticker.remove(updateCharacters)
     app.ticker.remove(mapOverlay.syncFrame)
     app.ticker.remove(playerHudOverlay.syncFrame)
@@ -6124,7 +6423,17 @@ export const createPixiTiledMapView = async ({
     destroy,
     updateAudioSettings: updateCurrentAudioSettings,
     applyEventDraft,
-    applyLuaScript
+    applyLuaScript,
+    setPlacementMode: (mode: 'off' | 'place' | 'erase') => {
+      placementMode = mode
+    },
+    setPlacementTemplate: (
+      template: PlacementTemplate | NpcWireTemplate | null
+    ) => {
+      placementTemplate = template
+    },
+    refreshPlacements,
+    refreshNpcs
   }
 }
 

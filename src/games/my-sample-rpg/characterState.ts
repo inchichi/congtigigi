@@ -45,6 +45,10 @@ export type NpcCharacterController = {
   kind: 'npc'
   behavior: 'idle'
   moveSpeedTilesPerSecond: number
+  // 에디터에서 수기 배치한 NPC가 lua 없이도 Enter 상호작용으로 말할 수 있도록 대사를 직접 싣는다.
+  // 비어 있으면(또는 없으면) 상호작용 불가한 조용한 NPC. 여러 줄이면 상호작용마다 순환한다.
+  dialogueLines?: string[]
+  messageDurationMilliseconds?: number
 }
 
 export type LuaCharacterControllerConfigValue =
@@ -118,14 +122,34 @@ export const createKeyboardCharacterController = ({
 })
 
 export const createIdleNpcCharacterController = ({
-  moveSpeedTilesPerSecond = DEFAULT_CHARACTER_MOVE_SPEED_TILES_PER_SECOND
+  moveSpeedTilesPerSecond = DEFAULT_CHARACTER_MOVE_SPEED_TILES_PER_SECOND,
+  dialogueLines,
+  messageDurationMilliseconds
 }: {
   moveSpeedTilesPerSecond?: number
-} = {}): NpcCharacterController => ({
-  kind: 'npc',
-  behavior: 'idle',
-  moveSpeedTilesPerSecond
-})
+  dialogueLines?: string[]
+  messageDurationMilliseconds?: number
+} = {}): NpcCharacterController => {
+  const controller: NpcCharacterController = {
+    kind: 'npc',
+    behavior: 'idle',
+    moveSpeedTilesPerSecond
+  }
+
+  const cleanedDialogueLines = dialogueLines
+    ?.map((line) => line.trim())
+    .filter((line) => line.length > 0)
+
+  if (cleanedDialogueLines && cleanedDialogueLines.length > 0) {
+    controller.dialogueLines = cleanedDialogueLines
+  }
+
+  if (messageDurationMilliseconds !== undefined) {
+    controller.messageDurationMilliseconds = messageDurationMilliseconds
+  }
+
+  return controller
+}
 
 export const createLuaCharacterController = ({
   scriptId,
