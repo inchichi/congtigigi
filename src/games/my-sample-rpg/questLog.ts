@@ -32,6 +32,7 @@ export type QuestStatus =
 export type QuestObjectiveType =
   | 'monster-defeat'
   | 'item-use'
+  | 'item-acquire'
   | 'shop-open'
   | 'scene-enter'
   | 'talk'
@@ -99,6 +100,8 @@ export type QuestNpcBadgeKind = 'new' | 'finish'
 export type QuestTrackerItem = {
   questId: string
   text: string
+  // 활성 목표(있으면) — 트래커에서 대상 이미지 링크를 만드는 데 쓴다.
+  objective?: QuestObjectiveDefinition
 }
 
 export type NpcQuestInteractionAction = 'start' | 'active' | 'complete'
@@ -523,6 +526,90 @@ const QUEST_DEFINITION_BY_ID = Object.fromEntries(
   QUEST_DEFINITIONS.map((definition) => [definition.id, definition])
 ) as Record<string, QuestDefinition>
 
+// 에디터에서 생성·주입한 동적 퀘스트. 정적 QUEST_DEFINITIONS와 합쳐 런타임에서 함께 동작한다.
+// 모듈 전역이라 테스트에서는 clearDynamicQuestDefinitions로 비워야 한다(정적 아크 테스트 보호).
+const dynamicQuestDefinitionById: Record<string, QuestDefinition> = {}
+
+// 정적 + 동적 전체 정의. 트래커/배지/목표매칭 등 "모든 퀘스트"를 도는 곳은 이걸 써야 한다.
+export const getAllQuestDefinitions = (): QuestDefinition[] => [
+  ...QUEST_DEFINITIONS,
+  ...Object.values(dynamicQuestDefinitionById)
+]
+
+let questDefinitionVisibilityFilter: Set<string> | undefined
+
+export const setQuestDefinitionVisibilityFilter = (
+  questIds: string[] | undefined
+): void => {
+  if (!questIds || questIds.length === 0) {
+    questDefinitionVisibilityFilter = undefined
+    return
+  }
+
+  questDefinitionVisibilityFilter = new Set(questIds)
+}
+
+export const getVisibleQuestDefinitions = (): QuestDefinition[] =>
+  getAllQuestDefinitions().filter((definition) =>
+    isQuestDefinitionVisible(definition)
+  )
+
+const isQuestDefinitionVisible = (definition: QuestDefinition): boolean =>
+  questDefinitionVisibilityFilter === undefined ||
+  questDefinitionVisibilityFilter.has(definition.id)
+
+const findQuestDefinition = (questId: string): QuestDefinition | undefined =>
+  QUEST_DEFINITION_BY_ID[questId] ?? dynamicQuestDefinitionById[questId]
+
+const isStaticQuestDefinition = (definition: QuestDefinition): boolean =>
+  QUEST_DEFINITION_BY_ID[definition.id] !== undefined
+
+// 진행도 항목을 throw 없이 조회(동적 퀘스트가 아직 진행도에 없을 수 있어 순회 시 방어용).
+const questProgressOrUndefined = (
+  questLog: QuestLogState,
+  questId: string
+): QuestProgress | undefined => questLog.progressByQuestId[questId]
+
+// 동적 퀘스트 등록(멱등): 정적 id와 충돌하거나 이미 등록된 id는 무시한다. 씬 로드마다 재주입돼도
+// 안전하다. 등록 후에는 ensureQuestProgressEntries로 진행도 항목을 채워야 한다.
+export const registerDynamicQuestDefinitions = (
+  definitions: QuestDefinition[]
+): void => {
+  for (const definition of definitions) {
+    if (QUEST_DEFINITION_BY_ID[definition.id]) {
+      continue
+    }
+    dynamicQuestDefinitionById[definition.id] = definition
+  }
+}
+
+// 등록된 퀘스트 중 진행도 항목이 없는 것만 채운다(기존 진행도는 절대 덮어쓰지 않음). 동적 퀘스트는
+// createInitialQuestLog 이후에 등록되므로, 등록 직후 이 함수로 진행도를 보강해야 추적이 시작된다.
+export const ensureQuestProgressEntries = (
+  questLog: QuestLogState
+): QuestLogState => {
+  let next = questLog
+  for (const definition of getAllQuestDefinitions()) {
+    if (!next.progressByQuestId[definition.id]) {
+      next = {
+        progressByQuestId: {
+          ...next.progressByQuestId,
+          [definition.id]: createInitialQuestProgress(definition)
+        }
+      }
+    }
+  }
+  return next
+}
+
+// 테스트 격리용 — 동적 레지스트리를 비운다.
+export const clearDynamicQuestDefinitions = (): void => {
+  for (const id of Object.keys(dynamicQuestDefinitionById)) {
+    delete dynamicQuestDefinitionById[id]
+  }
+  questDefinitionVisibilityFilter = undefined
+}
+
 export const createInitialQuestLog = (): QuestLogState => ({
   progressByQuestId: Object.fromEntries(
     QUEST_DEFINITIONS.map((definition) => [
@@ -533,7 +620,7 @@ export const createInitialQuestLog = (): QuestLogState => ({
 })
 
 export const getQuestDefinition = (questId: string): QuestDefinition => {
-  const definition = QUEST_DEFINITION_BY_ID[questId]
+  const definition = findQuestDefinition(questId)
 
   if (!definition) {
     throw new Error(`Unknown quest id ${questId}`)
@@ -644,6 +731,15 @@ export const recordItemUseQuestProgress = (
     objective.type === 'item-use' && objective.target.itemId === itemId
   )
 
+// 아이템/장비 "획득" 진행 — 드롭 픽업·상점 구매 등 인벤에 들어올 때 호출한다(item-use는 소비 기준).
+export const recordItemAcquireQuestProgress = (
+  questLog: QuestLogState,
+  itemId: string
+): QuestLogState =>
+  recordMatchingQuestObjectiveProgress(questLog, (objective) =>
+    objective.type === 'item-acquire' && objective.target.itemId === itemId
+  )
+
 export const recordShopOpenQuestProgress = (
   questLog: QuestLogState,
   shopId: string
@@ -749,10 +845,10 @@ export const completeQuest = (
 export const getVisibleQuestTrackers = (
   questLog: QuestLogState
 ): QuestTrackerItem[] =>
-  QUEST_DEFINITIONS.flatMap((definition) => {
-    const quest = getQuestProgress(questLog, definition.id)
+  getVisibleQuestDefinitions().flatMap((definition) => {
+    const quest = questProgressOrUndefined(questLog, definition.id)
 
-    if (!quest.trackerVisible) {
+    if (!quest || !quest.trackerVisible) {
       return []
     }
 
@@ -763,7 +859,8 @@ export const getVisibleQuestTrackers = (
         return [
           {
             questId: definition.id,
-            text: `${definition.trackerLabel} ${quest.objectives[objective.id]}/${objective.required}`
+            text: `${definition.trackerLabel} ${quest.objectives[objective.id]}/${objective.required}`,
+            objective
           }
         ]
       case 'ready-to-turn-in':
@@ -785,6 +882,11 @@ export const getQuestNpcBadgeKind = (
   questLog: QuestLogState,
   questId: string
 ): QuestNpcBadgeKind | undefined => {
+  const definition = getQuestDefinition(questId)
+  if (!isQuestDefinitionVisible(definition)) {
+    return undefined
+  }
+
   const quest = getQuestProgress(questLog, questId)
 
   switch (quest.status) {
@@ -807,19 +909,31 @@ export const getQuestNpcBadgeKindForNpc = (
   if (
     definitions.some(
       (definition) =>
-        getQuestProgress(questLog, definition.id).status === 'ready-to-turn-in'
+        questProgressOrUndefined(questLog, definition.id)?.status ===
+        'ready-to-turn-in'
     )
   ) {
     return 'finish'
   }
 
-  return definitions.some((definition) => {
-    const quest = getQuestProgress(questLog, definition.id)
+  if (
+    definitions.some((definition) => {
+      const quest = questProgressOrUndefined(questLog, definition.id)
 
-    return quest.status === 'not-started' && isQuestUnlocked(questLog, definition.id)
-  })
-    ? 'new'
-    : undefined
+      return (
+        quest?.status === 'not-started' &&
+        isQuestUnlocked(questLog, definition.id)
+      )
+    })
+  ) {
+    return 'new'
+  }
+
+  if (getQuestDefinitionsWithPendingTalkObjectiveForNpc(questLog, npcId).length > 0) {
+    return 'new'
+  }
+
+  return undefined
 }
 
 export const getNextQuestInteractionForNpc = (
@@ -829,7 +943,8 @@ export const getNextQuestInteractionForNpc = (
   const definitions = getQuestDefinitionsForNpc(npcId)
   const readyDefinition = definitions.find(
     (definition) =>
-      getQuestProgress(questLog, definition.id).status === 'ready-to-turn-in'
+      questProgressOrUndefined(questLog, definition.id)?.status ===
+      'ready-to-turn-in'
   )
 
   if (readyDefinition) {
@@ -837,17 +952,29 @@ export const getNextQuestInteractionForNpc = (
   }
 
   const activeDefinition = definitions.find(
-    (definition) => getQuestProgress(questLog, definition.id).status === 'active'
+    (definition) =>
+      questProgressOrUndefined(questLog, definition.id)?.status === 'active'
   )
 
   if (activeDefinition) {
     return createNpcQuestInteraction(questLog, activeDefinition, 'active')
   }
 
-  const unlockedDefinition = definitions.find((definition) => {
-    const quest = getQuestProgress(questLog, definition.id)
+  const activeTalkDefinition = getQuestDefinitionsWithPendingTalkObjectiveForNpc(
+    questLog,
+    npcId
+  )[0]
 
-    return quest.status === 'not-started' && isQuestUnlocked(questLog, definition.id)
+  if (activeTalkDefinition) {
+    return createNpcQuestInteraction(questLog, activeTalkDefinition, 'active')
+  }
+
+  const unlockedDefinition = definitions.find((definition) => {
+    const quest = questProgressOrUndefined(questLog, definition.id)
+
+    return (
+      quest?.status === 'not-started' && isQuestUnlocked(questLog, definition.id)
+    )
   })
 
   return unlockedDefinition
@@ -865,8 +992,49 @@ export const formatQuestTextLines = (
   context: QuestTextFormatContext
 ): string[] => lines.map((line) => formatQuestText(line, context))
 
-const getQuestDefinitionsForNpc = (npcId: string): QuestDefinition[] =>
-  QUEST_DEFINITIONS.filter((definition) => definition.giverNpcId === npcId)
+const getQuestDefinitionsForNpc = (npcId: string): QuestDefinition[] => {
+  const definitions = getVisibleQuestDefinitions().filter(
+    (definition) => definition.giverNpcId === npcId
+  )
+
+  return [
+    ...definitions.filter((definition) => !isStaticQuestDefinition(definition)),
+    ...definitions.filter((definition) => isStaticQuestDefinition(definition))
+  ]
+}
+
+const hasPendingTalkObjectiveForNpc = (
+  questLog: QuestLogState,
+  definition: QuestDefinition,
+  npcId: string
+): boolean => {
+  const quest = questProgressOrUndefined(questLog, definition.id)
+
+  if (!quest || quest.status !== 'active') {
+    return false
+  }
+
+  return definition.objectives.some(
+    (objective) =>
+      objective.type === 'talk' &&
+      objective.target.npcId === npcId &&
+      (quest.objectives[objective.id] ?? 0) < objective.required
+  )
+}
+
+const getQuestDefinitionsWithPendingTalkObjectiveForNpc = (
+  questLog: QuestLogState,
+  npcId: string
+): QuestDefinition[] => {
+  const definitions = getVisibleQuestDefinitions().filter((definition) =>
+    hasPendingTalkObjectiveForNpc(questLog, definition, npcId)
+  )
+
+  return [
+    ...definitions.filter((definition) => !isStaticQuestDefinition(definition)),
+    ...definitions.filter((definition) => isStaticQuestDefinition(definition))
+  ]
+}
 
 const createNpcQuestInteraction = (
   questLog: QuestLogState,
@@ -885,10 +1053,10 @@ const recordMatchingQuestObjectiveProgress = (
 ): QuestLogState => {
   let nextQuestLog = questLog
 
-  for (const definition of QUEST_DEFINITIONS) {
-    const quest = getQuestProgress(nextQuestLog, definition.id)
+  for (const definition of getVisibleQuestDefinitions()) {
+    const quest = questProgressOrUndefined(nextQuestLog, definition.id)
 
-    if (quest.status !== 'active') {
+    if (!quest || quest.status !== 'active') {
       continue
     }
 

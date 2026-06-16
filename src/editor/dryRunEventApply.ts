@@ -12,13 +12,9 @@ import type { GameStructureProfile } from './gameStructureProfile'
 
 export type DryRunStepStatus = 'ok' | 'fail' | 'warn'
 
-export type DryRunStepId =
-  | 'convert'
-  | 'resolve_npc'
-  | 'resolve_map'
-  | 'dialogue'
-  | 'reward_item'
-  | 'spec_validate'
+// 단계 id는 표시용 키(UI는 label/detail만 렌더). 이벤트·퀘스트 드라이런이 DryRunReport를
+// 공유하도록 string으로 둔다.
+export type DryRunStepId = string
 
 export type DryRunStep = {
   id: DryRunStepId

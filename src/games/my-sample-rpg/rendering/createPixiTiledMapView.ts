@@ -93,11 +93,11 @@ import {
   type PlayerControlBindings
 } from '../playerControls'
 import {
-  QUEST_GIVER_NPC_IDS,
   completeQuest,
   formatQuestTextLines,
   getNextQuestInteractionForNpc,
   getQuestNpcBadgeKindForNpc,
+  recordItemAcquireQuestProgress,
   recordItemUseQuestProgress,
   recordMonsterDefeatQuestProgress,
   recordShopOpenQuestProgress,
@@ -2018,6 +2018,34 @@ export const createPixiTiledMapView = async ({
       )
     }
   }
+  // 인벤토리 id별 수량 집계.
+  const countInventoryItemsById = (
+    inventory: PlayerInventory
+  ): Map<string, number> => {
+    const counts = new Map<string, number>()
+    for (const slot of inventory.slots) {
+      if (slot) {
+        counts.set(slot.id, (counts.get(slot.id) ?? 0) + slot.quantity)
+      }
+    }
+    return counts
+  }
+  // 상점 구매처럼 어떤 아이템을 얻었는지 직접 안 알려주는 경로에서, 인벤 전/후를 비교해 늘어난
+  // 아이템만큼 "획득" 퀘스트 진행을 기록한다.
+  const recordAcquiredItemsFromInventoryDelta = (
+    previousInventory: PlayerInventory,
+    nextInventory: PlayerInventory
+  ): void => {
+    const previousCounts = countInventoryItemsById(previousInventory)
+    let nextQuestLog = currentQuestLog
+    for (const [itemId, nextCount] of countInventoryItemsById(nextInventory)) {
+      const gained = nextCount - (previousCounts.get(itemId) ?? 0)
+      for (let index = 0; index < gained; index += 1) {
+        nextQuestLog = recordItemAcquireQuestProgress(nextQuestLog, itemId)
+      }
+    }
+    setQuestLogWithObjectiveFeedback(nextQuestLog)
+  }
   const grantPlayerExperienceReward = (experienceReward: number) => {
     const nextPlayerProgress = grantPlayerExperience(
       playerProfile,
@@ -2399,10 +2427,16 @@ export const createPixiTiledMapView = async ({
       nextPlayerInventory,
       nextMerchantInventory
     ) => {
+      const previousPlayerInventory = currentPlayerInventory
       currentPlayerInventory = nextPlayerInventory
       currentBlacksmithInventory = nextMerchantInventory
       onPlayerInventoryChange(nextPlayerInventory)
       onMerchantInventoryChange(nextMerchantInventory)
+      // 구매로 늘어난 아이템에 "획득" 퀘스트 진행을 기록한다.
+      recordAcquiredItemsFromInventoryDelta(
+        previousPlayerInventory,
+        nextPlayerInventory
+      )
       syncPlayerUiOverlays()
     }
   })
@@ -2417,10 +2451,15 @@ export const createPixiTiledMapView = async ({
       nextPlayerInventory,
       nextMerchantInventory
     ) => {
+      const previousPlayerInventory = currentPlayerInventory
       currentPlayerInventory = nextPlayerInventory
       currentPotionMerchantInventory = nextMerchantInventory
       onPlayerInventoryChange(nextPlayerInventory)
       onPotionMerchantInventoryChange(nextMerchantInventory)
+      recordAcquiredItemsFromInventoryDelta(
+        previousPlayerInventory,
+        nextPlayerInventory
+      )
       syncPlayerUiOverlays()
     }
   })
@@ -2728,9 +2767,7 @@ export const createPixiTiledMapView = async ({
             text: `Lv ${character.level}`
           })
     const questBadge =
-      QUEST_GIVER_NPC_IDS.includes(
-        character.id as (typeof QUEST_GIVER_NPC_IDS)[number]
-      )
+      !isPlayer && !isMonsterCharacter && !isSignPostCharacter
         ? createQuestBadgeSprite(questNewTexture)
         : undefined
     container.label = `character:${character.id}:container`
@@ -3235,8 +3272,7 @@ export const createPixiTiledMapView = async ({
   }
 
   const syncQuestNpcBadges = () => {
-    for (const npcId of QUEST_GIVER_NPC_IDS) {
-      const renderNode = renderedCharacters.get(npcId)
+    for (const [npcId, renderNode] of renderedCharacters) {
 
       if (!renderNode?.questBadge) {
         continue
@@ -4105,6 +4141,10 @@ export const createPixiTiledMapView = async ({
         }
       })
       onPlayerInventoryChange(currentPlayerInventory)
+      // 드롭 장비를 주우면 "아이템 획득" 목표 진행을 기록한다.
+      setQuestLogWithObjectiveFeedback(
+        recordItemAcquireQuestProgress(currentQuestLog, drop.itemId)
+      )
       syncPlayerUiOverlays()
       showCharacterDamageText(
         PLAYER_CHARACTER_ID,
@@ -5634,6 +5674,7 @@ export const createPixiTiledMapView = async ({
       syncActiveCharacterMessages()
       syncActiveCharacterDamageTexts(now)
       syncPlayerCharacterVisual(now)
+      syncQuestNpcBadges()
       syncPlayerFootsteps(didPlayerMoveThisFrame)
       triggeredActions.clear()
       lastRuntimeErrorMessage = undefined

@@ -31,7 +31,12 @@ import { buildSessionMetrics, type SessionGenerationTally } from './sessionMetri
 import { editorIcon, type EditorIconName } from './editorIcons'
 import type { GameEntity, GenerationFeedback, GenerationResult } from './gameAdapter'
 import { generateQuestCandidates, type QuestCandidate } from './questCandidates'
-import { dryRunEventApply, type DryRunReport } from './dryRunEventApply'
+import { type DryRunReport } from './dryRunEventApply'
+import { generateQuestJson } from './questJsonGenerator'
+import { dryRunQuestApply } from './dryRunQuestApply'
+import { convertGeneratedQuestToDefinition } from './questCodeGenerator'
+import { createGeneratedQuestValidationIssues } from './questJsonSchema'
+import { replacePendingQuests } from './pendingQuests'
 
 // 하드코딩 어댑터가 엔티티를 못 찾은 미지의 게임을, LLM 분석이 찾은 editable 그룹으로 채운다.
 const buildEntitiesFromAnalysis = (
@@ -78,6 +83,11 @@ type CreateEditorAppInput = {
   initialFiles: GameFile[]
   gamePreviewUrl: string
 }
+
+const findEntityById = (game: LoadedGame, entityId: string): GameEntity | undefined =>
+  game.maps
+    .flatMap((map) => map.entities)
+    .find((entity) => entity.id === entityId || entity.name === entityId)
 
 const API_KEY_STORAGE_KEY = 'my-sample-rpg:anthropic-api-key'
 const MODEL_STORAGE_PREFIX = 'my-sample-rpg:model:'
@@ -1940,31 +1950,59 @@ export const createEditorApp = ({
     if (!candidate) {
       return
     }
+    const profile = game.profile
+    if (!profile) {
+      setStatus('이 게임의 구조 프로필이 없습니다.')
+      return
+    }
+    const effectiveEntity =
+      candidate.target_hint
+        ? findEntityById(game, candidate.target_hint) ??
+          (selectedEntity?.kind === 'npc' ? selectedEntity : undefined)
+        : selectedEntity?.kind === 'npc'
+          ? selectedEntity
+          : undefined
+    const selectedNpcId =
+      effectiveEntity?.kind === 'npc' ? effectiveEntity.id : undefined
     isGenerating = true
     const filesAtStart = currentFiles
-    setStatus(`"${candidate.title}" 후보로 이벤트 생성 중...`)
+    setStatus(`"${candidate.title}" 후보로 단계별 퀘스트 생성 중...`)
     render()
 
     try {
-      const result = await game.adapter.generate({
+      // 퀘스트 모드: 고른 후보로 "목표 포함 진짜 퀘스트"를 생성한다(대사 이벤트가 아님).
+      const quest = await generateQuestJson({
         apiKey: apiKey.trim(),
         userPrompt: promptInput.value,
-        entity: selectedEntity,
-        profile: game.profile,
+        profile,
         candidate,
-        gameContext: currentAnalysis
-          ? `${currentAnalysis.game_name} (${currentAnalysis.engine}). 콘텐츠 모델: ${currentAnalysis.content_model}`
-          : undefined
+        entity: effectiveEntity
       })
       if (currentFiles !== filesAtStart) {
         return
       }
+      // 무결성 검증(드라이런): 목표/기버/보상 타깃이 런타임에서 추적되는 값인지 단계별 점검.
+      currentDryRun = dryRunQuestApply(quest, profile, {
+        selectedEntityId: selectedNpcId
+      })
+      const issues = createGeneratedQuestValidationIssues(quest, profile, {
+        selectedEntityId: selectedNpcId
+      }).map(
+        (issue) => `${issue.path} - ${issue.message}`
+      )
+      // 결과 보드/적용 경로가 쓰는 GenerationResult 형태로 감싼다(apply는 런타임 퀘스트로 변환·저장).
+      const result: GenerationResult = {
+        label: quest.title || quest.quest_id,
+        preview: JSON.stringify(quest, null, 2),
+        issues,
+        apply: () => {
+          replacePendingQuests([
+            convertGeneratedQuestToDefinition(quest, profile)
+          ])
+        },
+        bridgePayload: null
+      }
       currentResult = result
-      // 무결성 검증(드라이런): 이벤트 JSON을 복제 스냅샷에 시험 적용해 통과/실패·위치를 보고한다.
-      currentDryRun =
-        result.eventJson && game.profile
-          ? dryRunEventApply(result.eventJson, game.profile)
-          : undefined
       historyCounter += 1
       history = [{ n: historyCounter, result }, ...history].slice(0, HISTORY_LIMIT)
       sessionTally = {
@@ -2049,6 +2087,12 @@ export const createEditorApp = ({
         card.append(chip)
       }
       card.addEventListener('click', () => {
+        if (candidate.target_hint) {
+          const targetEntity = findEntityById(game, candidate.target_hint)
+          if (targetEntity?.kind === 'npc') {
+            selectedEntity = targetEntity
+          }
+        }
         selectedCandidateIndex = index
         renderCandidates()
         render()
