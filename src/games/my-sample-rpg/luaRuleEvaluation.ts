@@ -15,3 +15,10 @@ export const evaluateLuaNumber = (
     return fallback
   }
 }
+
+// 테이블(객체) 등 임의 값을 반환하는 규칙용. 호출부가 결과 shape 를 검증하고 폴백을 결정한다.
+export const evaluateLuaValue = (
+  loadDataModule: LoadLuaDataModule,
+  luaSource: string,
+  expression: string
+): unknown => loadDataModule(`${luaSource}\nreturn ${expression}`)

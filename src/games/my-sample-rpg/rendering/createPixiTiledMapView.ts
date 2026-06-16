@@ -119,10 +119,10 @@ import {
 } from '../monsterPatrol'
 import {
   applyMonsterDamage,
-  createMonsterCombatState,
   isMonsterDefeated,
   type MonsterCombatState
 } from '../monsterCombat'
+import { createLuaMonsterCombat } from '../monsterCombatLua'
 import { createLuaMonsterRewards } from '../monsterRewardsLua'
 import { resolveCharacterInteractionTarget } from '../interaction/resolveCharacterInteractionTarget'
 import {
@@ -1124,6 +1124,9 @@ export const createPixiTiledMapView = async ({
     controllerRuntime.loadDataModule(source)
   )
   const playerStatEffects = createLuaPlayerStatEffects((source) =>
+    controllerRuntime.loadDataModule(source)
+  )
+  const luaMonsterCombat = createLuaMonsterCombat((source) =>
     controllerRuntime.loadDataModule(source)
   )
   let currentBlacksmithInventory = merchantInventory
@@ -2805,7 +2808,7 @@ export const createPixiTiledMapView = async ({
     if (isMonsterCharacter) {
       monsterCombatStates.set(
         character.id,
-        createMonsterCombatState(
+        luaMonsterCombat.createMonsterCombatState(
           character.level ?? 1,
           monsterCombatStateOptions
         )
@@ -3885,7 +3888,7 @@ export const createPixiTiledMapView = async ({
     )
     monsterCombatStates.set(
       characterId,
-      createMonsterCombatState(
+      luaMonsterCombat.createMonsterCombatState(
         nextCharacter.level ?? 1,
         monsterCombatStateOptions
       )

@@ -26,6 +26,8 @@ import {
   getPlayerPhysicalAttackPower
 } from '../playerStatEffects'
 import { createInitialPlayerProfile } from '../playerProfile'
+import { createLuaMonsterCombat } from '../monsterCombatLua'
+import { createMonsterCombatState } from '../monsterCombat'
 
 const LUA_MODULE_JS_URL = new URL(
   '../../../../public/vendor/lua/lua-5.3.6.mjs',
@@ -587,6 +589,36 @@ end
         )
         expect(luaStats.getPlayerEvadeChance(profile)).toBe(
           getPlayerEvadeChance(profile)
+        )
+      }
+    } finally {
+      runtime.destroy()
+    }
+  })
+
+  it('runs monster combat-state creation in Lua with object-out parity to TS', async () => {
+    const runtime = await createBridgeRuntime({
+      source: createControllerModuleSource(`
+function controller.step(id, dt, x, y)
+  return 0, 0
+end
+`)
+    })
+
+    try {
+      const luaCombat = createLuaMonsterCombat((source) =>
+        runtime.loadDataModule(source)
+      )
+      const cases: [number, { hpMultiplier?: number; damageMultiplier?: number }][] = [
+        [1, {}],
+        [5, {}],
+        [10, { hpMultiplier: 2 }],
+        [7, { damageMultiplier: 3 }],
+        [20, { hpMultiplier: 1.5, damageMultiplier: 2 }]
+      ]
+      for (const [level, options] of cases) {
+        expect(luaCombat.createMonsterCombatState(level, options)).toEqual(
+          createMonsterCombatState(level, options)
         )
       }
     } finally {
