@@ -172,7 +172,7 @@
     </property>
     <property name="controller.messageDurationSeconds" type="float" value="2.8"/>
     <property name="controller.scriptId" value="reply-with-message"/>
-    <property name="displayText" value="대장장이"/>
+    <property name="displayText" value="모차르찬"/>
     <property name="type" value="character_bearded_apron_man"/>
    </properties>
   </object>
