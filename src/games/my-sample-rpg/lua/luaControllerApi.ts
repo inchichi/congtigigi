@@ -112,6 +112,19 @@ export type LuaControllerSetConfigEvent = {
   value: string
 }
 
+// Phase 4: 씬 전환 + 사운드 액션. (전투 encounter 는 이 게임의 실시간 온맵 전투 모델에
+// 맞는 spawn 프리미티브가 없어 보류 — 설계상 deferrable.)
+export type LuaControllerRequestSceneTransitionEvent = {
+  kind: 'request-scene-transition'
+  sceneId: string
+  x: number
+  y: number
+}
+export type LuaControllerPlaySoundEvent = {
+  kind: 'play-sound'
+  soundId: string
+}
+
 export type LuaControllerRuntimeEvent =
   | LuaControllerShowCharacterMessageEvent
   | LuaControllerShowNpcDialogueEvent
@@ -121,6 +134,8 @@ export type LuaControllerRuntimeEvent =
   | LuaControllerRequestInventoryAddEvent
   | LuaControllerRequestInventoryRemoveEvent
   | LuaControllerSetConfigEvent
+  | LuaControllerRequestSceneTransitionEvent
+  | LuaControllerPlaySoundEvent
 
 export type LuaControllerInteractionResponse = {
   message: string

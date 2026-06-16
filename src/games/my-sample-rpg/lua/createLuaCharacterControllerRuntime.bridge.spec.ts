@@ -451,6 +451,36 @@ end
     }
   })
 
+  it('emits Phase 4 scene-transition and play-sound action events', async () => {
+    const runtime = await createBridgeRuntime({
+      source: createControllerModuleSource(`
+function controller.step(id, dt, x, y)
+  return 0, 0
+end
+
+function controller.interact(id, source_id)
+  engine.scene.request_transition("cave", 96, 128)
+  engine.audio.play_sound("levelUp")
+end
+`)
+    })
+    const character = createBridgeCharacter()
+    const player = createInitialPlayerCharacter({ mapWidth: 20, mapHeight: 20 })
+
+    try {
+      runtime.attachCharacter(character, character.controller)
+      expect(
+        runtime.handleInteraction(character, character.controller, player)
+      ).toBeUndefined()
+      expect(runtime.drainEvents()).toEqual([
+        { kind: 'request-scene-transition', sceneId: 'cave', x: 96, y: 128 },
+        { kind: 'play-sound', soundId: 'levelUp' }
+      ])
+    } finally {
+      runtime.destroy()
+    }
+  })
+
   it('exposes TMX-backed controller config through engine.self', async () => {
     const runtime = await createBridgeRuntime({
       source: createControllerModuleSource(`

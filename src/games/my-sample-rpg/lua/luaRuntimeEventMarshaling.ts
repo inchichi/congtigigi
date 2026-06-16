@@ -92,6 +92,14 @@ const EVENT_PARSERS: Record<string, RuntimeEventParser> = {
     typeof raw.key === 'string' &&
     typeof raw.value === 'string'
       ? { kind: 'set-config', characterId: raw.characterId, key: raw.key, value: raw.value }
+      : undefined,
+  'request-scene-transition': (raw) =>
+    typeof raw.sceneId === 'string' && isFiniteNumber(raw.x) && isFiniteNumber(raw.y)
+      ? { kind: 'request-scene-transition', sceneId: raw.sceneId, x: raw.x, y: raw.y }
+      : undefined,
+  'play-sound': (raw) =>
+    typeof raw.soundId === 'string'
+      ? { kind: 'play-sound', soundId: raw.soundId }
       : undefined
 }
 

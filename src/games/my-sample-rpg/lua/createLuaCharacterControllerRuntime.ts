@@ -273,6 +273,18 @@ local function encode_runtime_event(event)
       .. ',"value":' .. escape_json_string(event.value) .. '}'
   end
 
+  if event.kind == 'request-scene-transition' then
+    return '{"kind":"request-scene-transition","sceneId":'
+      .. escape_json_string(event.scene_id)
+      .. ',"x":' .. tostring(event.x)
+      .. ',"y":' .. tostring(event.y) .. '}'
+  end
+
+  if event.kind == 'play-sound' then
+    return '{"kind":"play-sound","soundId":'
+      .. escape_json_string(event.sound_id) .. '}'
+  end
+
   error('Unsupported engine runtime event kind: ' .. tostring(event.kind))
 end
 
@@ -723,6 +735,26 @@ function ${LUA_CONTROLLER_PUBLIC_API_NAME}.self.set_config(key, value)
     character_id = require_current_character_id(),
     key = tostring(key),
     value = tostring(value)
+  }
+end
+
+function ${LUA_CONTROLLER_PUBLIC_API_NAME}.scene.request_transition(scene_id, x, y)
+  if scene_id == nil then return end
+  runtime.queued_events[#runtime.queued_events + 1] = {
+    kind = 'request-scene-transition',
+    scene_id = tostring(scene_id),
+    x = (type(x) == 'number' and x == x) and x or 0,
+    y = (type(y) == 'number' and y == y) and y or 0
+  }
+end
+
+${LUA_CONTROLLER_PUBLIC_API_NAME}.audio = ${LUA_CONTROLLER_PUBLIC_API_NAME}.audio or {}
+
+function ${LUA_CONTROLLER_PUBLIC_API_NAME}.audio.play_sound(sound_id)
+  if sound_id == nil then return end
+  runtime.queued_events[#runtime.queued_events + 1] = {
+    kind = 'play-sound',
+    sound_id = tostring(sound_id)
   }
 end
 `

@@ -172,7 +172,7 @@ import santaPortraitUrl from '../assets/portraits/santa.png'
 import type { MonsterAnimationTextures } from './monsterAnimationTextures'
 import { loadMonsterPigAnimationTextures } from './loadMonsterPigAnimationTextures'
 import { loadMonsterSlimeAnimationTextures } from './loadMonsterSlimeAnimationTextures'
-import { createGameSoundEffects } from './createGameSoundEffects'
+import { createGameSoundEffects, isGameSoundEffectId } from './createGameSoundEffects'
 import {
   createPauseMenuOverlay,
   type AudioSettings
@@ -5718,6 +5718,19 @@ export const createPixiTiledMapView = async ({
         }
         if (event.kind === 'set-config') {
           applyNpcConfigUpdate(event.characterId, event.key, event.value)
+          continue
+        }
+        if (event.kind === 'request-scene-transition') {
+          onRequestSceneChange({
+            sceneId: event.sceneId,
+            spawn: { x: event.x, y: event.y }
+          })
+          continue
+        }
+        if (event.kind === 'play-sound') {
+          if (isGameSoundEffectId(event.soundId)) {
+            gameSoundEffects.play(event.soundId)
+          }
           continue
         }
 

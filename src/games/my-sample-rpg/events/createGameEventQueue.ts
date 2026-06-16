@@ -24,7 +24,9 @@ import type {
   LuaControllerRequestQuestCompleteEvent,
   LuaControllerRequestInventoryAddEvent,
   LuaControllerRequestInventoryRemoveEvent,
-  LuaControllerSetConfigEvent
+  LuaControllerSetConfigEvent,
+  LuaControllerRequestSceneTransitionEvent,
+  LuaControllerPlaySoundEvent
 } from '../lua/luaControllerApi'
 
 export type GameEvent =
@@ -37,6 +39,8 @@ export type GameEvent =
   | LuaControllerRequestInventoryAddEvent
   | LuaControllerRequestInventoryRemoveEvent
   | LuaControllerSetConfigEvent
+  | LuaControllerRequestSceneTransitionEvent
+  | LuaControllerPlaySoundEvent
 
 export type GameEventQueue = {
   enqueue: (event: GameEvent) => void
