@@ -8,18 +8,18 @@ const profile = CURRENT_GAME_PROJECT_PROFILE
 
 const validQuest = (): GeneratedQuestJson => ({
   quest_id: 'hunt_forest_slimes',
-  title: '숲의 슬라임 사냥',
+  title: 'Forest Slime Hunt',
   giver_npc_id: 'wizard',
-  region: '티르코네일',
-  request_text: '슬라임을 잡아줘',
-  guide_text: '사냥터로 가라',
-  start_dialogue_lines: ['시작'],
-  active_dialogue_lines: ['진행'],
-  completion_dialogue_lines: ['완료'],
+  region: 'Town',
+  request_text: 'Please help me.',
+  guide_text: 'Go now.',
+  start_dialogue_lines: ['Start'],
+  active_dialogue_lines: ['Active'],
+  completion_dialogue_lines: ['Done'],
   objectives: [
     {
       type: 'monster-defeat',
-      label: '슬라임 3마리 처치',
+      label: 'Defeat slimes',
       required: 3,
       target: { sceneId: 'hunting-ground', appearanceType: 'monster_slime' }
     }
@@ -44,7 +44,7 @@ describe('dryRunQuestApply', () => {
       objectives: [
         {
           type: 'monster-defeat' as const,
-          label: '마을 슬라임',
+          label: 'Town slime',
           required: 1,
           target: { sceneId: 'town', appearanceType: 'monster_slime' }
         }
@@ -55,8 +55,14 @@ describe('dryRunQuestApply', () => {
     expect(report.ok).toBe(false)
   })
 
-  it('fails resolve_giver for a non-giver npc', () => {
-    const report = dryRunQuestApply({ ...validQuest(), giver_npc_id: 'santa' }, profile)
+  it('fails resolve_giver when the selected npc does not match', () => {
+    const report = dryRunQuestApply(validQuest(), profile, { selectedEntityId: 'santa' })
+    expect(stepStatus(report, 'resolve_giver')).toBe('fail')
+    expect(report.ok).toBe(false)
+  })
+
+  it('fails resolve_giver for an unknown npc', () => {
+    const report = dryRunQuestApply({ ...validQuest(), giver_npc_id: 'ghost' }, profile)
     expect(stepStatus(report, 'resolve_giver')).toBe('fail')
     expect(report.ok).toBe(false)
   })
@@ -69,6 +75,40 @@ describe('dryRunQuestApply', () => {
     const report = dryRunQuestApply(quest, profile)
     expect(stepStatus(report, 'reward_items')).toBe('warn')
     expect(report.ok).toBe(true)
+  })
+
+  it('passes an item-acquire objective for a monster-drop item', () => {
+    const quest = {
+      ...validQuest(),
+      objectives: [
+        {
+          type: 'item-acquire' as const,
+          label: 'Iron sword',
+          required: 1,
+          target: { itemId: 'iron-sword' }
+        }
+      ]
+    }
+    const report = dryRunQuestApply(quest, profile)
+    expect(stepStatus(report, 'objective_1')).toBe('ok')
+    expect(report.ok).toBe(true)
+  })
+
+  it('fails an item-acquire objective for a non-monster-drop item', () => {
+    const quest = {
+      ...validQuest(),
+      objectives: [
+        {
+          type: 'item-acquire' as const,
+          label: 'Smith charm',
+          required: 1,
+          target: { itemId: 'smith-charm' }
+        }
+      ]
+    }
+    const report = dryRunQuestApply(quest, profile)
+    expect(stepStatus(report, 'objective_1')).toBe('fail')
+    expect(report.ok).toBe(false)
   })
 
   it('does not mutate the profile (snapshot discarded)', () => {

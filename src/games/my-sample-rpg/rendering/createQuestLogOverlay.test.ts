@@ -32,6 +32,18 @@ describe('quest log overlay portraits', () => {
       width: 16,
       height: 16
     })
+    expect(getQuestGiverPortraitFrame('villager_1')).toEqual({
+      x: 16,
+      y: 112,
+      width: 16,
+      height: 16
+    })
+    expect(getQuestGiverPortraitFrame('santa')).toEqual({
+      x: 16,
+      y: 112,
+      width: 16,
+      height: 16
+    })
   })
 
   it('has portrait frames for all NPCs that give quests', () => {

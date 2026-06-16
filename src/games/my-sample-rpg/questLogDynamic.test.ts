@@ -6,10 +6,15 @@ import {
   createInitialQuestLog,
   ensureQuestProgressEntries,
   getAllQuestDefinitions,
+  getNextQuestInteractionForNpc,
+  getQuestNpcBadgeKindForNpc,
   getQuestProgress,
+  recordItemAcquireQuestProgress,
   recordMonsterDefeatQuestProgress,
+  recordTalkQuestProgress,
   registerDynamicQuestDefinitions,
   startQuest,
+  setQuestDefinitionVisibilityFilter,
   type QuestDefinition
 } from './questLog'
 
@@ -66,10 +71,104 @@ describe('dynamic quest registry', () => {
     expect(getQuestProgress(result.nextQuestLog, DYNAMIC_QUEST_ID).status).toBe('completed')
   })
 
+  it('prioritizes a newly registered dynamic quest over the static wizard quest', () => {
+    registerDynamicQuestDefinitions([dynamicQuest()])
+    const log = ensureQuestProgressEntries(createInitialQuestLog())
+
+    expect(getNextQuestInteractionForNpc(log, 'wizard')).toMatchObject({
+      questId: DYNAMIC_QUEST_ID,
+      action: 'start'
+    })
+  })
+
   it('appears in getAllQuestDefinitions after registration only', () => {
     const before = getAllQuestDefinitions().length
     registerDynamicQuestDefinitions([dynamicQuest()])
     expect(getAllQuestDefinitions().length).toBe(before + 1)
+  })
+
+  it('limits preview visibility to the latest pending quest snapshot', () => {
+    const potionQuest: QuestDefinition = {
+      ...dynamicQuest(),
+      id: 'dynamic_potion_merchant',
+      giverNpcId: 'potion_merchant',
+      giverName: '물약상인',
+      title: '물약상인 돕기',
+      trackerLabel: '물약상인 돕기'
+    }
+
+    registerDynamicQuestDefinitions([potionQuest])
+    setQuestDefinitionVisibilityFilter([potionQuest.id])
+
+    const log = ensureQuestProgressEntries(createInitialQuestLog())
+
+    expect(getQuestNpcBadgeKindForNpc(log, 'wizard')).toBeUndefined()
+    expect(getNextQuestInteractionForNpc(log, 'wizard')).toBeUndefined()
+    expect(getQuestNpcBadgeKindForNpc(log, 'potion_merchant')).toBe('new')
+    expect(getNextQuestInteractionForNpc(log, 'potion_merchant')).toMatchObject(
+      {
+        questId: potionQuest.id,
+        action: 'start'
+      }
+    )
+  })
+
+  it('shows a quest badge for a town resident giver', () => {
+    const villagerQuest: QuestDefinition = {
+      ...dynamicQuest(),
+      id: 'dynamic_villager_quest',
+      giverNpcId: 'villager_1',
+      giverName: '마을 주민',
+      title: '마을 주민의 부탁',
+      trackerLabel: '마을 주민의 부탁'
+    }
+
+    registerDynamicQuestDefinitions([villagerQuest])
+    setQuestDefinitionVisibilityFilter([villagerQuest.id])
+
+    const log = ensureQuestProgressEntries(createInitialQuestLog())
+
+    expect(getQuestNpcBadgeKindForNpc(log, 'wizard')).toBeUndefined()
+    expect(getQuestNpcBadgeKindForNpc(log, 'villager_1')).toBe('new')
+    expect(getNextQuestInteractionForNpc(log, 'villager_1')).toMatchObject({
+      questId: villagerQuest.id,
+      action: 'start'
+    })
+  })
+
+  it('shows a quest badge and interaction for an active talk target npc', () => {
+    const talkQuest: QuestDefinition = {
+      ...dynamicQuest(),
+      id: 'dynamic_talk_target_quest',
+      giverNpcId: 'wizard',
+      giverName: '마법사',
+      title: '주민에게 단서 묻기',
+      trackerLabel: '주민에게 단서 묻기',
+      objectives: [
+        {
+          id: 'talk_target',
+          label: '마을 주민에게 묻기',
+          required: 1,
+          type: 'talk',
+          target: { npcId: 'villager_1' }
+        }
+      ]
+    }
+
+    registerDynamicQuestDefinitions([talkQuest])
+    setQuestDefinitionVisibilityFilter([talkQuest.id])
+
+    let log = ensureQuestProgressEntries(createInitialQuestLog())
+    log = startQuest(log, talkQuest.id)
+
+    expect(getQuestNpcBadgeKindForNpc(log, 'villager_1')).toBe('new')
+    expect(getNextQuestInteractionForNpc(log, 'villager_1')).toMatchObject({
+      questId: talkQuest.id,
+      action: 'active'
+    })
+
+    log = recordTalkQuestProgress(log, 'villager_1')
+    expect(getQuestProgress(log, talkQuest.id).status).toBe('ready-to-turn-in')
   })
 
   it('ignores a dynamic id that collides with a static quest id', () => {
@@ -77,6 +176,33 @@ describe('dynamic quest registry', () => {
     const before = getAllQuestDefinitions().length
     registerDynamicQuestDefinitions([{ ...dynamicQuest(), id: staticId }])
     expect(getAllQuestDefinitions().length).toBe(before)
+  })
+
+  it('progresses an item-acquire objective when the item is acquired', () => {
+    registerDynamicQuestDefinitions([
+      {
+        ...dynamicQuest(),
+        id: 'dynamic_acquire',
+        objectives: [
+          {
+            id: 'obj_acquire',
+            label: '강철 검 획득',
+            required: 1,
+            type: 'item-acquire',
+            target: { itemId: 'iron-sword' }
+          }
+        ]
+      }
+    ])
+    let log = ensureQuestProgressEntries(createInitialQuestLog())
+    log = startQuest(log, 'dynamic_acquire')
+
+    // 다른 아이템 획득은 진행시키지 않는다.
+    log = recordItemAcquireQuestProgress(log, 'health-potion')
+    expect(getQuestProgress(log, 'dynamic_acquire').status).toBe('active')
+
+    log = recordItemAcquireQuestProgress(log, 'iron-sword')
+    expect(getQuestProgress(log, 'dynamic_acquire').status).toBe('ready-to-turn-in')
   })
 
   it('ensureQuestProgressEntries does not overwrite existing progress', () => {

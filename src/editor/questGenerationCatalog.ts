@@ -1,8 +1,3 @@
-// My Sample RPG의 퀘스트 목표 grounding/검증 카탈로그.
-// 프로필(gameStructureProfile)에는 맵·NPC·아이템만 있고 몬스터/상점/씬-목표 정보가 없어서,
-// 런타임이 실제로 추적하는 값들(questLog.ts의 정적 퀘스트가 쓰는 target 값과 동일)을 여기 모은다.
-// 이 값들이 틀리면 게임에서 목표가 영원히 진행되지 않으므로, 생성·검증 양쪽에서 이 카탈로그로 접지한다.
-
 export type QuestObjectiveType =
   | 'monster-defeat'
   | 'item-use'
@@ -20,8 +15,7 @@ export const QUEST_OBJECTIVE_TYPES: QuestObjectiveType[] = [
   'talk'
 ]
 
-// 드롭·상점 구매로 "획득"이 추적되는 아이템(playerEquipment 장비 + 포션). item-acquire 목표의
-// target.itemId는 이 목록에서 골라야 게임에서 진행된다.
+// Items that can exist in the project inventory or shops.
 export const ACQUIRABLE_ITEMS: { itemId: string; label: string }[] = [
   { itemId: 'iron-sword', label: '강철 검' },
   { itemId: 'bronze-sword', label: '청동 검' },
@@ -30,42 +24,57 @@ export const ACQUIRABLE_ITEMS: { itemId: string; label: string }[] = [
   { itemId: 'quick-dagger', label: '단검' },
   { itemId: 'spiked-mace', label: '철퇴' },
   { itemId: 'magic-staff', label: '마법 지팡이' },
-  { itemId: 'iron-armor', label: '철 옷' },
+  { itemId: 'iron-armor', label: '철 갑옷' },
   { itemId: 'Leather_Armor', label: '가죽 갑옷' },
   { itemId: 'Leather_Helmet', label: '가죽 투구' },
   { itemId: 'Chain_Armor', label: '사슬 갑옷' },
   { itemId: 'Chain_Helmet', label: '사슬 투구' },
   { itemId: 'Iron_Armor', label: '철 갑옷' },
   { itemId: 'Iron_Helmet', label: '철 투구' },
-  { itemId: 'leather-boots', label: '가죽 신발' },
+  { itemId: 'leather-boots', label: '가죽 장화' },
   { itemId: 'smith-charm', label: '수호 부적' },
   { itemId: 'health-potion', label: '체력 회복 포션' },
   { itemId: 'mana-potion', label: '마나 회복 포션' }
 ]
 
-// 처치 추적이 되는 몬스터 외형 타입(런타임 appearanceType). 현재 슬라임/돼지 2종뿐.
+// Items that can be validated as monster drops in the current game.
+export const QUEST_MONSTER_DROP_ITEMS: { itemId: string; label: string }[] = [
+  { itemId: 'iron-sword', label: '강철 검' },
+  { itemId: 'battle-axe', label: '전투 도끼' },
+  { itemId: 'long-spear', label: '장창' },
+  { itemId: 'quick-dagger', label: '단검' },
+  { itemId: 'spiked-mace', label: '철퇴' },
+  { itemId: 'magic-staff', label: '마법 지팡이' },
+  { itemId: 'Leather_Armor', label: '가죽 갑옷' },
+  { itemId: 'Leather_Helmet', label: '가죽 투구' },
+  { itemId: 'Chain_Armor', label: '사슬 갑옷' },
+  { itemId: 'Chain_Helmet', label: '사슬 투구' },
+  { itemId: 'Iron_Armor', label: '철 갑옷' },
+  { itemId: 'Iron_Helmet', label: '철 투구' }
+]
+
 export const QUEST_MONSTERS: { appearanceType: string; label: string }[] = [
-  { appearanceType: 'monster_slime', label: '슬라임(말캉이)' },
+  { appearanceType: 'monster_slime', label: '슬라임' },
   { appearanceType: 'monster_pig', label: '돼지' }
 ]
 
-// 몬스터가 등장하는 씬(monster-defeat의 sceneId로 써야 진행됨).
 export const QUEST_MONSTER_SCENES = ['hunting-ground', 'cave']
 
-// scene-enter 목표로 쓸 수 있는 씬. town은 시작 지점이라 즉시 완료돼 버리므로 제외한다.
+// town is the start scene and would complete immediately, so it is excluded.
 export const QUEST_SCENE_ENTER_SCENES = ['hunting-ground', 'cave']
 
-// 상점 열기 목표의 shopId(런타임이 실제로 발생시키는 값: blacksmith, potion).
 export const QUEST_SHOPS: { shopId: string; label: string }[] = [
   { shopId: 'blacksmith', label: '대장간 상점' },
   { shopId: 'potion', label: '포션 상점' }
 ]
 
-// 퀘스트를 줄 수 있는 NPC(시작/진행/완료 대화 흐름이 보장되는 wired NPC).
+// All NPCs that exist in the current project snapshot and can plausibly give quests.
 export const QUEST_GIVER_NPCS: { npcId: string; label: string }[] = [
   { npcId: 'wizard', label: '마법사' },
   { npcId: 'potion_merchant', label: '포션 상인' },
-  { npcId: 'blacksmith', label: '대장장이' }
+  { npcId: 'blacksmith', label: '대장장이' },
+  { npcId: 'santa', label: '산타' },
+  { npcId: 'villager_1', label: '마을 사람' }
 ]
 
 export const isQuestMonsterAppearance = (appearanceType: string): boolean =>
@@ -86,7 +95,9 @@ export const isQuestGiverNpc = (npcId: string): boolean =>
 export const isAcquirableItem = (itemId: string): boolean =>
   ACQUIRABLE_ITEMS.some((item) => item.itemId === itemId)
 
-// LLM 프롬프트에 넣을 사람이 읽는 카탈로그 요약.
+export const isQuestMonsterDropItem = (itemId: string): boolean =>
+  QUEST_MONSTER_DROP_ITEMS.some((item) => item.itemId === itemId)
+
 export const buildQuestCatalogText = (): string => {
   const monsters = QUEST_MONSTERS.map(
     (monster) => `${monster.appearanceType}(${monster.label})`
@@ -95,15 +106,16 @@ export const buildQuestCatalogText = (): string => {
   const givers = QUEST_GIVER_NPCS.map(
     (giver) => `${giver.npcId}(${giver.label})`
   ).join(', ')
-  const acquirable = ACQUIRABLE_ITEMS.map(
+  const monsterDrops = QUEST_MONSTER_DROP_ITEMS.map(
     (item) => `${item.itemId}(${item.label})`
   ).join(', ')
+
   return [
-    `처치 가능 몬스터(appearanceType): ${monsters}`,
-    `몬스터 등장 씬(sceneId): ${QUEST_MONSTER_SCENES.join(', ')}`,
-    `이동 목표 씬(scene-enter sceneId): ${QUEST_SCENE_ENTER_SCENES.join(', ')}`,
-    `상점(shopId): ${shops}`,
-    `획득 목표 아이템(item-acquire itemId): ${acquirable}`,
-    `퀘스트 기버 NPC(giver_npc_id): ${givers}`
+    `몬스터 appearanceType: ${monsters}`,
+    `몬스터 sceneId: ${QUEST_MONSTER_SCENES.join(', ')}`,
+    `이동 목표 scene-enter sceneId: ${QUEST_SCENE_ENTER_SCENES.join(', ')}`,
+    `상점 shopId: ${shops}`,
+    `획득 목표 item-acquire itemId (monster drop only): ${monsterDrops}`,
+    `퀘스트 기버 NPC givers: ${givers}`
   ].join('\n')
 }

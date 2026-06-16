@@ -110,7 +110,8 @@ describe('questLog', () => {
   it('tracks the first slime hunt and toggles the tracker independently', () => {
     let questLog = startQuest(createInitialQuestLog(), FIRST_SLIME_HUNT_QUEST_ID)
 
-    expect(getVisibleQuestTrackers(questLog)).toEqual([
+    // 트래커 아이템은 활성 목표(objective)도 함께 담는다 — questId/text만 확인한다.
+    expect(getVisibleQuestTrackers(questLog)).toMatchObject([
       {
         questId: FIRST_SLIME_HUNT_QUEST_ID,
         text: '첫 사냥: 말캉이 처치 0/3'

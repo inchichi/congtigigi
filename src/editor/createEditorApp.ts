@@ -36,7 +36,7 @@ import { generateQuestJson } from './questJsonGenerator'
 import { dryRunQuestApply } from './dryRunQuestApply'
 import { convertGeneratedQuestToDefinition } from './questCodeGenerator'
 import { createGeneratedQuestValidationIssues } from './questJsonSchema'
-import { savePendingQuest } from './pendingQuests'
+import { replacePendingQuests } from './pendingQuests'
 
 // 하드코딩 어댑터가 엔티티를 못 찾은 미지의 게임을, LLM 분석이 찾은 editable 그룹으로 채운다.
 const buildEntitiesFromAnalysis = (
@@ -83,6 +83,11 @@ type CreateEditorAppInput = {
   initialFiles: GameFile[]
   gamePreviewUrl: string
 }
+
+const findEntityById = (game: LoadedGame, entityId: string): GameEntity | undefined =>
+  game.maps
+    .flatMap((map) => map.entities)
+    .find((entity) => entity.id === entityId || entity.name === entityId)
 
 const API_KEY_STORAGE_KEY = 'my-sample-rpg:anthropic-api-key'
 const MODEL_STORAGE_PREFIX = 'my-sample-rpg:model:'
@@ -1889,6 +1894,15 @@ export const createEditorApp = ({
       setStatus('이 게임의 구조 프로필이 없습니다.')
       return
     }
+    const effectiveEntity =
+      candidate.target_hint
+        ? findEntityById(game, candidate.target_hint) ??
+          (selectedEntity?.kind === 'npc' ? selectedEntity : undefined)
+        : selectedEntity?.kind === 'npc'
+          ? selectedEntity
+          : undefined
+    const selectedNpcId =
+      effectiveEntity?.kind === 'npc' ? effectiveEntity.id : undefined
     isGenerating = true
     const filesAtStart = currentFiles
     setStatus(`"${candidate.title}" 후보로 단계별 퀘스트 생성 중...`)
@@ -1900,14 +1914,19 @@ export const createEditorApp = ({
         apiKey: apiKey.trim(),
         userPrompt: promptInput.value,
         profile,
-        candidate
+        candidate,
+        entity: effectiveEntity
       })
       if (currentFiles !== filesAtStart) {
         return
       }
       // 무결성 검증(드라이런): 목표/기버/보상 타깃이 런타임에서 추적되는 값인지 단계별 점검.
-      currentDryRun = dryRunQuestApply(quest, profile)
-      const issues = createGeneratedQuestValidationIssues(quest, profile).map(
+      currentDryRun = dryRunQuestApply(quest, profile, {
+        selectedEntityId: selectedNpcId
+      })
+      const issues = createGeneratedQuestValidationIssues(quest, profile, {
+        selectedEntityId: selectedNpcId
+      }).map(
         (issue) => `${issue.path} - ${issue.message}`
       )
       // 결과 보드/적용 경로가 쓰는 GenerationResult 형태로 감싼다(apply는 런타임 퀘스트로 변환·저장).
@@ -1916,7 +1935,9 @@ export const createEditorApp = ({
         preview: JSON.stringify(quest, null, 2),
         issues,
         apply: () => {
-          savePendingQuest(convertGeneratedQuestToDefinition(quest, profile))
+          replacePendingQuests([
+            convertGeneratedQuestToDefinition(quest, profile)
+          ])
         },
         bridgePayload: null
       }
@@ -2005,6 +2026,12 @@ export const createEditorApp = ({
         card.append(chip)
       }
       card.addEventListener('click', () => {
+        if (candidate.target_hint) {
+          const targetEntity = findEntityById(game, candidate.target_hint)
+          if (targetEntity?.kind === 'npc') {
+            selectedEntity = targetEntity
+          }
+        }
         selectedCandidateIndex = index
         renderCandidates()
         render()

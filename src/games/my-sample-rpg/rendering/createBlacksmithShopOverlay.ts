@@ -962,6 +962,28 @@ const renderPotionIcon = (
   setBackgroundFrame(element, POTION_ICON_FRAME_BY_ID[itemId], scale)
 }
 
+// 아이템 id만으로 아이콘을 그린다(퀘스트 대상 이미지 팝업 등에서 재사용). 성공 시 true.
+export const renderItemIconById = (
+  element: HTMLElement,
+  itemId: string,
+  scale: number
+): boolean => {
+  if (itemId in POTION_ICON_FRAME_BY_ID) {
+    renderPotionIcon(
+      element,
+      itemId as keyof typeof POTION_ICON_FRAME_BY_ID,
+      scale
+    )
+    return true
+  }
+  const definition = getPlayerEquipmentItemDefinitionById(itemId)
+  if (definition) {
+    renderEquipmentIcon(element, definition, scale)
+    return true
+  }
+  return false
+}
+
 const setGenericIcon = (element: HTMLElement) => {
   element.style.backgroundImage = 'none'
   element.style.backgroundPosition = '0 0'

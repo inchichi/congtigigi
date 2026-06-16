@@ -56,11 +56,17 @@ import {
 } from './playerControls'
 import {
   createInitialQuestLog,
+  clearDynamicQuestDefinitions,
   ensureQuestProgressEntries,
   recordSceneEnterQuestProgress,
-  registerDynamicQuestDefinitions
+  registerDynamicQuestDefinitions,
+  setQuestDefinitionVisibilityFilter
 } from './questLog'
-import { loadPendingQuests, PENDING_QUESTS_STORAGE_KEY } from '../../editor/pendingQuests'
+import {
+  clearPendingQuests,
+  loadPendingQuests,
+  PENDING_QUESTS_STORAGE_KEY
+} from '../../editor/pendingQuests'
 import { getSceneIntroMessage } from './sceneIntro'
 import { createPixiTiledMapView } from './rendering/createPixiTiledMapView'
 import {
@@ -185,7 +191,13 @@ let questLog = createInitialQuestLog()
 // 에디터가 생성·주입한 동적 퀘스트를 런타임 퀘스트 엔진에 등록하고, 진행도 항목을 채운다.
 // 부팅 전에 questLog를 갱신해야 bootstrapScene이 그걸 렌더러로 넘긴다(배지·추적·완료 전부 작동).
 const applyPendingQuests = (): void => {
-  registerDynamicQuestDefinitions(loadPendingQuests())
+  const pendingQuests = loadPendingQuests()
+  clearDynamicQuestDefinitions()
+  registerDynamicQuestDefinitions(pendingQuests)
+  setQuestDefinitionVisibilityFilter(pendingQuests.map((quest) => quest.id))
+  if (pendingQuests.length > 0) {
+    clearPendingQuests()
+  }
   questLog = ensureQuestProgressEntries(questLog)
 }
 applyPendingQuests()
@@ -948,6 +960,7 @@ window.addEventListener('message', (event) => {
   const sceneId = data.sceneId
 
   if (sceneId === 'town' || sceneId === 'hunting-ground' || sceneId === 'cave') {
+    questLog = recordSceneEnterQuestProgress(questLog, sceneId)
     void bootstrapScene(sceneId).catch(renderFatalError)
   }
 })

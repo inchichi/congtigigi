@@ -4,10 +4,9 @@ import type {
   QuestItemReward
 } from '../games/my-sample-rpg/questLog'
 import type { GameStructureProfile } from './gameStructureProfile'
-import { QUEST_GIVER_NPCS } from './myRpgQuestCatalog'
+import { QUEST_GIVER_NPCS } from './questGenerationCatalog'
 import type { GeneratedQuestJson } from './questJsonSchema'
 
-// 기버 NPC의 표시 이름: 카탈로그 → 프로필 → id 순으로 해결한다.
 const resolveGiverName = (
   giverNpcId: string,
   profile: GameStructureProfile
@@ -21,8 +20,6 @@ const resolveItemLabel = (
   profile: GameStructureProfile
 ): string => profile.items.find((item) => item.id === itemId)?.name ?? itemId
 
-// 생성된 퀘스트 JSON → 런타임 QuestDefinition. 빈 target 필드는 떨어내고, 동적 퀘스트는 선행 퀘스트
-// 없이 바로 풀리도록 prerequisiteQuestIds=[]로 둔다.
 export const convertGeneratedQuestToDefinition = (
   quest: GeneratedQuestJson,
   profile: GameStructureProfile
@@ -33,8 +30,9 @@ export const convertGeneratedQuestToDefinition = (
     (objective, index) => {
       const target: QuestObjectiveDefinition['target'] = {}
       if (objective.target.sceneId) target.sceneId = objective.target.sceneId
-      if (objective.target.appearanceType)
+      if (objective.target.appearanceType) {
         target.appearanceType = objective.target.appearanceType
+      }
       if (objective.target.itemId) target.itemId = objective.target.itemId
       if (objective.target.shopId) target.shopId = objective.target.shopId
       if (objective.target.npcId) target.npcId = objective.target.npcId
