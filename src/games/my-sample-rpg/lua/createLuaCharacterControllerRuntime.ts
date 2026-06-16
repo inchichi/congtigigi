@@ -783,7 +783,8 @@ local function encode_lua_value(value)
     then
       return string.format('%d', math.floor(value))
     end
-    return tostring(value)
+    -- %.17g 는 IEEE double 을 무손실로 왕복시킨다(부동소수 규칙의 정확한 패리티를 위해).
+    return string.format('%.17g', value)
   end
 
   if value_type == 'string' then

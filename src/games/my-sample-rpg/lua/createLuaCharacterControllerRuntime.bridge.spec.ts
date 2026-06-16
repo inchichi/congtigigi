@@ -19,6 +19,13 @@ import {
   getMonsterGoldDropAmount,
   getMonsterSkillPointDropAmount
 } from '../monsterRewards'
+import { createLuaPlayerStatEffects } from '../playerStatEffectsLua'
+import {
+  getPlayerEvadeChance,
+  getPlayerMovementSpeedTilesPerSecond,
+  getPlayerPhysicalAttackPower
+} from '../playerStatEffects'
+import { createInitialPlayerProfile } from '../playerProfile'
 
 const LUA_MODULE_JS_URL = new URL(
   '../../../../public/vendor/lua/lua-5.3.6.mjs',
@@ -539,6 +546,47 @@ end
         )
         expect(luaRewards.getMonsterSkillPointDropAmount(level)).toBe(
           getMonsterSkillPointDropAmount(level)
+        )
+      }
+    } finally {
+      runtime.destroy()
+    }
+  })
+
+  it('runs player stat-effect rules in Lua with float-exact parity to TS', async () => {
+    const runtime = await createBridgeRuntime({
+      source: createControllerModuleSource(`
+function controller.step(id, dt, x, y)
+  return 0, 0
+end
+`)
+    })
+
+    try {
+      const luaStats = createLuaPlayerStatEffects((source) =>
+        runtime.loadDataModule(source)
+      )
+      const base = createInitialPlayerProfile()
+      const withStats = (strength: number, agility: number, luck: number) => ({
+        ...base,
+        stats: { ...base.stats, strength, agility, luck }
+      })
+
+      for (const [strength, agility, luck] of [
+        [1, 4, 0],
+        [5, 10, 3],
+        [20, 2, 30],
+        [8, 20, 15]
+      ]) {
+        const profile = withStats(strength, agility, luck)
+        expect(luaStats.getPlayerPhysicalAttackPower(profile)).toBe(
+          getPlayerPhysicalAttackPower(profile)
+        )
+        expect(luaStats.getPlayerMovementSpeedTilesPerSecond(profile)).toBe(
+          getPlayerMovementSpeedTilesPerSecond(profile)
+        )
+        expect(luaStats.getPlayerEvadeChance(profile)).toBe(
+          getPlayerEvadeChance(profile)
         )
       }
     } finally {

@@ -108,11 +108,7 @@ import {
   type QuestItemReward,
   type QuestLogState
 } from '../questLog'
-import {
-  getPlayerMovementSpeedTilesPerSecond,
-  getPlayerPhysicalAttackPower,
-  shouldPlayerEvadeDamage
-} from '../playerStatEffects'
+import { createLuaPlayerStatEffects } from '../playerStatEffectsLua'
 import { grantPlayerExperience } from '../playerExperience'
 import { rollMonsterEquipmentDrop } from '../monsterEquipmentDrops'
 import { grantPlayerSkillPoints } from '../playerProgression'
@@ -1123,8 +1119,11 @@ export const createPixiTiledMapView = async ({
   let currentQuestLog = questLog
   // Phase 2 읽기 채널: 마지막으로 Lua 에 밀어넣은 스냅샷(변경 시에만 재푸시하기 위한 dirty 체크).
   let lastPushedSnapshotJson = ''
-  // 게임 규칙(몬스터 보상)을 Lua 로 실행한다(Lua 불가 시 TS 폴백). 호출부 시그니처는 동일.
+  // 게임 규칙을 Lua 로 실행한다(Lua 불가 시 TS 폴백). 호출부 시그니처는 TS 와 동일.
   const monsterRewards = createLuaMonsterRewards((source) =>
+    controllerRuntime.loadDataModule(source)
+  )
+  const playerStatEffects = createLuaPlayerStatEffects((source) =>
     controllerRuntime.loadDataModule(source)
   )
   let currentBlacksmithInventory = merchantInventory
@@ -1378,7 +1377,7 @@ export const createPixiTiledMapView = async ({
     playerCharacter.controller = {
       ...playerCharacter.controller,
       moveSpeedTilesPerSecond:
-        getPlayerMovementSpeedTilesPerSecond(playerProfile)
+        playerStatEffects.getPlayerMovementSpeedTilesPerSecond(playerProfile)
     }
   }
   const showSceneIntroBanner = () => {
@@ -4323,7 +4322,7 @@ export const createPixiTiledMapView = async ({
 
     if (
       sourceCharacter &&
-      shouldPlayerEvadeDamage(playerProfile)
+      playerStatEffects.shouldPlayerEvadeDamage(playerProfile)
     ) {
       showCharacterDamageText(
         PLAYER_CHARACTER_ID,
@@ -4498,7 +4497,7 @@ export const createPixiTiledMapView = async ({
     if (targetCharacter) {
       applyDamageToMonster(
         targetCharacter.id,
-        getPlayerPhysicalAttackPower(playerProfile),
+        playerStatEffects.getPlayerPhysicalAttackPower(playerProfile),
         now
       )
       playerAttackResolvedStartedAtMilliseconds =
