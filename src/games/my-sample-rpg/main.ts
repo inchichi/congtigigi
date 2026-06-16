@@ -63,7 +63,10 @@ import { getSceneIntroMessage } from './sceneIntro'
 import { createPixiTiledMapView } from './rendering/createPixiTiledMapView'
 import {
   loadPendingEvents,
-  PENDING_EVENTS_STORAGE_KEY
+  loadPendingLuaScripts,
+  PENDING_EVENTS_STORAGE_KEY,
+  PENDING_LUA_SCRIPTS_STORAGE_KEY,
+  type PendingLuaScript
 } from '../../editor/pendingEvents'
 import type { AudioSettings } from './rendering/createPauseMenuOverlay'
 import type {
@@ -300,6 +303,10 @@ const bootstrapScene = async (
     activeSceneRenderer?.applyEventDraft(pendingEvent, {
       targetCharacterId: pendingEvent.npc.id
     })
+  }
+
+  for (const pendingLuaScript of loadPendingLuaScripts()) {
+    applyPendingLuaScript(pendingLuaScript)
   }
 }
 
@@ -891,15 +898,38 @@ if (import.meta.hot) {
 
 // 에디터(별도 page/iframe)가 이벤트를 저장하면 같은 origin의 다른 문서에서 storage 이벤트가
 // 발생한다. 게임 프리뷰가 열려 있으면 새로고침 없이 즉시 적용한다.
+// 에디터가 생성한 Lua 컨트롤러를 대상 NPC에 핫 적용한다. 런타임이 Lua를 검증·재빌드하므로
+// 잘못된 코드면 throw 하고, 여기서 잡아 게임이 죽지 않게 한다(권위 있는 검증은 게임 측).
+function applyPendingLuaScript(pendingLuaScript: PendingLuaScript): void {
+  try {
+    activeSceneRenderer?.applyLuaScript({
+      targetCharacterId: pendingLuaScript.target_character_id,
+      source: pendingLuaScript.source
+    })
+  } catch (error) {
+    console.error(
+      `Failed to apply pending Lua script for "${pendingLuaScript.target_character_id}".`,
+      error
+    )
+  }
+}
+
+// 에디터(별도 page/iframe)가 이벤트/Lua를 저장하면 같은 origin의 다른 문서에서 storage 이벤트가
+// 발생한다. 게임 프리뷰가 열려 있으면 새로고침 없이 즉시 적용한다.
 window.addEventListener('storage', (event) => {
-  if (event.key !== PENDING_EVENTS_STORAGE_KEY) {
+  if (event.key === PENDING_EVENTS_STORAGE_KEY) {
+    for (const pendingEvent of loadPendingEvents()) {
+      activeSceneRenderer?.applyEventDraft(pendingEvent, {
+        targetCharacterId: pendingEvent.npc.id
+      })
+    }
     return
   }
 
-  for (const pendingEvent of loadPendingEvents()) {
-    activeSceneRenderer?.applyEventDraft(pendingEvent, {
-      targetCharacterId: pendingEvent.npc.id
-    })
+  if (event.key === PENDING_LUA_SCRIPTS_STORAGE_KEY) {
+    for (const pendingLuaScript of loadPendingLuaScripts()) {
+      applyPendingLuaScript(pendingLuaScript)
+    }
   }
 })
 
