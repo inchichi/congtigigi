@@ -33,9 +33,11 @@ export type PauseMenuOverlay = {
 }
 
 const OVERLAY_MARGIN = 16
-const PANEL_WIDTH = 420
-const MAIN_PANEL_HEIGHT = 300
-const CONTROLS_PANEL_HEIGHT = 420
+// 캐주얼 게임 설정창 리디자인에 맞춘 폭(520px) — 높이는 화면에 맞춰 클램프된다.
+// 제목 32px·슬라이더·버튼이 커져서 메인 화면 높이도 함께 키웠다.
+const PANEL_WIDTH = 520
+const MAIN_PANEL_HEIGHT = 360
+const CONTROLS_PANEL_HEIGHT = 480
 
 export const createPauseMenuOverlay = ({
   mountElement,
@@ -67,8 +69,8 @@ export const createPauseMenuOverlay = ({
   const resetButton = document.createElement('button')
   const resumeButton = document.createElement('button')
   const backButton = document.createElement('button')
-  const bgmRow = createVolumeRow('BGM')
-  const sfxRow = createVolumeRow('효과음')
+  const bgmRow = createVolumeRow('🔊 BGM')
+  const sfxRow = createVolumeRow('✨ 효과음')
   const bindingRows = getPlayerControlBindingDefinitions().map(
     (definition) => {
       const button = document.createElement('button')
@@ -119,7 +121,7 @@ export const createPauseMenuOverlay = ({
   panelBody.className = 'pause-menu-overlay__panel-body'
   titleElement.id = 'pause-menu-title'
   titleElement.className = 'pause-menu-overlay__title'
-  titleElement.textContent = '일시정지'
+  titleElement.textContent = '⚙ 게임 설정'
 
   screenHost.className = 'pause-menu-overlay__screen-host'
 
@@ -174,6 +176,8 @@ export const createPauseMenuOverlay = ({
 
     row.input.value = String(percentage)
     row.value.textContent = `${percentage}%`
+    // 게임풍 슬라이더의 금색 채움 표시용 CSS 변수(표시 전용) — styles.css의 트랙 그라데이션이 읽는다.
+    row.input.style.setProperty('--fill', `${percentage}%`)
   }
 
   const syncFrame = () => {
@@ -207,7 +211,7 @@ export const createPauseMenuOverlay = ({
     panel.style.transformOrigin = 'center center'
     panel.style.transform = `translate(-50%, -50%) scale(${uiScale})`
     titleElement.textContent =
-      currentScreen === 'controls' ? '단축키 설정' : '일시정지'
+      currentScreen === 'controls' ? '단축키 설정' : '⚙ 게임 설정'
     mainScreen.hidden = currentScreen !== 'main'
     controlsScreen.hidden = currentScreen !== 'controls'
     for (const bindingRow of bindingRows) {

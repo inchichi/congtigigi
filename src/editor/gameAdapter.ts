@@ -7,6 +7,8 @@ import { savePendingEvent } from './pendingEvents'
 import { generateJson } from './llmProvider'
 import { createEntityLinesValidationIssues } from './entityLinesValidator'
 import type { BridgeApplyMessage } from './gameBridge'
+import type { GeneratedEventJson } from './eventJsonSchema'
+import type { QuestCandidate } from './questCandidates'
 
 // 게임에 적용하는 방식:
 // - 'local-storage': 에디터와 같은 origin 웹게임(my-sample-rpg). apply()가 localStorage로 전달.
@@ -40,6 +42,9 @@ export type GenerationRequest = {
   gameContext?: string
   // 있으면 재생성 모드: 이전 결과를 이 피드백에 맞춰 수정한다(처음부터 새로 쓰지 않음).
   feedback?: GenerationFeedback
+  // 퀘스트 2단계: 유저가 고른 자연어 후보. 있으면 그 후보를 이벤트 JSON 생성 프롬프트에 엮는다.
+  // 없으면 기존 단일 생성과 완전히 동일하게 동작한다.
+  candidate?: QuestCandidate
 }
 
 // 재생성 시 모델에 붙이는 수정 지침. 이미 된 부분은 유지하고 거절 사유·검증 문제만 고치게 유도한다.
@@ -73,6 +78,8 @@ export type GenerationResult = {
   apply: (() => void) | null
   // 브리지(별도 프로세스 게임) 적용용 구조화 페이로드. applyMode가 'bridge'인 게임에서 채운다.
   bridgePayload: BridgeApplyMessage | null
+  // 이벤트 JSON 게임(my-sample-rpg)에서 채운다. 에디터가 드라이런 검증(dryRunEventApply)에 쓴다.
+  eventJson?: GeneratedEventJson
 }
 
 export type GameAdapter = {
@@ -132,7 +139,7 @@ export const rpgAdapter: GameAdapter = {
       }
     }),
   applyMode: 'local-storage',
-  generate: async ({ apiKey, userPrompt, entity, profile, feedback }) => {
+  generate: async ({ apiKey, userPrompt, entity, profile, feedback, candidate }) => {
     if (!profile) {
       throw new Error('이 게임의 구조 프로필이 없습니다.')
     }
@@ -140,10 +147,16 @@ export const rpgAdapter: GameAdapter = {
     const targetHint = entity
       ? ` 이 이벤트의 대상은 반드시 NPC id="${entity.id}"(${entity.name}, map=${entity.mapId})로 한다.`
       : ''
+    // 퀘스트 2단계: 고른 후보가 있으면 그 방향대로 이벤트 JSON을 만들게 엮는다.
+    // candidate가 없으면 이 문자열은 빈 값이라 기존 단일 생성과 프롬프트가 동일하다.
+    const candidateHint = candidate
+      ? `\n\n선택된 퀘스트 후보를 그대로 구현한다:\n- 제목: ${candidate.title}\n- 내용: ${candidate.summary}` +
+        (candidate.target_hint ? `\n- 대상 NPC: ${candidate.target_hint}` : '')
+      : ''
     const feedbackHint = feedback ? buildFeedbackInstruction(feedback) : ''
     const eventJson = await generateEventJsonDraftWithClaude({
       apiKey,
-      userPrompt: `${userPrompt}${targetHint}${feedbackHint}`,
+      userPrompt: `${userPrompt}${candidateHint}${targetHint}${feedbackHint}`,
       profile
     })
 
@@ -162,22 +175,49 @@ export const rpgAdapter: GameAdapter = {
           savePendingEvent(spec)
         }
       },
-      bridgePayload: null
+      bridgePayload: null,
+      // 에디터가 드라이런 검증(dryRunEventApply)에 쓰도록 원본 이벤트 JSON을 노출한다.
+      eventJson
     }
   }
 }
 
 // 그룹 이름 → 엔티티 종류. 맵마다 그룹 이름의 대소문자·단복수가 제각각(NPCs/npc/Npc...)이라
 // 소문자로 정규화해 매칭하고, 모르는 그룹은 그룹 이름 자체를 종류로 쓴다(트리에서 카테고리로 묶임).
+// 알 수 없는 그룹은 그룹 이름이 그대로 트리에 영문으로 노출돼 직관성이 떨어진다(예: 'transitions').
+// 흔한 그룹 이름을 에디터가 아는 종류(label·icon·카테고리가 붙는)로 정규화해 한눈에 읽히게 한다.
 const LEGEND_KIND_BY_GROUP: Record<string, string> = {
   enemies: 'enemy',
   enemy: 'enemy',
+  monsters: 'enemy',
+  monster: 'enemy',
   npcs: 'npc',
   npc: 'npc',
   characters: 'npc',
+  character: 'npc',
   chests: 'chest',
   chest: 'chest',
-  loot: 'loot'
+  loot: 'loot',
+  items: 'loot',
+  item: 'loot',
+  // 맵 전환/포털 류 — 영문 'transitions'가 그대로 보이던 그룹을 '포털'로 정규화한다.
+  transitions: 'portal',
+  transition: 'portal',
+  portals: 'portal',
+  portal: 'portal',
+  doors: 'portal',
+  door: 'portal',
+  warps: 'portal',
+  warp: 'portal',
+  // 지형·장식 류.
+  trees: 'tree',
+  tree: 'tree',
+  props: 'prop',
+  prop: 'prop',
+  signs: 'sign',
+  sign: 'sign',
+  buildings: 'building',
+  building: 'building'
 }
 
 // 엔티티가 아니라 충돌·경계 같은 구조용 도형이 든 그룹은 트리에서 제외한다(NPC는 보이게 하되

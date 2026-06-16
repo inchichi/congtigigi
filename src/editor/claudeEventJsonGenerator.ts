@@ -101,7 +101,7 @@ const createSystemPrompt = (profile: GameStructureProfile): string => {
     '너는 2D RPG 게임의 이벤트 기획 도우미다.',
     '사용자의 자연어 설명을 바탕으로 반드시 하나의 이벤트를 생성한다.',
     '제공된 도구 스키마를 정확히 따른다.',
-    'event_id와 event_name은 snake_case로 작성한다.',
+    'event_id와 event_name은 반드시 영문 소문자·숫자·밑줄(_)만 쓰는 snake_case로 작성한다. 한국어·공백·대문자·하이픈을 절대 쓰지 않는다(예: blacksmith_alloy_request). 시나리오가 한국어여도 이 두 필드는 영문으로 짓는다.',
     `location.map_id는 반드시 다음 맵 id 중 하나여야 한다: ${mapList}.`,
     `npc.id는 반드시 다음 NPC id 중 하나여야 한다: ${npcList}.`,
     'location.map_id는 선택한 npc.id가 속한 맵(위 목록의 map=...)과 반드시 같아야 한다.',
