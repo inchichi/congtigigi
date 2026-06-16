@@ -554,12 +554,12 @@ export const createEditorApp = ({
     { label: 'NPC 추가', desc: '주민 생성', text: '마을에 새로운 주민 NPC를 추가해줘', primary: false }
   ]
   let activeSuggestion: string | undefined
-  // 빠른 템플릿 선택 — 기본은 조용하게(hover에서만 강조), 선택된 카드만 금색.
+  // 빠른 템플릿 선택 — 기본은 완전 중립(회색 테두리, 금색 없음). 약한 hover, 금색은 active(클릭)만.
   const QUICK_CARD =
-    'h-[52px] flex flex-col items-start justify-center gap-1 rounded-lg px-3 text-left bg-[#2d2d30] border border-[#d9a85c]/18 transition duration-[180ms] ease-out hover:border-[#d5a14f] hover:bg-[#333333] hover:-translate-y-[2px]'
-  // 대표 액션(NPC 대사·퀘스트) — 배경·브론즈를 한 단계 올려 핵심 기능임이 먼저 읽히게.
-  const QUICK_CARD_PRIMARY =
-    'h-[52px] flex flex-col items-start justify-center gap-1 rounded-lg px-3 text-left bg-[#34322c] border border-[#d9a85c]/40 transition duration-[180ms] ease-out hover:border-[#d5a14f] hover:bg-[#3a382f] hover:-translate-y-[2px]'
+    'h-[52px] flex flex-col items-start justify-center gap-1 rounded-lg px-3 text-left bg-[#2d2d30] border border-[#3c3c3c] transition duration-[180ms] ease-out hover:bg-[#333333] hover:border-[#4a4a4a]'
+  // 대표 액션(NPC 대사·퀘스트)도 기본은 다른 카드와 똑같은 중립으로 둔다(초기 진입 시
+  // 선택된 것처럼 미리 강조되면 안 됨). 강조는 active(클릭)에만.
+  const QUICK_CARD_PRIMARY = QUICK_CARD
   const QUICK_CARD_ACTIVE =
     'h-[52px] flex flex-col items-start justify-center gap-1 rounded-lg px-3 text-left bg-gradient-to-b from-[#e7b15a]/15 to-[#e7b15a]/5 border border-[#e7b15a] shadow-[0_0_12px_rgba(231,177,90,0.18)] transition duration-[180ms] ease-out hover:-translate-y-[2px]'
   const quickStart = el('div', 'flex flex-wrap items-center gap-1.5')
@@ -571,8 +571,9 @@ export const createEditorApp = ({
     const badge = el('span', 'text-[10px] leading-none text-[#e7b15a]', '✓')
     badge.hidden = true
     const titleLine = el('span', 'flex items-center gap-1.5')
+    // 라벨도 기본은 중립 회색 — 금색 글자색은 선택 강조에만 쓴다.
     titleLine.append(
-      el('span', 'text-[14px] leading-none text-[#e8d5a5]', suggestion.label),
+      el('span', 'text-[14px] leading-none text-[#d4d4d4]', suggestion.label),
       badge
     )
     card.append(
