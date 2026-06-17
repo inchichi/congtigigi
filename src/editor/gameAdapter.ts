@@ -76,6 +76,8 @@ export type GenerationResult = {
   issues: string[]
   // 같은 origin 웹게임(local-storage 적용)용. null이면 이 경로로는 적용하지 않는다.
   apply: (() => void) | null
+  // 저장/export할 때 사용할 확장자. JSON이면 기본값, Lua 결과는 .lua를 쓴다.
+  exportFileExtension?: 'json' | 'lua'
   // 브리지(별도 프로세스 게임) 적용용 구조화 페이로드. applyMode가 'bridge'인 게임에서 채운다.
   bridgePayload: BridgeApplyMessage | null
   // 이벤트 JSON 게임(my-sample-rpg)에서 채운다. 에디터가 드라이런 검증(dryRunEventApply)에 쓴다.

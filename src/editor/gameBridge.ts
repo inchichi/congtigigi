@@ -13,8 +13,9 @@ export type BridgeApplyTarget = {
   mapId: string
 }
 
-// 에디터 → 게임으로 보내는 "적용" 메시지. kind로 종류를 구분해 앞으로 확장한다.
-export type BridgeApplyMessage = {
+// 에디터 → 게임으로 보내는 "적용" 메시지. kind로 종류를 구분한다(엔티티 대사 / 퀘스트).
+// 엔티티 대사 적용(기존). 게임은 target.id/mapId로 엔티티를 찾아 lines를 붙인다.
+export type BridgeEntityLinesMessage = {
   // 적용 1건의 고유 id(게임이 ack에 echo). 중복 적용 멱등 처리에 쓸 수 있다.
   id: string
   kind: 'entity_lines'
@@ -23,6 +24,67 @@ export type BridgeApplyMessage = {
   lines: string[]
   generatedAt: number
 }
+
+// 퀘스트 목표 1개(게임의 배치 엔티티 id/맵을 가리킨다). 게임-쪽 quest-runtime이 해석한다.
+export type BridgeQuestObjective = {
+  type: 'defeat' | 'talk' | 'acquire' | 'reach'
+  label: string
+  required: number
+  target: { entityId?: string; mapId?: string }
+}
+
+// 퀘스트 적용(신규). 게임-쪽 quest-runtime.lua가 등록·추적·보상한다(docs/legend-of-lua-quest-contract.md).
+export type BridgeQuestData = {
+  quest_id: string
+  title: string
+  giver_entity_id: string
+  request_text: string
+  guide_text: string
+  dialogue: {
+    start: string[]
+    active: string[]
+    complete: string[]
+  }
+  objectives: BridgeQuestObjective[]
+  rewards: {
+    gold: number
+    experience: number
+    items: { label: string; quantity: number }[]
+  }
+}
+
+export type BridgeQuestMessage = {
+  id: string
+  kind: 'quest'
+  quest: BridgeQuestData
+  generatedAt: number
+}
+
+// NPC 스폰 적용(신규). 실행 중인 legend-of-lua가 받아 NPC를 만든다. 패널(love.js iframe)은 host
+// page의 editor-bridge.js가 받아 Emscripten FS에 Lua 청크로 써두고, 게임의 pollEditorInbox가
+// 읽어 spawnNPC한다(docs/legend-of-lua-npc-contract.md). nearPlayer면 현재 플레이어 옆에 띄운다.
+export type BridgeSpawnNpcData = {
+  name: string
+  map: string
+  appearance: string
+  dialogue: string[]
+  radius: number
+  nearPlayer: boolean
+}
+
+export type BridgeSpawnNpcMessage = {
+  id: string
+  kind: 'spawn_npc'
+  npc: BridgeSpawnNpcData
+  // 게임이 loadstring으로 바로 로드할 한 줄 Lua 테이블(host page 다리가 'spawn-npc:'로 전달).
+  lua: string
+  generatedAt: number
+}
+
+export type BridgeApplyMessage =
+  | BridgeEntityLinesMessage
+  | BridgeQuestMessage
+  | BridgeSpawnNpcMessage
 
 export type BridgeApplyResponse = {
   ok: boolean

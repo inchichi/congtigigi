@@ -37,6 +37,24 @@ import { dryRunQuestApply } from './dryRunQuestApply'
 import { convertGeneratedQuestToDefinition } from './questCodeGenerator'
 import { createGeneratedQuestValidationIssues } from './questJsonSchema'
 import { replacePendingQuests } from './pendingQuests'
+import { buildLuaQuestCatalog } from './luaQuestCatalog'
+import { generateLuaQuestCandidates } from './luaQuestCandidates'
+import { generateLuaQuestJson } from './luaQuestJsonGenerator'
+import { dryRunLuaQuestApply } from './dryRunLuaQuestApply'
+import {
+  renderGeneratedLuaQuestModule,
+  convertLuaQuestToBridgePayload
+} from './luaQuestCodeGenerator'
+import { createGeneratedLuaQuestValidationIssues } from './luaQuestSchema'
+import { generateLuaNpcJson } from './luaNpcJsonGenerator'
+import { dryRunLuaNpcApply } from './dryRunLuaNpcApply'
+import {
+  renderEditorNpcSpawnEntry,
+  convertLuaNpcToGameEntity,
+  convertLuaNpcToSpawnBridgePayload
+} from './luaNpcCodeGenerator'
+import { createGeneratedLuaNpcValidationIssues } from './luaNpcSchema'
+import { createGameBridge } from './gameBridge'
 
 // 하드코딩 어댑터가 엔티티를 못 찾은 미지의 게임을, LLM 분석이 찾은 editable 그룹으로 채운다.
 const buildEntitiesFromAnalysis = (
@@ -88,6 +106,8 @@ const findEntityById = (game: LoadedGame, entityId: string): GameEntity | undefi
   game.maps
     .flatMap((map) => map.entities)
     .find((entity) => entity.id === entityId || entity.name === entityId)
+
+const isLegendOfLuaGame = (game: LoadedGame): boolean => game.adapter.id === 'legend-of-lua'
 
 const API_KEY_STORAGE_KEY = 'my-sample-rpg:anthropic-api-key'
 const MODEL_STORAGE_PREFIX = 'my-sample-rpg:model:'
@@ -365,6 +385,12 @@ export const createEditorApp = ({
   // 퀘스트 모드(2단계 생성): '퀘스트' 빠른시작을 고르면 켜진다. 1단계는 자연어 후보 N개를 만들고,
   // 유저가 하나를 골라 2단계에서 그 후보만 이벤트 JSON으로 만든 뒤 드라이런 검증→적용한다.
   let candidateMode = false
+  // NPC 생성 모드(legend-of-lua 전용 단일 생성): 'NPC 추가' 빠른시작을 legend 게임에서 고르면 켜진다.
+  // '이야기 생성'이 새 NPC를 한 번에 생성→검증하고, 통과하면 game.maps에 주입해 카탈로그/트리가 인식한다.
+  let luaNpcMode = false
+  // NPC 생성은 "새로 만드는" 작업이라 기존 대상을 고를 필요가 없다 — 이 모드에선 대상 선택 단계를
+  // 건너뛰고(흐름·안내가 "대상 선택 필요"에 멈추지 않게) 바로 작성/생성으로 진행한다.
+  const isTargetOptional = (): boolean => luaNpcMode
   let candidates: QuestCandidate[] = []
   let selectedCandidateIndex: number | undefined
   // 인라인 요약 편집 중인 후보 인덱스(표시 전용).
@@ -477,7 +503,11 @@ export const createEditorApp = ({
   summaryCard.append(targetText)
   // 선택 대상 표시 갱신(UI 표시 전용).
   const updateSummary = (): void => {
-    targetValue.textContent = selectedEntity ? selectedEntity.name : '없음'
+    targetValue.textContent = selectedEntity
+      ? selectedEntity.name
+      : isTargetOptional()
+        ? '새 NPC 생성 (대상 불필요)'
+        : '없음'
     // 선택된 동안에만 금색 — 강조는 "지금 선택된 것"에만 쓴다는 규칙.
     // 선택 없음 → 비활성처럼 흐리게, 선택 있음 → 일반 밝기의 금색.
     targetValue.className = selectedEntity
@@ -605,6 +635,9 @@ export const createEditorApp = ({
       activeSuggestion = quickCard.label
       // '퀘스트'만 2단계(후보→선택→검증) 모드. 다른 빠른시작은 기존 단일 생성 흐름.
       candidateMode = quickCard.label === '퀘스트'
+      // 'NPC 추가'는 legend-of-lua에서만 "진짜 NPC 생성"(검증+카탈로그 주입) 모드로 바뀐다.
+      // 그 외 게임에선 기존 대사 생성(entity_lines) 흐름 그대로다.
+      luaNpcMode = quickCard.label === 'NPC 추가' && isLegendOfLuaGame(game)
       candidates = []
       selectedCandidateIndex = undefined
       editingCandidateIndex = undefined
@@ -620,9 +653,15 @@ export const createEditorApp = ({
   quickStart.append(suggestionRow)
 
   // 추천 의뢰 — 한 줄 칩. 설명은 툴팁(title)으로, 클릭하면 그대로 입력창에 들어간다.
-  const RECOMMENDED = [
+  // quest: true인 추천 의뢰는 빠른시작 '퀘스트' 카드처럼 2단계(후보→선택) 모드로 들어간다.
+  const RECOMMENDED: {
+    title: string
+    desc: string
+    text: string
+    quest?: boolean
+  }[] = [
     { title: '📜 마법사의 경고', desc: '플레이어에게 위험 경고', text: '마법사가 플레이어에게 위험을 경고하는 대사를 추가해줘' },
-    { title: '📜 숨겨진 퀘스트', desc: '새로운 보상 의뢰', text: '마을 주민이 부탁하는 숨겨진 퀘스트를 만들어줘' },
+    { title: '📜 숨겨진 퀘스트', desc: '새로운 보상 의뢰', text: '마을 주민이 부탁하는 숨겨진 퀘스트를 만들어줘', quest: true },
     { title: '📜 계절 변화', desc: '가을 분위기로 변경', text: '이 나무를 가을 분위기의 나무로 바꿔줘' }
   ]
   // 도움말처럼 보이게: 더 어두운 배경 + 흐린 테두리 + 좌측 배지 — 입력창과 즉시 구분된다.
@@ -635,7 +674,22 @@ export const createEditorApp = ({
     chip.type = 'button'
     chip.title = item.desc
     chip.addEventListener('click', () => {
+      // 퀘스트형 추천은 빠른시작 '퀘스트' 카드와 동일하게 2단계(후보→선택) 모드로 들어간다.
+      const isQuest = item.quest === true
+      candidateMode = isQuest
+      // 추천 의뢰엔 NPC 생성형이 없다 — NPC 모드는 항상 끈다.
+      luaNpcMode = false
+      candidates = []
+      selectedCandidateIndex = undefined
+      editingCandidateIndex = undefined
+      currentDryRun = undefined
+      activeSuggestion = isQuest ? '퀘스트' : undefined
+      if (!candidateMode && activeBoardTab === 'candidates') {
+        activeBoardTab = undefined
+      }
       fillPrompt(item.text)
+      updateQuickCards()
+      render()
     })
     recommendBoard.append(chip)
   }
@@ -905,12 +959,9 @@ export const createEditorApp = ({
   reloadButton.title = '게임 새로고침'
   previewActions.append(mapSwitcher, popoutButton, reloadButton)
   previewBar.append(previewActions)
-  // 게임 스테이지 — 16:9 고정 대신 패널을 '덮는'(cover) 방식. iframe(게임 창)을 패널보다
-  // 크게 키워 중앙 정렬하고 넘치는 가장자리는 overflow로 잘라낸다 → 레터박스(빈 검정) 없이
-  // 타일맵이 패널을 가득 채운다. 미니맵 등 게임 오버레이는 게임 화면 위에 그대로 얹힌다.
-  // 패딩 8px만 남겨 게임 주변 프레임 느낌을 준다.
-  // 게임이 패널 안을 꽉 채우게 — 프레임은 패널의 둥근 테두리만으로 충분하다.
-  // items-end: 게임 창을 바닥 기준으로 정렬해, 넘치는 부분이 위쪽(맵의 빈 어두운 띠)부터 잘리게 한다.
+  // 게임 스테이지 — 16:9 게임 화면을 패널 안에 '맞춰 넣는'(contain) 방식. 게임의 대사 박스가
+  // 화면 상단에 그려지는데, 예전 cover-크롭은 그 상단을 잘라 대사가 가려졌다. 그래서 화면 전체가
+  // 항상 보이도록 contain으로 바꾼다 — 남는 가장자리는 검은 레터박스로 둔다. 중앙 정렬.
   // ---------- 게임에 맞춰 프리뷰 iframe 소스 결정 ----------
   // love.js 웹빌드가 있는 게임(legend-of-lua)은 그 빌드를, 그 외(my-sample-rpg)는 기본 게임 URL을
   // iframe에 띄운다. 이전에 설정에서 저장한 웹빌드 URL(localStorage)이 있으면 그것을 우선한다.
@@ -921,7 +972,7 @@ export const createEditorApp = ({
       stored.length > 0 ? stored : (game.adapter.defaultWebBuildUrl ?? '').trim()
     return webBuild.length > 0 ? webBuild : gamePreviewUrl
   }
-  const previewStage = el('div', 'relative flex-1 min-h-0 flex items-end justify-center overflow-hidden bg-[#181818]')
+  const previewStage = el('div', 'relative flex-1 min-h-0 flex items-center justify-center overflow-hidden bg-[#181818]')
   const iframe = el('iframe', 'shrink-0 border-0 bg-black') as HTMLIFrameElement
   iframe.src = previewSrcForGame()
   iframe.title = '게임 프리뷰'
@@ -935,17 +986,16 @@ export const createEditorApp = ({
   )
   previewLoading.style.display = 'none'
   previewStage.append(previewLoading)
-  // 표시 전용: 스테이지 크기가 바뀔 때마다 iframe을 16:9 비율의 cover 크기로 다시 맞춘다.
-  // TOP_TRIM: 마을 맵 위쪽의 빈 어두운 띠가 헤더 아래에 보이지 않도록, 게임 창을 살짝 키워
-  // 그만큼을 위에서 잘라낸다(바닥 정렬이라 잘리는 쪽은 항상 위). 캐릭터·카메라는 그대로다.
-  const GAME_TOP_TRIM = 40
+  // 표시 전용: 스테이지 크기가 바뀔 때마다 16:9 게임 화면을 패널 안에 '맞춰 넣는'(contain) 크기로
+  // 다시 맞춘다. 가로/세로 중 더 빡빡한 쪽에 맞춰 전체가 보이게 하고(잘림 없음), 남는 쪽은
+  // 레터박스로 둔다. 상단 대사 박스가 잘리지 않는 것이 우선이라 cover-크롭/TOP_TRIM은 쓰지 않는다.
   const fitGameFrame = (): void => {
     const stageWidth = previewStage.clientWidth
     const stageHeight = previewStage.clientHeight
     if (stageWidth <= 0 || stageHeight <= 0) {
       return
     }
-    const width = Math.max(stageWidth, ((stageHeight + GAME_TOP_TRIM) * 16) / 9)
+    const width = Math.min(stageWidth, (stageHeight * 16) / 9)
     iframe.style.width = `${Math.floor(width)}px`
     iframe.style.height = `${Math.floor((width * 9) / 16)}px`
   }
@@ -1039,7 +1089,8 @@ export const createEditorApp = ({
     const applied = currentResult !== undefined && appliedResults.has(currentResult)
     const hasPrompt = promptInput.value.trim().length > 0
     // 선택 전 0 → 작성 중 1 → 생성(작성 완료/생성 중) 2 → 확인 3 → 적용 후엔 5(전부 완료).
-    const activeStep = !selectedEntity
+    // NPC 생성처럼 대상이 불필요한 모드는 0단계(대상 선택)를 건너뛴다.
+    const activeStep = !selectedEntity && !isTargetOptional()
       ? 0
       : isGenerating
         ? 2
@@ -1107,7 +1158,12 @@ export const createEditorApp = ({
   composerSteps.append(...composerStepEls)
   // 진행 상태 갱신(표시 전용): 선택 전 → ①, 요청 비었으면 → ②, 채워지면 → ③.
   const updateComposerSteps = (): void => {
-    const current = !selectedEntity ? 0 : promptInput.value.trim().length === 0 ? 1 : 2
+    const current =
+      !selectedEntity && !isTargetOptional()
+        ? 0
+        : promptInput.value.trim().length === 0
+          ? 1
+          : 2
     composerStepEls.forEach((node, index) => {
       const step = COMPOSER_STEPS[index]
       if (!step) {
@@ -1681,11 +1737,16 @@ export const createEditorApp = ({
       )
       targetLine.replaceChildren(selectedCard)
     } else {
-      // 선택 전: 오류처럼 보이지 않게 흐린 회색 안내 톤("대상 선택 필요").
+      // 선택 전: 오류처럼 보이지 않게 흐린 회색 안내 톤. NPC 생성처럼 대상이 불필요한 모드에선
+      // "대상 선택 필요" 대신 "대상 불필요"로 안내해 흐름이 막힌 것처럼 보이지 않게 한다.
       const emptyCardBadge = el('span', 'fade-in inline-flex items-center gap-2 rounded-lg px-3 py-1.5 bg-[#2d2d30]/70 border border-[#d9a85c]/20 opacity-80')
       emptyCardBadge.append(
         editorIcon('target', 16),
-        el('span', 'text-[12px] leading-none text-[#9d9d9d]', '대상 선택 필요')
+        el(
+          'span',
+          'text-[12px] leading-none text-[#9d9d9d]',
+          isTargetOptional() ? '새 NPC 생성 — 대상 선택 불필요' : '대상 선택 필요'
+        )
       )
       targetLine.replaceChildren(emptyCardBadge)
     }
@@ -1754,9 +1815,10 @@ export const createEditorApp = ({
       isGenerating || apiKey.trim().length === 0 || promptInput.value.trim().length === 0
     // 단일 흐름: 검증(issues)이 적용을 막지 않는다(기존 동작 유지). 퀘스트 모드에서는 무결성
     // 검증(드라이런)이 통과해야만 적용을 허용한다 — 사용자가 정한 "검증 통과 시 라이브 적용".
+    // 적용 가능 = localStorage apply()가 있거나(rpg) 브리지 페이로드가 있을 때(legend-of-lua).
     applyButton.disabled =
       isGenerating ||
-      !currentResult?.apply ||
+      (!currentResult?.apply && !currentResult?.bridgePayload) ||
       (candidateMode && currentDryRun?.ok !== true)
     copyButton.disabled = !currentResult || isGenerating
     exportButton.disabled = !currentResult || isGenerating
@@ -1837,10 +1899,19 @@ export const createEditorApp = ({
     luaStatus.hidden = currentResult !== undefined
     result.hidden = currentResult === undefined
     result.textContent = currentResult ? currentResult.preview : ''
-    filesStatus.textContent = currentResult ? `이벤트: ${currentResult.label}` : '변경 파일 없음'
+    filesStatus.textContent = currentResult
+      ? `${currentResult.exportFileExtension === 'lua' ? 'Lua 코드' : '이벤트'}: ${currentResult.label}`
+      : '변경 파일 없음'
     if (!currentResult) {
       applyStatus.className = 'text-[12px] text-[#9d9d9d]'
       applyStatus.textContent = '대기 중'
+    } else if (
+      !currentResult.apply &&
+      !currentResult.bridgePayload &&
+      currentResult.exportFileExtension === 'lua'
+    ) {
+      applyStatus.className = 'text-[12px] text-[#9d9d9d]'
+      applyStatus.textContent = '코드만 생성됨'
     } else if (appliedResults.has(currentResult)) {
       applyStatus.className = 'text-[12px] text-[#8fc96a]'
       applyStatus.textContent = '적용 완료'
@@ -1850,7 +1921,9 @@ export const createEditorApp = ({
     }
     // 최근 생성 결과 표시(표시 전용): 실제 결과 우선, 없으면 발표용 예시 한 줄.
     recentResultLine.textContent = currentResult
-      ? `최근 생성 결과 · "${currentResult.label}" 이벤트가 생성되었습니다.`
+      ? currentResult.exportFileExtension === 'lua'
+        ? `최근 생성 결과 · "${currentResult.label}" Lua 퀘스트 코드가 생성되었습니다.`
+        : `최근 생성 결과 · "${currentResult.label}" 이벤트가 생성되었습니다.`
       : '최근 생성 결과 · "마법사가 플레이어에게 마을 북쪽 숲의 위험을 경고하는 대사가 생성되었습니다."'
     // 결과가 생겼는데 아직 아무 항목도 안 골랐으면 Lua 코드 상세를 자동으로 연다.
     if (currentResult && activeBoardTab === undefined) {
@@ -1881,29 +1954,42 @@ export const createEditorApp = ({
   const runGenerateCandidates = async (
     feedback?: GenerationFeedback
   ): Promise<void> => {
-    // game은 let이라 TS가 game.profile을 좁혀주지 못한다 — const로 캡처해 좁힌다.
+    const isLegend = isLegendOfLuaGame(game)
     const profile = game.profile
-    if (!profile) {
-      setStatus('이 게임의 구조 프로필이 없습니다.')
+    const catalog = isLegend ? buildLuaQuestCatalog(game) : undefined
+
+    if (!profile && !catalog) {
+      setStatus('이 게임의 구조 정보가 없습니다.')
       return
     }
     isGenerating = true
     const filesAtStart = currentFiles
-    setStatus('퀘스트 후보 생성 중...')
+    setStatus(isLegend ? 'Lua 퀘스트 후보 생성 중...' : '퀘스트 후보 생성 중...')
     activeBoardTab = 'candidates'
     render()
 
     try {
-      const result = await generateQuestCandidates({
-        apiKey: apiKey.trim(),
-        userPrompt: promptInput.value,
-        profile,
-        entity: selectedEntity,
-        gameContext: currentAnalysis
-          ? `${currentAnalysis.game_name} (${currentAnalysis.engine}). 콘텐츠 모델: ${currentAnalysis.content_model}`
-          : undefined,
-        feedback
-      })
+      const result = isLegend
+        ? await generateLuaQuestCandidates({
+            apiKey: apiKey.trim(),
+            userPrompt: promptInput.value,
+            catalog: catalog!,
+            entity: selectedEntity,
+            gameContext: currentAnalysis
+              ? `${currentAnalysis.game_name} (${currentAnalysis.engine}). 콘텐츠 모델: ${currentAnalysis.content_model}`
+              : undefined,
+            feedback
+          })
+        : await generateQuestCandidates({
+            apiKey: apiKey.trim(),
+            userPrompt: promptInput.value,
+            profile: profile!,
+            entity: selectedEntity,
+            gameContext: currentAnalysis
+              ? `${currentAnalysis.game_name} (${currentAnalysis.engine}). 콘텐츠 모델: ${currentAnalysis.content_model}`
+              : undefined,
+            feedback
+          })
       if (currentFiles !== filesAtStart) {
         return
       }
@@ -1914,7 +2000,9 @@ export const createEditorApp = ({
       currentDryRun = undefined
       setStatus(
         result.length > 0
-          ? `후보 ${result.length}개 생성됨 — 하나를 골라 "이 후보로 생성"을 누르세요.`
+          ? isLegend
+            ? `Lua 후보 ${result.length}개 생성됨 — 하나를 골라 "이 후보로 생성"을 누르세요.`
+            : `후보 ${result.length}개 생성됨 — 하나를 골라 "이 후보로 생성"을 누르세요.`
           : '후보를 생성하지 못했습니다. 다시 시도하세요.'
       )
     } catch (error) {
@@ -1950,9 +2038,12 @@ export const createEditorApp = ({
     if (!candidate) {
       return
     }
+    const isLegend = isLegendOfLuaGame(game)
     const profile = game.profile
-    if (!profile) {
-      setStatus('이 게임의 구조 프로필이 없습니다.')
+    const catalog = isLegend ? buildLuaQuestCatalog(game) : undefined
+
+    if (!profile && !catalog) {
+      setStatus('이 게임의 구조 정보가 없습니다.')
       return
     }
     const effectiveEntity =
@@ -1966,56 +2057,100 @@ export const createEditorApp = ({
       effectiveEntity?.kind === 'npc' ? effectiveEntity.id : undefined
     isGenerating = true
     const filesAtStart = currentFiles
-    setStatus(`"${candidate.title}" 후보로 단계별 퀘스트 생성 중...`)
+    setStatus(
+      isLegend
+        ? `"${candidate.title}" 후보로 Lua 퀘스트 생성 중...`
+        : `"${candidate.title}" 후보로 단계별 퀘스트 생성 중...`
+    )
     render()
 
     try {
-      // 퀘스트 모드: 고른 후보로 "목표 포함 진짜 퀘스트"를 생성한다(대사 이벤트가 아님).
-      const quest = await generateQuestJson({
-        apiKey: apiKey.trim(),
-        userPrompt: promptInput.value,
-        profile,
-        candidate,
-        entity: effectiveEntity
-      })
-      if (currentFiles !== filesAtStart) {
-        return
+      if (isLegend) {
+        const quest = await generateLuaQuestJson({
+          apiKey: apiKey.trim(),
+          userPrompt: promptInput.value,
+          catalog: catalog!,
+          candidate,
+          entity: effectiveEntity
+        })
+        if (currentFiles !== filesAtStart) {
+          return
+        }
+        currentDryRun = dryRunLuaQuestApply(quest, catalog!, {
+          selectedEntityId: selectedNpcId
+        })
+        const issues = createGeneratedLuaQuestValidationIssues(quest, catalog!).map(
+          (issue) => `${issue.path} - ${issue.message}`
+        )
+        const result: GenerationResult = {
+          label: quest.title || quest.quest_id,
+          preview: renderGeneratedLuaQuestModule(quest),
+          issues,
+          apply: null,
+          exportFileExtension: 'lua',
+          // 라이브 적용용: 실행 중인 legend-of-lua에 브리지로 보낼 퀘스트 페이로드.
+          bridgePayload: convertLuaQuestToBridgePayload(quest)
+        }
+        currentResult = result
+        historyCounter += 1
+        history = [{ n: historyCounter, result }, ...history].slice(0, HISTORY_LIMIT)
+        sessionTally = {
+          generations: sessionTally.generations + 1,
+          validatorPasses:
+            sessionTally.validatorPasses + (result.issues.length === 0 ? 1 : 0)
+        }
+        activeBoardTab = 'lua'
+        setStatus(
+          currentDryRun && !currentDryRun.ok
+            ? `생성됨 — Lua 무결성 검증 실패. '검증 결과'에서 위치를 확인하고 다시 시도하세요.`
+            : `생성 완료: ${result.label} — Lua 무결성 검증 통과`
+        )
+      } else {
+        // 퀘스트 모드: 고른 후보로 "목표 포함 진짜 퀘스트"를 생성한다(대사 이벤트가 아님).
+        const quest = await generateQuestJson({
+          apiKey: apiKey.trim(),
+          userPrompt: promptInput.value,
+          profile: profile!,
+          candidate,
+          entity: effectiveEntity
+        })
+        if (currentFiles !== filesAtStart) {
+          return
+        }
+        // 무결성 검증(드라이런): 목표/기버/보상 타깃이 런타임에서 추적되는 값인지 단계별 점검.
+        currentDryRun = dryRunQuestApply(quest, profile!, {
+          selectedEntityId: selectedNpcId
+        })
+        const issues = createGeneratedQuestValidationIssues(quest, profile!, {
+          selectedEntityId: selectedNpcId
+        }).map((issue) => `${issue.path} - ${issue.message}`)
+        // 결과 보드/적용 경로가 쓰는 GenerationResult 형태로 감싼다(apply는 런타임 퀘스트로 변환·저장).
+        const result: GenerationResult = {
+          label: quest.title || quest.quest_id,
+          preview: JSON.stringify(quest, null, 2),
+          issues,
+          apply: () => {
+            replacePendingQuests([
+              convertGeneratedQuestToDefinition(quest, profile!)
+            ])
+          },
+          bridgePayload: null
+        }
+        currentResult = result
+        historyCounter += 1
+        history = [{ n: historyCounter, result }, ...history].slice(0, HISTORY_LIMIT)
+        sessionTally = {
+          generations: sessionTally.generations + 1,
+          validatorPasses:
+            sessionTally.validatorPasses + (result.issues.length === 0 ? 1 : 0)
+        }
+        activeBoardTab = 'verify'
+        setStatus(
+          currentDryRun && !currentDryRun.ok
+            ? `생성됨 — 무결성 검증 실패. '검증 결과'에서 위치를 확인하고 다시 시도하세요.`
+            : `생성 완료: ${result.label} — 무결성 검증 통과`
+        )
       }
-      // 무결성 검증(드라이런): 목표/기버/보상 타깃이 런타임에서 추적되는 값인지 단계별 점검.
-      currentDryRun = dryRunQuestApply(quest, profile, {
-        selectedEntityId: selectedNpcId
-      })
-      const issues = createGeneratedQuestValidationIssues(quest, profile, {
-        selectedEntityId: selectedNpcId
-      }).map(
-        (issue) => `${issue.path} - ${issue.message}`
-      )
-      // 결과 보드/적용 경로가 쓰는 GenerationResult 형태로 감싼다(apply는 런타임 퀘스트로 변환·저장).
-      const result: GenerationResult = {
-        label: quest.title || quest.quest_id,
-        preview: JSON.stringify(quest, null, 2),
-        issues,
-        apply: () => {
-          replacePendingQuests([
-            convertGeneratedQuestToDefinition(quest, profile)
-          ])
-        },
-        bridgePayload: null
-      }
-      currentResult = result
-      historyCounter += 1
-      history = [{ n: historyCounter, result }, ...history].slice(0, HISTORY_LIMIT)
-      sessionTally = {
-        generations: sessionTally.generations + 1,
-        validatorPasses:
-          sessionTally.validatorPasses + (result.issues.length === 0 ? 1 : 0)
-      }
-      activeBoardTab = 'verify'
-      setStatus(
-        currentDryRun && !currentDryRun.ok
-          ? `생성됨 — 무결성 검증 실패. '검증 결과'에서 위치를 확인하고 다시 시도하세요.`
-          : `생성 완료: ${result.label} — 무결성 검증 통과`
-      )
     } catch (error) {
       if (currentFiles !== filesAtStart) {
         return
@@ -2112,6 +2247,88 @@ export const createEditorApp = ({
     candidatesView.body.append(actionRow)
   }
 
+  // NPC 생성(legend-of-lua): 새 NPC를 한 번에 생성→드라이런 검증→Lua 출력한다. 검증을 통과하면
+  // 생성 NPC를 game.maps의 해당 맵에 주입해, 트리와 퀘스트 카탈로그(buildLuaQuestCatalog)가
+  // "배치된 NPC"로 인식하게 한다 — 이후 그 NPC를 퀘스트 기버로 고를 수 있다. (실제 게임 런타임
+  // 스폰은 이번 범위 밖: 산출물은 Lua 모듈 미리보기/복사/내보내기로 쓴다.)
+  const runGenerateLuaNpc = async (): Promise<void> => {
+    const catalog = buildLuaQuestCatalog(game)
+    isGenerating = true
+    const filesAtStart = currentFiles
+    setStatus('Lua NPC 생성 중...')
+    render()
+
+    try {
+      const npc = await generateLuaNpcJson({
+        apiKey: apiKey.trim(),
+        userPrompt: promptInput.value,
+        catalog
+      })
+      if (currentFiles !== filesAtStart) {
+        return
+      }
+
+      // 지금 보고 있는 맵으로 NPC를 고정한다 — LLM이 다른 맵을 고르면 트리(현재 맵 기준)와
+      // 라이브(플레이어 옆) 위치가 어긋난다. 현재 맵이 정해져 있으면 그 맵으로 맞춘다.
+      if (currentMapId && catalog.scenes.includes(currentMapId)) {
+        npc.map_id = currentMapId
+      }
+
+      const dryRun = dryRunLuaNpcApply(npc, catalog)
+      const issues = createGeneratedLuaNpcValidationIssues(npc, catalog).map(
+        (issue) => `${issue.path} - ${issue.message}`
+      )
+      // 미리보기/복사/내보내기는 editorNPCs.lua 붙여넣기용 항목. 라이브 적용은 bridgePayload로 한다.
+      const spawnEntry = renderEditorNpcSpawnEntry(npc)
+      const result: GenerationResult = {
+        label: npc.name || npc.npc_id,
+        preview: spawnEntry,
+        issues,
+        apply: null,
+        exportFileExtension: 'lua',
+        // 검증 통과 시: '적용'이 이 페이로드를 패널 iframe(love.js)·네이티브 HTTP 브리지로 보내
+        // 실행 중인 게임이 NPC를 플레이어 옆에 라이브 스폰한다(host page editor-bridge.js + 게임
+        // pollEditorInbox). 검증 실패면 null이라 적용 버튼이 잠긴다.
+        bridgePayload: dryRun.ok ? convertLuaNpcToSpawnBridgePayload(npc, Date.now()) : null
+      }
+      currentDryRun = dryRun
+      currentResult = result
+      historyCounter += 1
+      history = [{ n: historyCounter, result }, ...history].slice(0, HISTORY_LIMIT)
+      sessionTally = {
+        generations: sessionTally.generations + 1,
+        validatorPasses:
+          sessionTally.validatorPasses + (result.issues.length === 0 ? 1 : 0)
+      }
+      activeBoardTab = 'lua'
+
+      // 검증 통과한 NPC만 카탈로그/트리에 더한다(맵에 같은 id가 없을 때만 — 멱등).
+      if (dryRun.ok) {
+        const entity = convertLuaNpcToGameEntity(npc)
+        const targetMap = game.maps.find((map) => map.id === entity.mapId)
+        if (targetMap && !targetMap.entities.some((existing) => existing.id === entity.id)) {
+          targetMap.entities.push(entity)
+          renderTree()
+        }
+        setStatus(
+          `생성 완료: ${result.label} — 검증 통과, 카탈로그에 추가됨(이제 퀘스트 기버로 쓸 수 있어요).`
+        )
+      } else {
+        setStatus(
+          `생성됨 — NPC 무결성 검증 실패. '검증 결과'에서 위치를 확인하고 다시 시도하세요.`
+        )
+      }
+    } catch (error) {
+      if (currentFiles !== filesAtStart) {
+        return
+      }
+      setStatus(`NPC 생성 실패: ${error instanceof Error ? error.message : String(error)}`)
+    } finally {
+      isGenerating = false
+      render()
+    }
+  }
+
   const runGenerate = async (): Promise<void> => {
     if (isGenerating) {
       return
@@ -2130,6 +2347,13 @@ export const createEditorApp = ({
     // 퀘스트 모드: '이야기 생성'은 1단계(후보 N개)를 만든다. 실제 이벤트는 후보를 골라 2단계에서.
     if (candidateMode) {
       await runGenerateCandidates()
+      return
+    }
+
+    // NPC 생성 모드(legend-of-lua): 새 NPC를 한 번에 생성→검증→Lua 출력하고, 통과하면
+    // game.maps에 주입해 카탈로그/트리가 즉시 인식한다(이후 그 NPC를 퀘스트 기버로 쓸 수 있다).
+    if (luaNpcMode) {
+      await runGenerateLuaNpc()
       return
     }
 
@@ -2179,8 +2403,57 @@ export const createEditorApp = ({
     }
   }
 
+  // 실행 중인 외부 게임(legend-of-lua)에 라이브 전송하는 브리지 클라이언트(HTTP localhost:17320).
+  // 폴링 없이 apply()만 쓴다 — 게임/브리지가 안 떠 있으면 응답이 실패로 와서 상태로 알린다.
+  const liveBridge = createGameBridge({
+    baseUrl: 'http://localhost:17320',
+    onStatusChange: () => {}
+  })
+
   const runApply = (): void => {
+    // legend-of-lua NPC 스폰: 패널 iframe(love.js)에 postMessage로 보내고(host page editor-bridge.js가
+    // 받아 게임에 전달), 네이티브 게임이 떠 있으면 HTTP 브리지로도 보낸다. 패널은 NPC 코드+브리지가
+    // 담긴 재빌드된 love.js 빌드여야 즉시 반영된다(미반영이면 native 또는 editorNPCs.lua 경로 사용).
+    const spawnPayload = currentResult?.bridgePayload
+    if (spawnPayload?.kind === 'spawn_npc' && currentResult) {
+      const appliedResult = currentResult
+      iframe.contentWindow?.postMessage({ type: 'editor:apply', payload: spawnPayload }, '*')
+      void liveBridge.apply(spawnPayload)
+      appliedResults.add(appliedResult)
+      appliedCount += 1
+      render()
+      setStatus(
+        '게임에 NPC 스폰 요청을 보냈습니다 — 패널은 재빌드된 love.js 빌드여야 즉시 반영됩니다(아니면 복사→editorNPCs.lua 또는 네이티브).'
+      )
+      return
+    }
+
+    // 브리지 게임(legend-of-lua): 생성한 퀘스트/대사를 실행 중인 게임에 라이브 전송한다.
+    const payload = currentResult?.bridgePayload
+    if (payload && currentResult) {
+      const appliedResult = currentResult
+      setStatus('실행 중인 게임에 전송 중...')
+      // love.js 프리뷰(iframe)에도 같은 페이로드를 전달한다(핸들러가 있으면 즉시 반영).
+      iframe.contentWindow?.postMessage({ type: 'editor:apply', payload }, '*')
+      void liveBridge.apply(payload).then((response) => {
+        if (response.ok) {
+          appliedResults.add(appliedResult)
+          appliedCount += 1
+          render()
+          setStatus('게임에 전송됨 — 실행 중인 legend-of-lua에 적용 요청을 보냈습니다.')
+        } else {
+          setStatus(
+            `전송 실패: ${response.error ?? '게임 브리지에 연결할 수 없습니다(게임 실행 + 브리지 켜짐 확인).'}`
+          )
+        }
+      })
+      return
+    }
+
     if (!currentResult?.apply) {
+      if (currentResult?.exportFileExtension === 'lua') {
+        setStatus('이 결과는 Lua 코드입니다. 게임 브리지가 없으면 복사/내보내기를 사용하세요.')
+      }
       return
     }
 
@@ -2223,8 +2496,11 @@ export const createEditorApp = ({
       return
     }
 
-    const fileName = `${currentResult.label || 'generated'}.json`
-    const blob = new Blob([currentResult.preview], { type: 'application/json' })
+    const extension = currentResult.exportFileExtension ?? 'json'
+    const fileName = `${currentResult.label || 'generated'}.${extension}`
+    const blob = new Blob([currentResult.preview], {
+      type: extension === 'lua' ? 'text/plain;charset=utf-8' : 'application/json'
+    })
     const url = URL.createObjectURL(blob)
     const link = document.createElement('a')
     link.href = url
@@ -2256,6 +2532,7 @@ export const createEditorApp = ({
       currentAnalysis = undefined
       // 퀘스트 모드 상태도 프로젝트 단위 — 새 게임에 옛 후보/검증이 묻어 나오지 않게 비운다.
       candidateMode = false
+      luaNpcMode = false
       candidates = []
       selectedCandidateIndex = undefined
       editingCandidateIndex = undefined
@@ -2301,6 +2578,7 @@ export const createEditorApp = ({
     currentResult = undefined
     currentAnalysis = undefined
     candidateMode = false
+    luaNpcMode = false
     candidates = []
     selectedCandidateIndex = undefined
     editingCandidateIndex = undefined
