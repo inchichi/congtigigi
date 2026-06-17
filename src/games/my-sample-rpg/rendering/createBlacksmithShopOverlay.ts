@@ -14,7 +14,7 @@ import {
 import {
   findFirstEmptyPlayerInventorySlotIndex,
   getPlayerInventoryFilledSlotCount
-} from '../playerInventory'
+} from '../lua/luaGameLogic'
 import type { PlayerInventory } from '../playerInventory'
 
 type CreateBlacksmithShopOverlayInput = {

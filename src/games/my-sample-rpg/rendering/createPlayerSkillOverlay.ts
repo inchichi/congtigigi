@@ -4,7 +4,7 @@ import {
   getPlayerSkillPointCost,
   getPlayerSkillUserLevel,
   spendPlayerSkillPoint
-} from '../playerProgression'
+} from '../lua/luaGameLogic'
 import {
   PLAYER_SKILL_DRAG_MIME_TYPE
 } from '../playerSkillSlots'

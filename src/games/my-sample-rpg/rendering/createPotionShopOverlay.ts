@@ -13,7 +13,7 @@ import {
 } from '../playerEquipment'
 import {
   getPlayerInventoryFilledSlotCount
-} from '../playerInventory'
+} from '../lua/luaGameLogic'
 import type { PlayerInventory } from '../playerInventory'
 
 type CreatePotionShopOverlayInput = {

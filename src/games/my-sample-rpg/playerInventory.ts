@@ -11,9 +11,9 @@ export type PlayerInventory = {
   slots: PlayerInventorySlot[]
 }
 
-const DEFAULT_PLAYER_INVENTORY_SLOT_COUNT = 30
-const DEFAULT_PLAYER_INVENTORY_GOLD = 1000
-const DEFAULT_PLAYER_INVENTORY_STARTER_ITEMS: PlayerInventoryItem[] = [
+export const DEFAULT_PLAYER_INVENTORY_SLOT_COUNT = 30
+export const DEFAULT_PLAYER_INVENTORY_GOLD = 1000
+export const DEFAULT_PLAYER_INVENTORY_STARTER_ITEMS: PlayerInventoryItem[] = [
   {
     id: 'health-potion',
     label: '체력 회복 포션',

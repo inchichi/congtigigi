@@ -10,10 +10,8 @@ import {
 import { PLAYER_CHARACTER_APPEARANCE_TYPE } from '../characterState'
 import type { PlayerInventory } from '../playerInventory'
 import type { PlayerProfile } from '../playerProfile'
-import {
-  PLAYER_MAX_LEVEL,
-  getPlayerJobDisplayName
-} from '../playerProfile'
+import { PLAYER_MAX_LEVEL } from '../playerProfile'
+import { getPlayerJobDisplayName } from '../lua/luaGameLogic'
 import {
   equipPlayerInventorySlot,
   unequipPlayerEquipmentSlot

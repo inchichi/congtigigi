@@ -49,7 +49,7 @@ export type PlayerEquipment = {
   slots: PlayerEquipmentSlot[]
 }
 
-const EQUIPMENT_SLOT_LABEL_BY_ID: Record<PlayerEquipmentSlotId, string> = {
+export const EQUIPMENT_SLOT_LABEL_BY_ID: Record<PlayerEquipmentSlotId, string> = {
   weapon: '무기',
   armor: '옷',
   hat: '모자',
@@ -57,7 +57,7 @@ const EQUIPMENT_SLOT_LABEL_BY_ID: Record<PlayerEquipmentSlotId, string> = {
   accessory: '장신구'
 }
 
-const EQUIPMENT_SLOT_IDS: PlayerEquipmentSlotId[] = [
+export const EQUIPMENT_SLOT_IDS: PlayerEquipmentSlotId[] = [
   'weapon',
   'armor',
   'hat',
@@ -65,7 +65,7 @@ const EQUIPMENT_SLOT_IDS: PlayerEquipmentSlotId[] = [
   'accessory'
 ]
 
-const PLAYER_EQUIPMENT_ITEM_DEFINITIONS: PlayerEquipmentItemDefinition[] = [
+export const PLAYER_EQUIPMENT_ITEM_DEFINITIONS: PlayerEquipmentItemDefinition[] = [
   {
     id: 'basic-sword',
     slotId: 'weapon',
@@ -332,6 +332,9 @@ const STARTER_WEAPON_ITEM_DEFINITION = PLAYER_EQUIPMENT_ITEM_DEFINITION_BY_ID.ge
 if (!STARTER_WEAPON_ITEM_DEFINITION) {
   throw new Error('Missing starter weapon definition')
 }
+
+export const PLAYER_EQUIPMENT_STARTER_WEAPON_ITEM_DEFINITION: PlayerEquipmentItemDefinition =
+  STARTER_WEAPON_ITEM_DEFINITION
 
 export const createInitialPlayerEquipment = (): PlayerEquipment => ({
   setName: '기본 장비',

@@ -524,7 +524,9 @@ export const createEditorApp = ({
     getNpcPaletteContext: resolveNpcPaletteContext
   })
   const headerRight = el('div', 'flex items-center gap-3')
-  headerRight.append(muteButton, styleTransfer.openButton, styleRevert.button, externalStyler.button, placementPalette.button, settingsButton, connection)
+  // 에디터 미리보기(게임 iframe)는 항상 음소거된다(게임이 임베드를 감지해 강제 음소거) —
+  // 음소거 토글은 의미가 없어 헤더에서 제외한다(버튼/핸들러 정의는 호환을 위해 그대로 둔다).
+  headerRight.append(styleTransfer.openButton, styleRevert.button, externalStyler.button, placementPalette.button, settingsButton, connection)
   header.append(brand, headerRight)
 
   // LLM 챗 스타일 배치: 가운데가 라이브 게임(위 가득) + 프롬프트(아래), 오른쪽이 생성 결과.

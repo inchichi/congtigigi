@@ -6,7 +6,7 @@ import {
   getPlayerEquipmentItemDefinitionById,
   getPlayerEquipmentSlotLabelById
 } from '../playerEquipment'
-import { getPlayerInventoryFilledSlotCount } from '../playerInventory'
+import { getPlayerInventoryFilledSlotCount } from '../lua/luaGameLogic'
 import type { PlayerInventory } from '../playerInventory'
 import type { PlayerProfile } from '../playerProfile'
 import {

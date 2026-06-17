@@ -1,9 +1,9 @@
 import type { PlayerProfile, PlayerStatId } from '../playerProfile'
+import { PLAYER_MAX_LEVEL } from '../playerProfile'
 import {
-  PLAYER_MAX_LEVEL,
-  getPlayerJobPrimaryStatLabel
-} from '../playerProfile'
-import { spendPlayerStatPoint } from '../playerProgression'
+  getPlayerJobPrimaryStatLabel,
+  spendPlayerStatPoint
+} from '../lua/luaGameLogic'
 import { getResponsiveUiScale } from './getResponsiveUiScale'
 
 type CreatePlayerStatOverlayInput = {

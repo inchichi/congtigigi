@@ -1,9 +1,11 @@
 import {
   PLAYER_MAX_LEVEL,
-  getPlayerJobDisplayName,
   type PlayerProfile
 } from '../playerProfile'
-import { getPlayerExperienceToNextLevel } from '../playerExperience'
+import {
+  getPlayerExperienceToNextLevel,
+  getPlayerJobDisplayName
+} from '../lua/luaGameLogic'
 import { getPlayerEquipmentItemDefinitionById } from '../playerEquipment'
 import type { PlayerInventory } from '../playerInventory'
 import {

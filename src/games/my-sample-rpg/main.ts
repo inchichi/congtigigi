@@ -23,6 +23,7 @@ import { createCharacterControllerRuntime } from './createCharacterControllerRun
 import { createInitialBlacksmithInventory } from './blacksmithShop'
 import { createInitialPotionInventory } from './potionShop'
 import { createLuaCharacterControllerRuntime } from './lua/createLuaCharacterControllerRuntime'
+import { initLuaGameLogic } from './lua/luaGameLogic'
 import { createNpcCharactersFromEventLayers } from './tiled/createNpcCharactersFromEventLayers'
 import { parseTiledMap, parseTiledTileset } from './tiled/parseTiledMap'
 import { createInitialPlayerEquipment } from './playerEquipment'
@@ -119,6 +120,22 @@ const DEFAULT_AUDIO_SETTINGS: AudioSettings = {
   sfxVolume: 1,
   isMuted: false
 }
+
+// 에디터 미리보기는 게임을 iframe으로 띄운다. 에디터로 편집하는 동안에는 효과음·배경음이
+// 들리지 않도록, 게임이 iframe(=에디터) 안에서 실행되면 강제로 음소거한다.
+// 단독 실행(직접 플레이)에서는 window.self === window.top 이라 영향이 없다.
+const IS_EMBEDDED_IN_EDITOR = ((): boolean => {
+  try {
+    return window.self !== window.top
+  } catch {
+    // top이 교차 출처라 접근이 막히면 임베드로 간주해 안전하게 음소거한다.
+    return true
+  }
+})()
+
+// 에디터 안에서 실행 중이면 어떤 오디오 설정이 와도 음소거를 강제한다.
+const applyEditorMute = (settings: AudioSettings): AudioSettings =>
+  IS_EMBEDDED_IN_EDITOR ? { ...settings, isMuted: true } : settings
 type EventDraftMode = 'rule' | 'llm'
 const DEFAULT_EVENT_DRAFT_MODE: EventDraftMode = 'rule'
 const EVENT_DRAFT_TARGET_CHARACTER_ID = 'santa'
@@ -209,7 +226,7 @@ let activeSceneMusicUrl = ''
 let isSceneMusicRetryQueued = false
 let pendingSceneTransition: SceneTransitionRequest | undefined
 let isSceneTransitionScheduled = false
-let audioSettings = readStoredAudioSettings()
+let audioSettings = applyEditorMute(readStoredAudioSettings())
 let refreshEventDraftPreview: (() => void) | undefined
 
 const bootstrapScene = async (
@@ -426,12 +443,16 @@ const applyActiveSceneMusicVolume = () => {
 }
 
 const updateAudioSettings = (nextAudioSettings: AudioSettings) => {
+  const chosenIsMuted = nextAudioSettings.isMuted === true
   audioSettings = {
     bgmVolume: clampVolume(nextAudioSettings.bgmVolume),
     sfxVolume: clampVolume(nextAudioSettings.sfxVolume),
-    isMuted: nextAudioSettings.isMuted === true
+    // 에디터(iframe) 안에서는 항상 음소거 — 단독 실행 시에만 설정값을 따른다.
+    isMuted: IS_EMBEDDED_IN_EDITOR ? true : chosenIsMuted
   }
-  saveAudioSettings(audioSettings)
+  // 저장은 사용자의 실제 선택값으로 — 에디터·게임이 localStorage를 공유하므로, 에디터의 강제
+  // 음소거가 단독 실행(플레이)의 음소거 설정을 덮어쓰지 않게 한다.
+  saveAudioSettings({ ...audioSettings, isMuted: chosenIsMuted })
   applyActiveSceneMusicVolume()
 }
 
@@ -990,4 +1011,12 @@ window.addEventListener('message', (event) => {
   }
 })
 
-void bootstrapScene('town').catch(renderFatalError)
+// 첫 씬을 띄우기 전에 Lua 게임 로직(전투/보상/드롭/표시/경험치)을 초기화한다.
+// 실패해도(WASM 로드 불가 등) 퍼사드가 TS로 폴백하므로 게임은 계속 실행된다.
+void initLuaGameLogic()
+  .catch((error) => {
+    console.warn('[lua] 게임 로직 Lua 초기화 실패 — TS 폴백으로 계속합니다.', error)
+  })
+  .finally(() => {
+    void bootstrapScene('town').catch(renderFatalError)
+  })

@@ -55,8 +55,6 @@ import {
   type PlayerEquipmentSlotId
 } from '../playerEquipment'
 import {
-  findFirstEmptyPlayerInventorySlotIndex,
-  setPlayerInventorySlot,
   type PlayerInventory,
   type PlayerInventoryItem
 } from '../playerInventory'
@@ -65,7 +63,6 @@ import {
   clearPlayerQuickslotAssignment,
   type PlayerQuickslots
 } from '../playerQuickslots'
-import { getMonsterDisplayName } from '../monsterDisplayName'
 import {
   getPlayerSkillSlotIndexFromCode,
   type PlayerSkillSlots
@@ -123,30 +120,30 @@ import {
   type QuestItemReward,
   type QuestLogState
 } from '../questLog'
-import {
-  getPlayerMovementSpeedTilesPerSecond,
-  getPlayerPhysicalAttackPower,
-  shouldPlayerEvadeDamage
-} from '../playerStatEffects'
 import { grantPlayerExperience } from '../playerExperience'
-import { rollMonsterEquipmentDrop } from '../monsterEquipmentDrops'
-import { grantPlayerSkillPoints } from '../playerProgression'
 import {
   createMonsterPatrolState,
   stepMonsterPatrol,
   type MonsterPatrolState
 } from '../monsterPatrol'
+import { type MonsterCombatState } from '../monsterCombat'
+// 게임 로직(전투/보상/드롭)은 Lua로 실행한다 — 동일 시그니처의 Lua 퍼사드를 통해 호출.
 import {
   applyMonsterDamage,
   createMonsterCombatState,
   isMonsterDefeated,
-  type MonsterCombatState
-} from '../monsterCombat'
-import {
+  getMonsterDisplayName,
   getMonsterExperienceDropAmount,
   getMonsterGoldDropAmount,
-  getMonsterSkillPointDropAmount
-} from '../monsterRewards'
+  getMonsterSkillPointDropAmount,
+  rollMonsterEquipmentDrop,
+  findFirstEmptyPlayerInventorySlotIndex,
+  setPlayerInventorySlot,
+  getPlayerMovementSpeedTilesPerSecond,
+  getPlayerPhysicalAttackPower,
+  shouldPlayerEvadeDamage,
+  grantPlayerSkillPoints
+} from '../lua/luaGameLogic'
 import { resolveCharacterInteractionTarget } from '../interaction/resolveCharacterInteractionTarget'
 import {
   createMapPortalsFromEventLayers,
