@@ -28,6 +28,8 @@ type CreateBlacksmithShopOverlayInput = {
     nextPlayerInventory: PlayerInventory,
     nextMerchantInventory: PlayerInventory
   ) => void
+  // 매도가 규칙을 외부(Lua)에서 주입한다. 없으면 TS 기본 규칙으로 폴백.
+  getSellPriceById?: (itemId: string) => number | undefined
 }
 
 export type BlacksmithShopOverlay = {
@@ -333,7 +335,8 @@ export const createBlacksmithShopOverlay = ({
   getMerchantInventory,
   getIsOpen,
   onRequestOpenChange,
-  onRequestTradeStateChange
+  onRequestTradeStateChange,
+  getSellPriceById = getBlacksmithShopSellPriceById
 }: CreateBlacksmithShopOverlayInput): BlacksmithShopOverlay => {
   const overlayRoot = document.createElement('div')
   const backdropButton = document.createElement('button')
@@ -891,7 +894,7 @@ export const createBlacksmithShopOverlay = ({
       return true
     }
 
-    const price = getBlacksmithShopSellPriceById(renderDefinition.id)
+    const price = getSellPriceById(renderDefinition.id)
     const canSell = price !== undefined && counterInventory.gold >= price
 
     row.price.textContent = price !== undefined ? formatGoldAmount(price) : '--'

@@ -28,6 +28,7 @@ import {
 import { createInitialPlayerProfile } from '../playerProfile'
 import { createLuaMonsterCombat } from '../monsterCombatLua'
 import { createMonsterCombatState } from '../monsterCombat'
+import { BLACKSMITH_SHOP_LUA } from '../blacksmithShopLua'
 
 const LUA_MODULE_JS_URL = new URL(
   '../../../../public/vendor/lua/lua-5.3.6.mjs',
@@ -620,6 +621,28 @@ end
         expect(luaCombat.createMonsterCombatState(level, options)).toEqual(
           createMonsterCombatState(level, options)
         )
+      }
+    } finally {
+      runtime.destroy()
+    }
+  })
+
+  it('runs the blacksmith sell-price formula in Lua', async () => {
+    const runtime = await createBridgeRuntime({
+      source: createControllerModuleSource(`
+function controller.step(id, dt, x, y)
+  return 0, 0
+end
+`)
+    })
+
+    try {
+      for (const buyPrice of [1, 2, 3, 10, 99, 100, 250]) {
+        expect(
+          runtime.loadDataModule(
+            `${BLACKSMITH_SHOP_LUA}\nreturn blacksmith_sell_price(${buyPrice})`
+          )
+        ).toBe(Math.max(1, Math.floor(buyPrice * 0.5)))
       }
     } finally {
       runtime.destroy()

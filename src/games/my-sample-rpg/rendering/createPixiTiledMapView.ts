@@ -124,6 +124,7 @@ import {
 } from '../monsterCombat'
 import { createLuaMonsterCombat } from '../monsterCombatLua'
 import { createLuaMonsterRewards } from '../monsterRewardsLua'
+import { createLuaBlacksmithPricing } from '../blacksmithShopLua'
 import { resolveCharacterInteractionTarget } from '../interaction/resolveCharacterInteractionTarget'
 import {
   createMapPortalsFromEventLayers,
@@ -1127,6 +1128,9 @@ export const createPixiTiledMapView = async ({
     controllerRuntime.loadDataModule(source)
   )
   const luaMonsterCombat = createLuaMonsterCombat((source) =>
+    controllerRuntime.loadDataModule(source)
+  )
+  const luaBlacksmithPricing = createLuaBlacksmithPricing((source) =>
     controllerRuntime.loadDataModule(source)
   )
   let currentBlacksmithInventory = merchantInventory
@@ -2423,7 +2427,8 @@ export const createPixiTiledMapView = async ({
       onPlayerInventoryChange(nextPlayerInventory)
       onMerchantInventoryChange(nextMerchantInventory)
       syncPlayerUiOverlays()
-    }
+    },
+    getSellPriceById: luaBlacksmithPricing.getSellPriceById
   })
   potionShopOverlay = createPotionShopOverlay({
     mountElement,
