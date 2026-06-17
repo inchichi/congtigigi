@@ -1,10 +1,10 @@
 import {
-  getCharacterControllerIntent,
   type CharacterAction,
   type CharacterControllerIntent,
   type CharacterMoveDirection,
   type CharacterState
 } from './characterState'
+import { getCharacterControllerIntent } from './lua/luaGameLogic'
 import type {
   LuaCharacterControllerRuntime,
   LuaControllerScriptSource

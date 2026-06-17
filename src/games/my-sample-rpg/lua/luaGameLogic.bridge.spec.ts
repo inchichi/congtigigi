@@ -59,6 +59,34 @@ import {
   startQuest as tsStartQuest,
   FIRST_SLIME_HUNT_QUEST_ID
 } from '../questLog'
+import { grantPlayerExperience as tsGrantExperience } from '../playerExperience'
+import {
+  createInitialPlayerControlBindings as tsCreateControlBindings,
+  getPlayerControlBindingDisplayText as tsControlDisplayText
+} from '../playerControls'
+import {
+  serializePlayerSaveState as tsSerializeSave,
+  parseStoredPlayerSaveState as tsParseSave
+} from '../playerSaveState'
+import {
+  getPlayerRollDirectionVector as tsRollDirection,
+  getPlayerRollVisualState as tsRollVisual
+} from '../playerRoll'
+import {
+  getPlayerSmashSkillSegmentPlacement as tsSmashPlacement,
+  getPlayerSmashSkillDirectionVector as tsSmashDirection
+} from '../playerSmashSkill'
+import {
+  isHolidayDialogueEventValid as tsEventValid,
+  createTiledNpcEventObject as tsTiledNpc
+} from '../eventGeneration'
+import { createHolidayDialogueEventDraftFromText as tsEventDraft } from '../eventDrafting'
+import {
+  createInitialPlayerCharacter as tsCreatePlayerCharacter,
+  getCharacterMoveDirectionFromKey as tsMoveDirFromKey
+} from '../characterState'
+import { createMonsterPatrolState as tsCreatePatrol } from '../monsterPatrol'
+import { getSceneIntroMessage as tsSceneIntro } from '../sceneIntro'
 
 import {
   initLuaGameLogic,
@@ -97,7 +125,23 @@ import {
   equipPlayerInventorySlot,
   getBlacksmithShopBuyPriceById,
   createInitialQuestLog,
-  recordMonsterDefeatQuestProgress
+  recordMonsterDefeatQuestProgress,
+  grantPlayerExperience,
+  createInitialPlayerControlBindings,
+  getPlayerControlBindingDisplayText,
+  serializePlayerSaveState,
+  parseStoredPlayerSaveState,
+  getPlayerRollDirectionVector,
+  getPlayerRollVisualState,
+  getPlayerSmashSkillSegmentPlacement,
+  getPlayerSmashSkillDirectionVector,
+  isHolidayDialogueEventValid,
+  createTiledNpcEventObject,
+  createHolidayDialogueEventDraftFromText,
+  createInitialPlayerCharacter,
+  getCharacterMoveDirectionFromKey,
+  createMonsterPatrolState,
+  getSceneIntroMessage
 } from './luaGameLogic'
 
 // 단일 호스트 퍼사드(게임이 실제로 쓰는 경로)가 모든 함수에서 TS와 동등한지 실제 WASM으로 검증.
@@ -280,6 +324,105 @@ describe('luaGameLogic facade (real wasm)', () => {
         appearanceType: 'monster_slime'
       })
     )
+
+    // ── 신규 10개 모듈 스팟 체크 ──
+
+    // playerExperience — grant (progression 전역에 위임)
+    expect(grantPlayerExperience(profile, 500)).toEqual(
+      tsGrantExperience(profile, 500)
+    )
+    expect(grantPlayerExperience(profile, 0)).toEqual(
+      tsGrantExperience(profile, 0)
+    )
+
+    // playerControls
+    expect(createInitialPlayerControlBindings()).toEqual(tsCreateControlBindings())
+    for (const code of ['ArrowUp', 'KeyA', 'Digit3', 'Numpad5', 'Escape']) {
+      expect(getPlayerControlBindingDisplayText(code)).toBe(
+        tsControlDisplayText(code)
+      )
+    }
+
+    // playerSaveState — serialize 후 parse 왕복이 TS와 동등
+    const saveInput = {
+      profile,
+      equipment: tsCreateEquip(),
+      inventory: tsCreateInv(),
+      quickslots: tsCreateQuickslots(),
+      skillSlots: tsCreateSkillSlots()
+    }
+    // 직렬화 문자열은 키 순서가 비결정적이므로 파싱해 같은 데이터인지 비교한다.
+    expect(JSON.parse(serializePlayerSaveState(saveInput))).toEqual(
+      JSON.parse(tsSerializeSave(saveInput))
+    )
+    expect(parseStoredPlayerSaveState(serializePlayerSaveState(saveInput))).toEqual(
+      tsParseSave(tsSerializeSave(saveInput))
+    )
+    expect(parseStoredPlayerSaveState('not json')).toEqual(tsParseSave('not json'))
+
+    // playerRoll
+    for (const dir of ['up', 'down', 'left', 'right'] as const) {
+      expect(getPlayerRollDirectionVector(dir)).toEqual(tsRollDirection(dir))
+    }
+    expect(
+      getPlayerRollVisualState({ vector: { x: 1, y: 0 }, progress: 0.5 })
+    ).toEqual(tsRollVisual({ vector: { x: 1, y: 0 }, progress: 0.5 }))
+
+    // playerSmashSkill
+    for (const facing of ['up', 'down', 'left', 'right'] as const) {
+      expect(getPlayerSmashSkillDirectionVector(facing)).toEqual(
+        tsSmashDirection(facing)
+      )
+    }
+    expect(
+      getPlayerSmashSkillSegmentPlacement({
+        characterCenterX: 100,
+        characterCenterY: 80,
+        facing: 'right',
+        segmentIndex: 1,
+        progress: 0.4
+      })
+    ).toEqual(
+      tsSmashPlacement({
+        characterCenterX: 100,
+        characterCenterY: 80,
+        facing: 'right',
+        segmentIndex: 1,
+        progress: 0.4
+      })
+    )
+
+    // eventGeneration / eventDrafting
+    const draft = tsEventDraft('크리스마스 이벤트 만들어줘')
+    expect(createHolidayDialogueEventDraftFromText('크리스마스 이벤트 만들어줘')).toEqual(
+      draft
+    )
+    if (draft) {
+      expect(isHolidayDialogueEventValid(draft)).toBe(tsEventValid(draft))
+      expect(createTiledNpcEventObject(draft)).toEqual(tsTiledNpc(draft))
+    }
+    expect(createHolidayDialogueEventDraftFromText('관련없는 입력')).toEqual(
+      tsEventDraft('관련없는 입력')
+    )
+
+    // characterState
+    expect(
+      createInitialPlayerCharacter({ mapWidth: 20, mapHeight: 16 })
+    ).toEqual(tsCreatePlayerCharacter({ mapWidth: 20, mapHeight: 16 }))
+    for (const key of ['ArrowUp', 'ArrowLeft', 'Enter', 'KeyX']) {
+      expect(getCharacterMoveDirectionFromKey(key)).toBe(tsMoveDirFromKey(key))
+    }
+
+    // monsterPatrol — createMonsterPatrolState 만 변환됨(stepMonsterPatrol 은 TS 유지)
+    const patrolCharacter = tsCreatePlayerCharacter({ mapWidth: 20, mapHeight: 16 })
+    expect(createMonsterPatrolState(patrolCharacter)).toEqual(
+      tsCreatePatrol(patrolCharacter)
+    )
+
+    // sceneIntro
+    for (const sceneId of ['town', 'hunting-ground', 'cave', 'unknown']) {
+      expect(getSceneIntroMessage(sceneId)).toBe(tsSceneIntro(sceneId))
+    }
   })
 
   it('falls back to TS before init', () => {

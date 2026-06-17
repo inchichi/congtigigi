@@ -1,10 +1,12 @@
 import { getResponsiveUiScale } from './getResponsiveUiScale'
 import {
-  getPlayerControlBindingDefinitions,
-  getPlayerControlBindingDisplayText,
   type PlayerControlBindingId,
   type PlayerControlBindings
 } from '../playerControls'
+import {
+  getPlayerControlBindingDefinitions,
+  getPlayerControlBindingDisplayText
+} from '../lua/luaGameLogic'
 
 export type AudioSettings = {
   bgmVolume: number

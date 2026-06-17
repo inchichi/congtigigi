@@ -24,8 +24,10 @@ import {
 import { getMonsterDisplayName as tsGetMonsterDisplayName } from '../monsterDisplayName'
 import {
   getPlayerExperienceToNextLevel as tsGetPlayerExperienceToNextLevel,
+  grantPlayerExperience as tsGrantPlayerExperience,
   PLAYER_BASE_EXPERIENCE_TO_LEVEL_UP,
-  PLAYER_EXPERIENCE_TO_LEVEL_UP_PER_LEVEL
+  PLAYER_EXPERIENCE_TO_LEVEL_UP_PER_LEVEL,
+  type GrantPlayerExperienceResult
 } from '../playerExperience'
 import { PLAYER_MAX_LEVEL } from '../playerProfile'
 import {
@@ -94,6 +96,46 @@ import {
   createQuestLogLua,
   type QuestLogLua
 } from './questLogLua'
+import {
+  createPlayerExperienceLua,
+  type PlayerExperienceLua
+} from './playerExperienceLua'
+import {
+  createPlayerControlsLua,
+  type PlayerControlsLua
+} from './playerControlsLua'
+import {
+  createPlayerSaveStateLua,
+  type PlayerSaveStateLua
+} from './playerSaveStateLua'
+import {
+  createPlayerRollLua,
+  type PlayerRollLua
+} from './playerRollLua'
+import {
+  createPlayerSmashSkillLua,
+  type PlayerSmashSkillLua
+} from './playerSmashSkillLua'
+import {
+  createEventGenerationLua,
+  type EventGenerationLua
+} from './eventGenerationLua'
+import {
+  createEventDraftingLua,
+  type EventDraftingLua
+} from './eventDraftingLua'
+import {
+  createCharacterStateLua,
+  type CharacterStateLua
+} from './characterStateLua'
+import {
+  createMonsterPatrolLua,
+  type MonsterPatrolLua
+} from './monsterPatrolLua'
+import {
+  createSceneIntroLua,
+  type SceneIntroLua
+} from './sceneIntroLua'
 
 // 위 모듈들의 TS 폴백 + 게임 호출부 시그니처용 타입.
 import {
@@ -237,6 +279,78 @@ import {
   type QuestTrackerItem,
   type QuestTextFormatContext
 } from '../questLog'
+import {
+  createInitialPlayerControlBindings as tsCreateInitialPlayerControlBindings,
+  normalizeStoredPlayerControlBindings as tsNormalizeStoredPlayerControlBindings,
+  setPlayerControlBinding as tsSetPlayerControlBinding,
+  getPlayerControlBindingDisplayText as tsGetPlayerControlBindingDisplayText,
+  getPlayerControlMovementDirectionFromCode as tsGetPlayerControlMovementDirectionFromCode,
+  getPlayerControlActionFromCode as tsGetPlayerControlActionFromCode,
+  getPlayerControlQuickslotIndexFromCode as tsGetPlayerControlQuickslotIndexFromCode,
+  isPlayerControlPauseKey as tsIsPlayerControlPauseKey,
+  isPlayerControlCaptureModifierKey as tsIsPlayerControlCaptureModifierKey,
+  getPlayerControlBindingDefinitionById as tsGetPlayerControlBindingDefinitionById,
+  getPlayerControlBindingDefinitions as tsGetPlayerControlBindingDefinitions,
+  type PlayerControlBindingDefinition,
+  type PlayerControlBindingId,
+  type PlayerControlBindings
+} from '../playerControls'
+import {
+  serializePlayerSaveState as tsSerializePlayerSaveState,
+  normalizeStoredPlayerSaveState as tsNormalizeStoredPlayerSaveState,
+  parseStoredPlayerSaveState as tsParseStoredPlayerSaveState,
+  type PlayerSaveState,
+  type PlayerSaveStateInput
+} from '../playerSaveState'
+import {
+  getPlayerRollDirectionVector as tsGetPlayerRollDirectionVector,
+  normalizePlayerRollVector as tsNormalizePlayerRollVector,
+  getPlayerRollProgress as tsGetPlayerRollProgress,
+  getPlayerRollDistanceTiles as tsGetPlayerRollDistanceTiles,
+  getPlayerRollVisualState as tsGetPlayerRollVisualState,
+  type PlayerRollVector,
+  type PlayerRollVisualState
+} from '../playerRoll'
+import {
+  getPlayerSmashSkillDirectionVector as tsGetPlayerSmashSkillDirectionVector,
+  getPlayerSmashSkillSegmentDistancePixels as tsGetPlayerSmashSkillSegmentDistancePixels,
+  getPlayerSmashSkillSegmentPlacement as tsGetPlayerSmashSkillSegmentPlacement,
+  type PlayerSmashSkillSegmentPlacement
+} from '../playerSmashSkill'
+import {
+  createHolidayDialogueEventValidationErrors as tsCreateHolidayDialogueEventValidationErrors,
+  isHolidayDialogueEventValid as tsIsHolidayDialogueEventValid,
+  createTiledNpcEventObject as tsCreateTiledNpcEventObject,
+  HOLIDAY_DIALOGUE_EVENT_TYPE,
+  TALK_EVENT_TRIGGER_TYPE,
+  type HolidayDialogueEventSpec,
+  type TiledNpcEventObject
+} from '../eventGeneration'
+import { createHolidayDialogueEventDraftFromText as tsCreateHolidayDialogueEventDraftFromText } from '../eventDrafting'
+import {
+  createKeyboardCharacterController as tsCreateKeyboardCharacterController,
+  createIdleNpcCharacterController as tsCreateIdleNpcCharacterController,
+  createLuaCharacterController as tsCreateLuaCharacterController,
+  createInitialPlayerCharacter as tsCreateInitialPlayerCharacter,
+  createNpcCharacter as tsCreateNpcCharacter,
+  getCharacterMoveDirectionFromKey as tsGetCharacterMoveDirectionFromKey,
+  getCharacterActionFromKey as tsGetCharacterActionFromKey,
+  getCharacterControllerIntent as tsGetCharacterControllerIntent,
+  moveCharacterState as tsMoveCharacterState,
+  type CharacterAction,
+  type CharacterControllerIntent,
+  type CharacterMoveDirection,
+  type CharacterState,
+  type KeyboardCharacterController,
+  type LuaCharacterController,
+  type LuaCharacterControllerConfig,
+  type NpcCharacterController
+} from '../characterState'
+import {
+  createMonsterPatrolState as tsCreateMonsterPatrolState,
+  type MonsterPatrolState
+} from '../monsterPatrol'
+import { getSceneIntroMessage as tsGetSceneIntroMessage } from '../sceneIntro'
 
 let host: LuaLogicHost | undefined
 let statEffects: PlayerStatEffectsLua | undefined
@@ -252,6 +366,16 @@ let loadout: PlayerLoadoutLua | undefined
 let consumables: PlayerConsumablesLua | undefined
 let blacksmith: BlacksmithShopLua | undefined
 let questLogLua: QuestLogLua | undefined
+let experience: PlayerExperienceLua | undefined
+let controls: PlayerControlsLua | undefined
+let saveState: PlayerSaveStateLua | undefined
+let roll: PlayerRollLua | undefined
+let smashSkill: PlayerSmashSkillLua | undefined
+let eventGeneration: EventGenerationLua | undefined
+let eventDrafting: EventDraftingLua | undefined
+let characterState: CharacterStateLua | undefined
+let monsterPatrol: MonsterPatrolLua | undefined
+let sceneIntro: SceneIntroLua | undefined
 
 // 부팅 시 1회 호출 — Lua VM을 띄우고 변환된 모듈들을 모두 로드한다. 이후 아래 함수들이 Lua를 쓴다.
 export const initLuaGameLogic = async (
@@ -271,6 +395,9 @@ export const initLuaGameLogic = async (
   inventory = await createPlayerInventoryLua({ host: next })
   profile = await createPlayerProfileLua({ host: next })
   progression = await createPlayerProgressionLua({ host: next })
+  // experience 의 grant 는 progression 전역(progression_grant_level_up_rewards)에 의존하므로
+  // progression 이 로드된 이후에 만든다(이미 .lua 가 로드돼 있다고 가정).
+  experience = await createPlayerExperienceLua({ host: next })
   equipmentLua = await createPlayerEquipmentLua({ host: next })
   // potionShop 은 인벤토리 전역(inventory_*)에 의존하므로 inventory 로드 이후에 만든다.
   potionShop = await createPlayerPotionShopLua({ host: next })
@@ -282,6 +409,27 @@ export const initLuaGameLogic = async (
   consumables = await createPlayerConsumablesLua({ host: next })
   blacksmith = await createBlacksmithShopLua({ host: next })
   questLogLua = await createQuestLogLua({ host: next })
+
+  // 추가 자급식 모듈들(상호 의존 없음 — 임의 순서). 같은 단일 호스트(next)를 공유한다.
+  controls = await createPlayerControlsLua({ host: next })
+  saveState = await createPlayerSaveStateLua({ host: next })
+  roll = await createPlayerRollLua({ host: next })
+  smashSkill = await createPlayerSmashSkillLua({ host: next })
+  characterState = await createCharacterStateLua({ host: next })
+  monsterPatrol = await createMonsterPatrolLua({ host: next })
+  sceneIntro = await createSceneIntroLua({ host: next })
+  // eventDrafting 의 .lua 는 두 전역 상수(HOLIDAY_DIALOGUE_EVENT_TYPE, TALK_EVENT_TRIGGER_TYPE)에
+  // 의존한다. event-generation.lua 는 이 값들을 local 로만 갖고 전역으로 노출하지 않으므로,
+  // 공유 호스트에선 TS(단일 출처)에서 가져온 값을 전역으로 주입한 뒤 eventDrafting 을 만든다.
+  eventGeneration = await createEventGenerationLua({ host: next })
+  next.runModule(
+    [
+      `HOLIDAY_DIALOGUE_EVENT_TYPE = ${JSON.stringify(HOLIDAY_DIALOGUE_EVENT_TYPE)}`,
+      `TALK_EVENT_TRIGGER_TYPE = ${JSON.stringify(TALK_EVENT_TRIGGER_TYPE)}`
+    ].join('\n'),
+    '@event-generation.constants.lua'
+  )
+  eventDrafting = await createEventDraftingLua({ host: next })
 }
 
 export const isLuaGameLogicReady = (): boolean => host !== undefined
@@ -309,6 +457,16 @@ export const closeLuaGameLogic = (): void => {
   consumables?.close(); consumables = undefined
   blacksmith?.close(); blacksmith = undefined
   questLogLua?.close(); questLogLua = undefined
+  experience?.close(); experience = undefined
+  controls?.close(); controls = undefined
+  saveState?.close(); saveState = undefined
+  roll?.close(); roll = undefined
+  smashSkill?.close(); smashSkill = undefined
+  eventGeneration?.close(); eventGeneration = undefined
+  eventDrafting?.close(); eventDrafting = undefined
+  characterState?.close(); characterState = undefined
+  monsterPatrol?.close(); monsterPatrol = undefined
+  sceneIntro?.close(); sceneIntro = undefined
 }
 
 // ── monsterRewards ──
@@ -390,6 +548,15 @@ export const getPlayerExperienceToNextLevel = (level: number): number =>
         PLAYER_EXPERIENCE_TO_LEVEL_UP_PER_LEVEL
       )
     : tsGetPlayerExperienceToNextLevel(level)
+
+// grant 는 레벨업 보상을 progression 전역에 위임하므로 확장된 experience 래퍼로 라우팅한다.
+export const grantPlayerExperience = (
+  profile: PlayerProfile,
+  experienceAmount: number
+): GrantPlayerExperienceResult =>
+  experience
+    ? experience.grantPlayerExperience(profile, experienceAmount)
+    : tsGrantPlayerExperience(profile, experienceAmount)
 
 // ── monsterEquipmentDrops ──
 // 확률 게이트와 드롭 정의는 TS, 인덱스 계산만 Lua(난수 호출 순서는 원본과 동일).
@@ -1104,3 +1271,320 @@ export const formatQuestTextLines = (
   questLogLua
     ? questLogLua.formatQuestTextLines(lines, context)
     : tsFormatQuestTextLines(lines, context)
+
+// ── playerControls ──
+export const createInitialPlayerControlBindings = (): PlayerControlBindings =>
+  controls
+    ? controls.createInitialPlayerControlBindings()
+    : tsCreateInitialPlayerControlBindings()
+
+export const normalizeStoredPlayerControlBindings = (
+  nextBindings: unknown
+): PlayerControlBindings =>
+  controls
+    ? controls.normalizeStoredPlayerControlBindings(nextBindings)
+    : tsNormalizeStoredPlayerControlBindings(nextBindings)
+
+export const setPlayerControlBinding = (input: {
+  bindings: PlayerControlBindings
+  bindingId: PlayerControlBindingId
+  nextCode: string
+}): PlayerControlBindings =>
+  controls
+    ? controls.setPlayerControlBinding(input)
+    : tsSetPlayerControlBinding(input)
+
+export const getPlayerControlBindingDisplayText = (code: string): string =>
+  controls
+    ? controls.getPlayerControlBindingDisplayText(code)
+    : tsGetPlayerControlBindingDisplayText(code)
+
+export const getPlayerControlMovementDirectionFromCode = (
+  bindings: PlayerControlBindings,
+  code: string
+): CharacterMoveDirection | undefined =>
+  controls
+    ? controls.getPlayerControlMovementDirectionFromCode(bindings, code)
+    : tsGetPlayerControlMovementDirectionFromCode(bindings, code)
+
+export const getPlayerControlActionFromCode = (
+  bindings: PlayerControlBindings,
+  code: string
+): CharacterAction | undefined =>
+  controls
+    ? controls.getPlayerControlActionFromCode(bindings, code)
+    : tsGetPlayerControlActionFromCode(bindings, code)
+
+export const getPlayerControlQuickslotIndexFromCode = (
+  bindings: PlayerControlBindings,
+  code: string
+): number | undefined =>
+  controls
+    ? controls.getPlayerControlQuickslotIndexFromCode(bindings, code)
+    : tsGetPlayerControlQuickslotIndexFromCode(bindings, code)
+
+export const isPlayerControlPauseKey = (
+  bindings: PlayerControlBindings,
+  code: string
+): boolean =>
+  controls
+    ? controls.isPlayerControlPauseKey(bindings, code)
+    : tsIsPlayerControlPauseKey(bindings, code)
+
+export const isPlayerControlCaptureModifierKey = (code: string): boolean =>
+  controls
+    ? controls.isPlayerControlCaptureModifierKey(code)
+    : tsIsPlayerControlCaptureModifierKey(code)
+
+export const getPlayerControlBindingDefinitionById = (
+  bindingId: PlayerControlBindingId
+): PlayerControlBindingDefinition =>
+  controls
+    ? controls.getPlayerControlBindingDefinitionById(bindingId)
+    : tsGetPlayerControlBindingDefinitionById(bindingId)
+
+export const getPlayerControlBindingDefinitions =
+  (): readonly PlayerControlBindingDefinition[] =>
+    controls
+      ? controls.getPlayerControlBindingDefinitions()
+      : tsGetPlayerControlBindingDefinitions()
+
+export const findPlayerControlBindingIdByCode = (
+  bindings: PlayerControlBindings,
+  code: string
+): PlayerControlBindingId | undefined =>
+  controls
+    ? controls.findPlayerControlBindingIdByCode(bindings, code)
+    : findPlayerControlBindingIdByCodeFallback(bindings, code)
+
+// 원본 findPlayerControlBindingIdByCode 는 모듈 내부 const(미export)라 폴백을 여기 재현한다.
+const findPlayerControlBindingIdByCodeFallback = (
+  bindings: PlayerControlBindings,
+  code: string
+): PlayerControlBindingId | undefined => {
+  for (const [bindingId, bindingCode] of Object.entries(bindings)) {
+    if (bindingCode === code) {
+      return bindingId as PlayerControlBindingId
+    }
+  }
+
+  return undefined
+}
+
+export { PLAYER_CONTROL_BINDINGS_STORAGE_KEY } from '../playerControls'
+
+// ── playerSaveState ──
+export const serializePlayerSaveState = (
+  input: PlayerSaveStateInput
+): string =>
+  saveState
+    ? saveState.serializePlayerSaveState(input)
+    : tsSerializePlayerSaveState(input)
+
+export const normalizeStoredPlayerSaveState = (
+  value: unknown
+): PlayerSaveState | undefined =>
+  saveState
+    ? saveState.normalizeStoredPlayerSaveState(value)
+    : tsNormalizeStoredPlayerSaveState(value)
+
+export const parseStoredPlayerSaveState = (
+  raw: string | null | undefined
+): PlayerSaveState | undefined =>
+  saveState
+    ? saveState.parseStoredPlayerSaveState(raw)
+    : tsParseStoredPlayerSaveState(raw)
+
+export {
+  PLAYER_SAVE_STATE_STORAGE_KEY,
+  PLAYER_SAVE_STATE_VERSION
+} from '../playerSaveState'
+
+// ── playerRoll ──
+export const getPlayerRollDirectionVector = (
+  direction: CharacterMoveDirection
+): PlayerRollVector =>
+  roll
+    ? roll.getPlayerRollDirectionVector(direction)
+    : tsGetPlayerRollDirectionVector(direction)
+
+export const normalizePlayerRollVector = (
+  vector: PlayerRollVector
+): PlayerRollVector | undefined =>
+  roll
+    ? roll.normalizePlayerRollVector(vector)
+    : tsNormalizePlayerRollVector(vector)
+
+export const getPlayerRollProgress = (input: {
+  nowMilliseconds: number
+  startedAtMilliseconds: number
+}): number =>
+  roll ? roll.getPlayerRollProgress(input) : tsGetPlayerRollProgress(input)
+
+export const getPlayerRollDistanceTiles = (progress: number): number =>
+  roll
+    ? roll.getPlayerRollDistanceTiles(progress)
+    : tsGetPlayerRollDistanceTiles(progress)
+
+export const getPlayerRollVisualState = (input: {
+  vector: PlayerRollVector
+  progress: number
+}): PlayerRollVisualState =>
+  roll
+    ? roll.getPlayerRollVisualState(input)
+    : tsGetPlayerRollVisualState(input)
+
+// ── playerSmashSkill ──
+export const getPlayerSmashSkillDirectionVector = (
+  facing: CharacterMoveDirection
+): { x: number; y: number } =>
+  smashSkill
+    ? smashSkill.getPlayerSmashSkillDirectionVector(facing)
+    : tsGetPlayerSmashSkillDirectionVector(facing)
+
+export const getPlayerSmashSkillSegmentDistancePixels = (
+  segmentIndex: number,
+  progress = 0
+): number =>
+  smashSkill
+    ? smashSkill.getPlayerSmashSkillSegmentDistancePixels(segmentIndex, progress)
+    : tsGetPlayerSmashSkillSegmentDistancePixels(segmentIndex, progress)
+
+export const getPlayerSmashSkillSegmentPlacement = (input: {
+  characterCenterX: number
+  characterCenterY: number
+  facing: CharacterMoveDirection
+  segmentIndex: number
+  progress?: number
+}): PlayerSmashSkillSegmentPlacement =>
+  smashSkill
+    ? smashSkill.getPlayerSmashSkillSegmentPlacement(input)
+    : tsGetPlayerSmashSkillSegmentPlacement(input)
+
+// ── eventGeneration ──
+export const createHolidayDialogueEventValidationErrors = (
+  event: HolidayDialogueEventSpec
+): string[] =>
+  eventGeneration
+    ? eventGeneration.createHolidayDialogueEventValidationErrors(event)
+    : tsCreateHolidayDialogueEventValidationErrors(event)
+
+export const isHolidayDialogueEventValid = (
+  event: HolidayDialogueEventSpec
+): boolean =>
+  eventGeneration
+    ? eventGeneration.isHolidayDialogueEventValid(event)
+    : tsIsHolidayDialogueEventValid(event)
+
+export const createTiledNpcEventObject = (
+  event: HolidayDialogueEventSpec
+): TiledNpcEventObject =>
+  eventGeneration
+    ? eventGeneration.createTiledNpcEventObject(event)
+    : tsCreateTiledNpcEventObject(event)
+
+// ── eventDrafting ──
+export const createHolidayDialogueEventDraftFromText = (
+  prompt: string
+): HolidayDialogueEventSpec | undefined =>
+  eventDrafting
+    ? eventDrafting.createHolidayDialogueEventDraftFromText(prompt)
+    : tsCreateHolidayDialogueEventDraftFromText(prompt)
+
+// ── characterState ──
+export const createKeyboardCharacterController = (input?: {
+  moveSpeedTilesPerSecond?: number
+}): KeyboardCharacterController =>
+  characterState
+    ? characterState.createKeyboardCharacterController(input)
+    : tsCreateKeyboardCharacterController(input)
+
+export const createIdleNpcCharacterController = (input?: {
+  moveSpeedTilesPerSecond?: number
+  dialogueLines?: string[]
+  messageDurationMilliseconds?: number
+}): NpcCharacterController =>
+  characterState
+    ? characterState.createIdleNpcCharacterController(input)
+    : tsCreateIdleNpcCharacterController(input)
+
+export const createLuaCharacterController = (input: {
+  scriptId: string
+  radiusInTiles: number
+  config?: LuaCharacterControllerConfig
+  moveSpeedTilesPerSecond?: number
+}): LuaCharacterController =>
+  characterState
+    ? characterState.createLuaCharacterController(input)
+    : tsCreateLuaCharacterController(input)
+
+export const createInitialPlayerCharacter = (input: {
+  mapWidth: number
+  mapHeight: number
+}): CharacterState =>
+  characterState
+    ? characterState.createInitialPlayerCharacter(input)
+    : tsCreateInitialPlayerCharacter(input)
+
+export const createNpcCharacter = (input: {
+  id: string
+  appearanceType: string
+  level?: number
+  displayText?: string
+  position: { x: number; y: number }
+  facing?: CharacterMoveDirection
+  collisionSize: { width: number; height: number }
+  blocksMovement?: boolean
+  controller?: CharacterState['controller']
+}): CharacterState =>
+  characterState
+    ? characterState.createNpcCharacter(input)
+    : tsCreateNpcCharacter(input)
+
+export const getCharacterMoveDirectionFromKey = (
+  key: string
+): CharacterMoveDirection | undefined =>
+  characterState
+    ? characterState.getCharacterMoveDirectionFromKey(key)
+    : tsGetCharacterMoveDirectionFromKey(key)
+
+export const getCharacterActionFromKey = (
+  key: string
+): CharacterAction | undefined =>
+  characterState
+    ? characterState.getCharacterActionFromKey(key)
+    : tsGetCharacterActionFromKey(key)
+
+export const getCharacterControllerIntent = (input: {
+  character: CharacterState
+  deltaMilliseconds: number
+  pressedDirections?: ReadonlySet<CharacterMoveDirection>
+  triggeredActions?: ReadonlySet<CharacterAction>
+}): CharacterControllerIntent | undefined =>
+  characterState
+    ? characterState.getCharacterControllerIntent(input)
+    : tsGetCharacterControllerIntent(input)
+
+export const moveCharacterState = (input: {
+  character: CharacterState
+  delta: { x: number; y: number }
+  mapWidth: number
+  mapHeight: number
+}): CharacterState =>
+  characterState
+    ? characterState.moveCharacterState(input)
+    : tsMoveCharacterState(input)
+
+// ── monsterPatrol (createMonsterPatrolState 만 Lua — stepMonsterPatrol 은 가변 난수라 TS 유지) ──
+export const createMonsterPatrolState = (
+  character: CharacterState
+): MonsterPatrolState =>
+  monsterPatrol
+    ? monsterPatrol.createMonsterPatrolState(character)
+    : tsCreateMonsterPatrolState(character)
+
+// ── sceneIntro ──
+export const getSceneIntroMessage = (sceneId: string): string =>
+  sceneIntro
+    ? sceneIntro.getSceneIntroMessage(sceneId)
+    : tsGetSceneIntroMessage(sceneId)
