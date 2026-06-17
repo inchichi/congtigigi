@@ -49,6 +49,12 @@ import {
   createPlacementPalette,
   type NpcPaletteContext
 } from './createPlacementPalette'
+import {
+  createHoverPreview,
+  buildTileSlicePreview,
+  buildImagePreview,
+  buildCellsCanvasPreview
+} from './createHoverPreview'
 
 // 하드코딩 어댑터가 엔티티를 못 찾은 미지의 게임을, LLM 분석이 찾은 editable 그룹으로 채운다.
 const buildEntitiesFromAnalysis = (
@@ -1231,7 +1237,9 @@ export const createEditorApp = ({
   // 화면의 주인공 '마을 의뢰서' — 다른 패널보다 밝은 배경 + 2px 금색 테두리,
   // 입력에 포커스되면 은은한 발광(focus-within)으로 "여기에 쓰면 된다"가 바로 보이게.
   // 게임 화면이 주인공 — 의뢰서는 화면의 약 1/3 이하로 압축한다.
-  const composer = el('div', 'settings-game-font shrink-0 max-h-[36%] overflow-y-auto rounded-xl box-grad-border box-grad-border--strong box-grad-border--thick [--bgb:#252526] text-[#d4d4d4] p-2.5 flex flex-col gap-1.5 transition focus-within:shadow-[0_0_20px_rgba(222,170,90,0.25)]')
+  // 높이는 미리보기↔컴포저 사이 드래그 핸들로 조절한다(아래 center.append 직전 로직). max-h 고정 대신
+  // 명시적 height를 주므로, 여기선 shrink-0 + 스크롤만 남긴다(내용이 높이를 넘으면 자체 스크롤).
+  const composer = el('div', 'settings-game-font shrink-0 overflow-y-auto rounded-xl box-grad-border box-grad-border--strong box-grad-border--thick [--bgb:#252526] text-[#d4d4d4] p-2.5 flex flex-col gap-1.5 transition focus-within:shadow-[0_0_20px_rgba(222,170,90,0.25)]')
   // 제목은 하나, 설명도 한 줄만 — 정보를 줄여 흐름(선택→작성→생성)이 먼저 읽히게.
   const composerTitle = el('div', 'flex flex-wrap items-baseline gap-x-2.5 gap-y-0.5 min-w-0')
   const composerTitleRow = el('div', 'flex items-center gap-2')
@@ -1283,7 +1291,66 @@ export const createEditorApp = ({
   // 최근 생성 결과 한 줄 — 처음엔 발표용 예시, 실제 결과가 생기면 그 라벨로 바뀐다(render()가 갱신).
   const recentResultLine = el('div', 'text-[10px] leading-[1.4] text-[#777777]')
   composer.append(composerTop, supportNote, quickStart, promptField, recommendBoard, actions, status, recentResultLine)
-  center.append(preview, composer)
+  // ---------- 미리보기 ↔ 컴포저 높이 조절 핸들 ----------
+  // 게임 미리보기(preview, flex-1)와 하단 컴포저 사이를 드래그해 컴포저 높이를 바꾼다.
+  // 컴포저에 명시적 height를 주면 flex-1인 preview가 나머지 공간을 채운다. 높이는 localStorage에 영속.
+  const COMPOSER_HEIGHT_KEY = 'editor:composer-height-px'
+  const resizeHandle = el('div', 'editor-resize-handle')
+  resizeHandle.append(el('div', 'editor-resize-handle__grip'))
+  resizeHandle.title = '드래그해서 입력창 높이 조절'
+  let composerHeight = Number.parseInt(readLocalStorage(COMPOSER_HEIGHT_KEY) ?? '', 10)
+  if (!Number.isFinite(composerHeight)) {
+    composerHeight = 0 // 0 = 미설정 → 첫 레이아웃에서 기본 36%로 채운다.
+  }
+  // 미리보기가 최소 200px는 남도록 컴포저 높이를 [120, center-220] 범위로 제한한다.
+  const clampComposerHeight = (height: number, centerHeight: number): number => {
+    const min = 120
+    const max = Math.max(min, centerHeight - 220)
+    return Math.round(Math.min(max, Math.max(min, height)))
+  }
+  const applyComposerHeight = (): void => {
+    const centerHeight = center.clientHeight
+    if (centerHeight <= 0) {
+      return
+    }
+    if (composerHeight <= 0) {
+      composerHeight = Math.round(centerHeight * 0.36)
+    }
+    composerHeight = clampComposerHeight(composerHeight, centerHeight)
+    composer.style.height = `${composerHeight}px`
+  }
+  let resizeStartY = 0
+  let resizeStartHeight = 0
+  resizeHandle.addEventListener('pointerdown', (event) => {
+    event.preventDefault()
+    resizeStartY = event.clientY
+    resizeStartHeight = composer.getBoundingClientRect().height
+    resizeHandle.setPointerCapture(event.pointerId)
+    document.body.classList.add('editor-row-resizing')
+  })
+  resizeHandle.addEventListener('pointermove', (event) => {
+    if (!resizeHandle.hasPointerCapture(event.pointerId)) {
+      return
+    }
+    // 위로 끌면(델타 양수) 컴포저가 커지고 게임 미리보기가 작아진다.
+    const delta = resizeStartY - event.clientY
+    composerHeight = clampComposerHeight(resizeStartHeight + delta, center.clientHeight)
+    composer.style.height = `${composerHeight}px`
+  })
+  const endComposerResize = (event: PointerEvent): void => {
+    if (resizeHandle.hasPointerCapture(event.pointerId)) {
+      resizeHandle.releasePointerCapture(event.pointerId)
+    }
+    document.body.classList.remove('editor-row-resizing')
+    if (composerHeight > 0) {
+      writeLocalStorage(COMPOSER_HEIGHT_KEY, String(composerHeight))
+    }
+  }
+  resizeHandle.addEventListener('pointerup', endComposerResize)
+  resizeHandle.addEventListener('pointercancel', endComposerResize)
+  // 창 크기가 바뀌면 현재 높이를 새 영역에 맞게 다시 클램프한다(미리보기가 사라지지 않게).
+  new ResizeObserver(applyComposerHeight).observe(center)
+  center.append(preview, resizeHandle, composer)
 
   // ---------- right: 생성 결과 사이드바 ----------
   // 결과 사이드는 보조 정보 — 패널 자체를 본문보다 살짝 더 어둡게 가라앉힌다.
@@ -1819,6 +1886,50 @@ export const createEditorApp = ({
     }, 0)
   }
 
+  // 트리 엔티티 호버 미리보기 — 종류별로 가능한 이미지를 만들어 떠 있는 박스에 띄운다.
+  // 몬스터(전용 시트)→시트 이미지, 캐릭터/NPC(tiny-dungeon 타일)→단일 타일 슬라이스,
+  // 타일 군집·영역 오브젝트→셀들을 경계 사각형으로 조립한 캔버스. 못 구하면 undefined(미리보기 없음).
+  const treeHoverPreview = createHoverPreview()
+  const buildEntityPreviewContent = (
+    map: LoadedGameMap,
+    entity: GameEntity
+  ): HTMLElement | undefined | Promise<HTMLElement | undefined> => {
+    const appearanceType = getEntityAppearanceType(map, entity)
+    if (appearanceType) {
+      const monsterSheet = MONSTER_SHEET_BY_APPEARANCE[appearanceType]
+      if (monsterSheet) {
+        return buildImagePreview(`/${monsterSheet}`, { maxSize: 192 })
+      }
+      const characterTarget = buildStyleCharacterTileTarget(appearanceType, entity.name)
+      const characterCell = characterTarget?.cells[0]
+      if (characterTarget && characterCell) {
+        return buildTileSlicePreview({
+          imageUrl: `/${characterTarget.tilesetImagePath}`,
+          columns: characterTarget.columns,
+          tileWidth: characterTarget.tileWidth,
+          tileHeight: characterTarget.tileHeight,
+          tileId: characterCell.tileId,
+          targetSize: 128
+        })
+      }
+    }
+    const objectTarget = buildStyleObjectTarget(map, entity)
+    if (objectTarget) {
+      return buildCellsCanvasPreview({
+        imageUrl: `/${objectTarget.tilesetImagePath}`,
+        columns: objectTarget.columns,
+        tileWidth: objectTarget.tileWidth,
+        tileHeight: objectTarget.tileHeight,
+        cells: objectTarget.cells,
+        targetSize: 176
+      })
+    }
+    return undefined
+  }
+  const bindEntityPreview = (target: HTMLElement, map: LoadedGameMap, entity: GameEntity): void => {
+    treeHoverPreview.bind(target, () => buildEntityPreviewContent(map, entity))
+  }
+
   const renderTree = (): void => {
     entityButtons = []
     const groups: HTMLElement[] = []
@@ -1949,6 +2060,7 @@ export const createEditorApp = ({
               render()
             })
             entityButtons.push({ entity, node })
+            bindEntityPreview(node, map, entity)
             // NPC는 행 클릭이 LLM 생성 선택에 쓰이므로, 스타일 변환은 별도 🎨 버튼으로 분리한다.
             // 선택 버튼은 flex-1(인라인 스타일 — render()의 className 덮어쓰기에도 유지됨).
             if (game.adapter.id === 'my-sample-rpg' && groupKindOf(entity.kind) === 'npc') {
@@ -1982,6 +2094,7 @@ export const createEditorApp = ({
             ) as HTMLButtonElement
             node.type = 'button'
             node.title = '클릭하면 이 몬스터를 스타일 변환합니다 (같은 종류의 몬스터가 함께 바뀝니다)'
+            bindEntityPreview(node, map, entity)
             node.append(
               el('span', 'truncate', entity.name),
               el('span', 'ml-auto shrink-0 text-[10px]', '🎨')
@@ -2001,6 +2114,7 @@ export const createEditorApp = ({
             ) as HTMLButtonElement
             node.type = 'button'
             node.title = '클릭하면 이 오브젝트를 스타일 변환합니다 (같은 타일을 쓰는 다른 곳도 함께 바뀔 수 있습니다)'
+            bindEntityPreview(node, map, entity)
             node.append(
               el('span', 'truncate', entity.name),
               el('span', 'ml-auto shrink-0 text-[10px]', '🎨')
@@ -2017,6 +2131,7 @@ export const createEditorApp = ({
           } else {
             // 몬스터·표지판·포털(및 다른 게임의 구조물)은 맵에 있음을 보여주되(보기 전용), 생성 대상은 아니다.
             const row = el('div', 'truncate rounded-lg px-2.5 py-2 text-sm text-zinc-400', entity.name)
+            bindEntityPreview(row, map, entity)
             body.append(row)
           }
         }

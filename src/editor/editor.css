@@ -116,6 +116,55 @@
   pointer-events: none;
 }
 
+/* 호버 확대 미리보기 박스 — 팔레트/트리 항목에 마우스를 올리면 커서 옆에 떠서 큰 이미지를 보여준다.
+   pointer-events:none이라 마우스를 가로채지 않고, 모달(z-50/60)보다 위(z-80)에 그린다. */
+.hover-preview {
+  position: fixed;
+  z-index: 80;
+  top: 0;
+  left: 0;
+  padding: 6px;
+  border-radius: 10px;
+  background: #1b1b1c;
+  border: 1px solid #d09a4c;
+  box-shadow: 0 8px 26px rgba(0, 0, 0, 0.55);
+  pointer-events: none;
+}
+.hover-preview > * {
+  display: block;
+}
+
+/* 하단 컴포저 높이 조절 핸들 — 게임 미리보기와 컴포저 사이의 얇은 드래그 바. */
+.editor-resize-handle {
+  flex-shrink: 0;
+  height: 0.5rem;
+  margin: -0.25rem 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: row-resize;
+  touch-action: none;
+}
+.editor-resize-handle__grip {
+  height: 3px;
+  width: 2.5rem;
+  border-radius: 9999px;
+  background: rgba(217, 168, 92, 0.3);
+  transition: background 150ms ease, width 150ms ease;
+}
+.editor-resize-handle:hover .editor-resize-handle__grip {
+  background: rgba(217, 168, 92, 0.65);
+  width: 3.5rem;
+}
+/* 드래그 중 — 전역 커서 고정 + 선택/iframe 포인터 차단으로 끊김 없이 끌리게. */
+body.editor-row-resizing {
+  cursor: row-resize !important;
+  user-select: none;
+}
+body.editor-row-resizing iframe {
+  pointer-events: none;
+}
+
 /* '✓ 선택됨' 배지는 선택된 에셋 카드에서만 보인다(클래스 교체만으로 토글). */
 .entity-check {
   display: none;

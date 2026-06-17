@@ -10,6 +10,11 @@
 
 import { clearPlacementsForMap, type PlacementTemplate } from './placementStore'
 import { clearNpcsForMap, type NpcWireTemplate } from './npcStore'
+import {
+  createHoverPreview,
+  buildTileSlicePreview,
+  buildImagePreview
+} from './createHoverPreview'
 
 const el = <K extends keyof HTMLElementTagNameMap>(
   tag: K,
@@ -185,6 +190,9 @@ export const createPlacementPalette = (options: {
   let npcGridBuilt = false
   let npcSelectedAppearance: NpcAppearanceOption | null = null
 
+  // 항목에 마우스를 올리면 확대 미리보기를 띄운다(작은 썸네일을 크게 확인).
+  const hoverPreview = createHoverPreview()
+
   const setStatus = (message: string): void => {
     status.textContent = message
   }
@@ -318,6 +326,16 @@ export const createPlacementPalette = (options: {
       cell.style.backgroundSize = `${sheetWidth}px auto`
       cell.style.backgroundPosition = `-${col * ctx.tileWidth * scale}px -${row * ctx.tileHeight * scale}px`
       cell.title = appearance.label
+      hoverPreview.bind(cell, () =>
+        buildTileSlicePreview({
+          imageUrl: ctx.tilesetImageUrl,
+          columns: ctx.columns,
+          tileWidth: ctx.tileWidth,
+          tileHeight: ctx.tileHeight,
+          tileId: appearance.tileId,
+          targetSize: 128
+        })
+      )
       cell.addEventListener('click', () => {
         for (const other of npcGrid.children) {
           ;(other as HTMLElement).classList.remove('!border-indigo-400', 'ring-2', 'ring-indigo-400/60')
@@ -355,6 +373,16 @@ export const createPlacementPalette = (options: {
         cell.style.backgroundRepeat = 'no-repeat'
         cell.style.backgroundPosition = `-${(tileId % ctx.columns) * ctx.tileWidth}px -${Math.floor(tileId / ctx.columns) * ctx.tileHeight}px`
         cell.title = `타일 #${tileId}`
+        hoverPreview.bind(cell, () =>
+          buildTileSlicePreview({
+            imageUrl: ctx.tilesetImageUrl,
+            columns: ctx.columns,
+            tileWidth: ctx.tileWidth,
+            tileHeight: ctx.tileHeight,
+            tileId,
+            targetSize: 128
+          })
+        )
         cell.addEventListener('click', () => {
           for (const other of tileGrid.children) {
             (other as HTMLElement).classList.remove('!border-indigo-400', 'ring-2', 'ring-indigo-400/60')
@@ -394,6 +422,11 @@ export const createPlacementPalette = (options: {
         thumb.src = `${STYLE_SERVICE_BASE}/extracted-objects/${object.key}.png?t=${bust}`
         thumb.loading = 'lazy'
         card.append(thumb, el('span', 'w-full truncate text-center text-[10px] text-zinc-400', object.label))
+        hoverPreview.bind(card, () =>
+          buildImagePreview(`${STYLE_SERVICE_BASE}/extracted-objects/${object.key}.png?t=${bust}`, {
+            maxSize: 224
+          })
+        )
         card.addEventListener('click', () => {
           for (const other of objectGrid.children) {
             (other as HTMLElement).classList.remove('ring-2', 'ring-indigo-400/60')
