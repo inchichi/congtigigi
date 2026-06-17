@@ -7,7 +7,8 @@ import {
 import { getCharacterControllerIntent } from './lua/luaGameLogic'
 import type {
   LuaCharacterControllerRuntime,
-  LuaControllerScriptSource
+  LuaControllerScriptSource,
+  LuaRuntimeSnapshot
 } from './lua/createLuaCharacterControllerRuntime'
 import type { LuaControllerRuntimeEvent } from './lua/luaControllerApi'
 
@@ -51,6 +52,9 @@ export type CharacterControllerRuntime = {
     scriptId: string,
     script: LuaControllerScriptSource
   ) => void
+  pushSnapshot: (snapshot: LuaRuntimeSnapshot) => void
+  // 게임 규칙을 Lua 로 실행: 테이블/값을 반환하는 Lua 데이터·로직 모듈을 마샬링해 돌려준다.
+  loadDataModule: (source: string) => unknown
   destroy: () => void
 }
 
@@ -145,6 +149,10 @@ export const createCharacterControllerRuntime = ({
     updateLuaControllerScript: (scriptId, script) => {
       luaControllerRuntime?.updateScript(scriptId, script)
     },
+    pushSnapshot: (snapshot) => {
+      luaControllerRuntime?.pushSnapshot(snapshot)
+    },
+    loadDataModule: (source) => luaControllerRuntime?.loadDataModule(source) ?? null,
     destroy: () => {
       if (isDestroyed) {
         return

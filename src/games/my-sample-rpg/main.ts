@@ -3,6 +3,7 @@ import caveMapXml from './assets/maps/cave.tmx?raw'
 import townMapXml from './assets/maps/town.tmx?raw'
 import replyWithMessageControllerLua from './assets/lua/reply-with-message.lua?raw'
 import wanderNearHomeControllerLua from './assets/lua/wander-near-home.lua?raw'
+import vnDialogueControllerLua from './assets/lua/vn-dialogue.lua?raw'
 import huntingGroundMusicUrl from './assets/sounds/전투브금.mp3'
 import townMusicUrl from './assets/sounds/브금5.mp3'
 import questFinUrl from './assets/tilesets/quest_fin.png'
@@ -74,7 +75,10 @@ import { getSceneIntroMessage } from './sceneIntro'
 import { createPixiTiledMapView } from './rendering/createPixiTiledMapView'
 import {
   loadPendingEvents,
-  PENDING_EVENTS_STORAGE_KEY
+  loadPendingLuaScripts,
+  PENDING_EVENTS_STORAGE_KEY,
+  PENDING_LUA_SCRIPTS_STORAGE_KEY,
+  type PendingLuaScript
 } from '../../editor/pendingEvents'
 import {
   PENDING_PLACEMENTS_STORAGE_KEY,
@@ -192,12 +196,16 @@ const tinyDungeonTileset = parseTiledTileset({
 const characterSpriteScale = 2
 const replyWithMessageScriptId = 'reply-with-message'
 const wanderNearHomeScriptId = 'wander-near-home'
+const vnDialogueScriptId = 'vn-dialogue'
 const availableLuaControllerScriptsById: Record<string, { source: string }> = {
   [replyWithMessageScriptId]: {
     source: replyWithMessageControllerLua
   },
   [wanderNearHomeScriptId]: {
     source: wanderNearHomeControllerLua
+  },
+  [vnDialogueScriptId]: {
+    source: vnDialogueControllerLua
   }
 }
 const sceneMaps: Record<SceneId, typeof parsedTownMap> = {
@@ -360,6 +368,10 @@ const bootstrapScene = async (
     activeSceneRenderer?.applyEventDraft(pendingEvent, {
       targetCharacterId: pendingEvent.npc.id
     })
+  }
+
+  for (const pendingLuaScript of loadPendingLuaScripts()) {
+    applyPendingLuaScript(pendingLuaScript)
   }
 }
 
@@ -949,9 +961,37 @@ if (import.meta.hot) {
       source: nextModule.default
     })
   })
+
+  import.meta.hot.accept('./assets/lua/vn-dialogue.lua?raw', (nextModule) => {
+    if (!nextModule || !activeControllerRuntime) {
+      return
+    }
+
+    activeControllerRuntime.updateLuaControllerScript(vnDialogueScriptId, {
+      source: nextModule.default
+    })
+  })
 }
 
 // 에디터(별도 page/iframe)가 이벤트를 저장하면 같은 origin의 다른 문서에서 storage 이벤트가
+// 발생한다. 게임 프리뷰가 열려 있으면 새로고침 없이 즉시 적용한다.
+// 에디터가 생성한 Lua 컨트롤러를 대상 NPC에 핫 적용한다. 런타임이 Lua를 검증·재빌드하므로
+// 잘못된 코드면 throw 하고, 여기서 잡아 게임이 죽지 않게 한다(권위 있는 검증은 게임 측).
+function applyPendingLuaScript(pendingLuaScript: PendingLuaScript): void {
+  try {
+    activeSceneRenderer?.applyLuaScript({
+      targetCharacterId: pendingLuaScript.target_character_id,
+      source: pendingLuaScript.source
+    })
+  } catch (error) {
+    console.error(
+      `Failed to apply pending Lua script for "${pendingLuaScript.target_character_id}".`,
+      error
+    )
+  }
+}
+
+// 에디터(별도 page/iframe)가 이벤트/Lua를 저장하면 같은 origin의 다른 문서에서 storage 이벤트가
 // 발생한다. 게임 프리뷰가 열려 있으면 새로고침 없이 즉시 적용한다.
 window.addEventListener('storage', (event) => {
   // 에디터가 퀘스트를 주입하면 동적 퀘스트를 등록하고 현재 씬을 다시 부팅해 반영한다(렌더러는
@@ -974,14 +1014,19 @@ window.addEventListener('storage', (event) => {
     return
   }
 
-  if (event.key !== PENDING_EVENTS_STORAGE_KEY) {
+  if (event.key === PENDING_EVENTS_STORAGE_KEY) {
+    for (const pendingEvent of loadPendingEvents()) {
+      activeSceneRenderer?.applyEventDraft(pendingEvent, {
+        targetCharacterId: pendingEvent.npc.id
+      })
+    }
     return
   }
 
-  for (const pendingEvent of loadPendingEvents()) {
-    activeSceneRenderer?.applyEventDraft(pendingEvent, {
-      targetCharacterId: pendingEvent.npc.id
-    })
+  if (event.key === PENDING_LUA_SCRIPTS_STORAGE_KEY) {
+    for (const pendingLuaScript of loadPendingLuaScripts()) {
+      applyPendingLuaScript(pendingLuaScript)
+    }
   }
 })
 

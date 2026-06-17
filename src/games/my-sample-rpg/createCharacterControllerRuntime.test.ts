@@ -294,5 +294,7 @@ const createLuaRuntimeStub = ({
   drainEvents: vi.fn(() => emittedEvents),
   getActiveErrorMessages: vi.fn(() => activeErrorMessages),
   updateScript: vi.fn(),
+  pushSnapshot: vi.fn(),
+  loadDataModule: vi.fn(),
   destroy: vi.fn()
 })

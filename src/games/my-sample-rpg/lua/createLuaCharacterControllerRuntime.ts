@@ -26,6 +26,7 @@ import {
   type LuaControllerInteractionResponse,
   type LuaControllerRuntimeEvent
 } from './luaControllerApi'
+import { parseLuaControllerRuntimeEvents } from './luaRuntimeEventMarshaling'
 
 export type LuaControllerScriptSource = {
   source: string
@@ -92,6 +93,15 @@ type LuaModule = {
   UTF8ToString: (pointer: number) => string
 }
 
+// Phase 2 읽기 채널: 호스트가 Lua 에 밀어넣는 전역 스냅샷. 평면 키 → 타입별 값.
+// 키 규약: 'q:status:<questId>', 'q:unlocked:<questId>', 'q:obj:<questId>:<objId>',
+// 'inv:<itemId>', 'p:name'|'p:level'|'p:hp'|'p:max_hp'|'p:gold', 'scene:id'.
+export type LuaRuntimeSnapshot = {
+  strings: Record<string, string>
+  numbers: Record<string, number>
+  booleans: Record<string, boolean>
+}
+
 export type LuaCharacterControllerRuntime = {
   attachCharacter: (
     character: CharacterState,
@@ -118,6 +128,9 @@ export type LuaCharacterControllerRuntime = {
   drainEvents: () => LuaControllerRuntimeEvent[]
   getActiveErrorMessages: () => string[]
   updateScript: (scriptId: string, script: LuaControllerScriptSource) => void
+  pushSnapshot: (snapshot: LuaRuntimeSnapshot) => void
+  // Phase 5: 테이블을 반환하는 Lua 데이터 모듈을 실행해 그 값을 마샬링(JSON→JS)해 돌려준다.
+  loadDataModule: (source: string) => unknown
   destroy: () => void
 }
 
@@ -158,14 +171,25 @@ const LUA_CONTROLLER_APPEND_CONFIG_BOOLEAN_LIST_ITEM_HELPER_FUNCTION_NAME =
   '__engine_append_controller_config_boolean_list_item'
 const LUA_CONTROLLER_REMOVE_CONFIG_HELPER_FUNCTION_NAME =
   '__engine_remove_controller_config'
+// Phase 2: 호스트→Lua 전역 스냅샷(읽기 채널). config 주입과 같은 typed-setter 방식.
+const LUA_CONTROLLER_RESET_SNAPSHOT_HELPER_FUNCTION_NAME = '__engine_reset_snapshot'
+const LUA_CONTROLLER_SET_SNAPSHOT_STRING_HELPER_FUNCTION_NAME =
+  '__engine_set_snapshot_string'
+const LUA_CONTROLLER_SET_SNAPSHOT_NUMBER_HELPER_FUNCTION_NAME =
+  '__engine_set_snapshot_number'
+const LUA_CONTROLLER_SET_SNAPSHOT_BOOLEAN_HELPER_FUNCTION_NAME =
+  '__engine_set_snapshot_boolean'
 const LUA_CONTROLLER_DRAIN_EVENTS_FUNCTION_NAME = '__engine_drain_events_json'
+// Phase 5: 임의의 Lua 데이터 모듈(테이블 반환)을 실행해 JSON 으로 마샬링한다(Lua→TS 데이터 읽기).
+const LUA_CONTROLLER_LOAD_DATA_MODULE_FUNCTION_NAME = '__engine_load_data_module_json'
 const LUA_CONTROLLER_RUNTIME_HOST_API_SOURCE = `
 local runtime = {
   current_character_id = nil,
   current_source_character_id = nil,
   queued_events = {},
   controllers_by_script_id = {},
-  controller_config_by_character_id = {}
+  controller_config_by_character_id = {},
+  snapshot = {}
 }
 
 local function escape_json_string(value)
@@ -199,6 +223,70 @@ local function encode_runtime_event(event)
       .. ',"durationMilliseconds":'
       .. tostring(event.duration_milliseconds)
       .. '}'
+  end
+
+  if event.kind == 'show-npc-dialogue' then
+    local encoded_lines = {}
+
+    for index = 1, #event.lines do
+      encoded_lines[index] = escape_json_string(event.lines[index])
+    end
+
+    return '{"kind":"show-npc-dialogue","characterId":'
+      .. escape_json_string(event.character_id)
+      .. ',"lines":['
+      .. table.concat(encoded_lines, ',')
+      .. '],"durationMilliseconds":'
+      .. tostring(event.duration_milliseconds)
+      .. '}'
+  end
+
+  if event.kind == 'request-quest-start' then
+    return '{"kind":"request-quest-start","questId":'
+      .. escape_json_string(event.quest_id) .. '}'
+  end
+
+  if event.kind == 'request-quest-progress' then
+    return '{"kind":"request-quest-progress","questId":'
+      .. escape_json_string(event.quest_id)
+      .. ',"objectiveId":' .. escape_json_string(event.objective_id)
+      .. ',"amount":' .. tostring(event.amount) .. '}'
+  end
+
+  if event.kind == 'request-quest-complete' then
+    return '{"kind":"request-quest-complete","questId":'
+      .. escape_json_string(event.quest_id) .. '}'
+  end
+
+  if event.kind == 'request-inventory-add' then
+    return '{"kind":"request-inventory-add","itemId":'
+      .. escape_json_string(event.item_id)
+      .. ',"quantity":' .. tostring(event.quantity) .. '}'
+  end
+
+  if event.kind == 'request-inventory-remove' then
+    return '{"kind":"request-inventory-remove","itemId":'
+      .. escape_json_string(event.item_id)
+      .. ',"quantity":' .. tostring(event.quantity) .. '}'
+  end
+
+  if event.kind == 'set-config' then
+    return '{"kind":"set-config","characterId":'
+      .. escape_json_string(event.character_id)
+      .. ',"key":' .. escape_json_string(event.key)
+      .. ',"value":' .. escape_json_string(event.value) .. '}'
+  end
+
+  if event.kind == 'request-scene-transition' then
+    return '{"kind":"request-scene-transition","sceneId":'
+      .. escape_json_string(event.scene_id)
+      .. ',"x":' .. tostring(event.x)
+      .. ',"y":' .. tostring(event.y) .. '}'
+  end
+
+  if event.kind == 'play-sound' then
+    return '{"kind":"play-sound","soundId":'
+      .. escape_json_string(event.sound_id) .. '}'
   end
 
   error('Unsupported engine runtime event kind: ' .. tostring(event.kind))
@@ -494,6 +582,266 @@ function ${LUA_CONTROLLER_PUBLIC_API_NAME}.ui.show_message(message, duration_sec
     duration_milliseconds = get_duration_milliseconds(duration_seconds)
   }
 end
+
+function ${LUA_CONTROLLER_PUBLIC_API_NAME}.ui.show_dialogue(lines, duration_seconds)
+  if type(lines) ~= 'table' then
+    return
+  end
+
+  local normalized_lines = {}
+
+  for index = 1, #lines do
+    local line = lines[index]
+
+    if line ~= nil and tostring(line) ~= '' then
+      normalized_lines[#normalized_lines + 1] = tostring(line)
+    end
+  end
+
+  if #normalized_lines == 0 then
+    return
+  end
+
+  runtime.queued_events[#runtime.queued_events + 1] = {
+    kind = 'show-npc-dialogue',
+    character_id = require_current_character_id(),
+    lines = normalized_lines,
+    duration_milliseconds = get_duration_milliseconds(duration_seconds)
+  }
+end
+
+-- Phase 2 읽기 채널: 호스트가 매 변경 시 전역 스냅샷(평면 키)을 밀어넣고, Lua 는 그걸 읽는다.
+function ${LUA_CONTROLLER_RESET_SNAPSHOT_HELPER_FUNCTION_NAME}()
+  runtime.snapshot = {}
+end
+
+function ${LUA_CONTROLLER_SET_SNAPSHOT_STRING_HELPER_FUNCTION_NAME}(key, value)
+  runtime.snapshot[key] = tostring(value)
+end
+
+function ${LUA_CONTROLLER_SET_SNAPSHOT_NUMBER_HELPER_FUNCTION_NAME}(key, value)
+  runtime.snapshot[key] = value
+end
+
+function ${LUA_CONTROLLER_SET_SNAPSHOT_BOOLEAN_HELPER_FUNCTION_NAME}(key, numeric_boolean)
+  runtime.snapshot[key] = numeric_boolean ~= 0
+end
+
+${LUA_CONTROLLER_PUBLIC_API_NAME}.quest = ${LUA_CONTROLLER_PUBLIC_API_NAME}.quest or {}
+${LUA_CONTROLLER_PUBLIC_API_NAME}.inventory = ${LUA_CONTROLLER_PUBLIC_API_NAME}.inventory or {}
+${LUA_CONTROLLER_PUBLIC_API_NAME}.player = ${LUA_CONTROLLER_PUBLIC_API_NAME}.player or {}
+${LUA_CONTROLLER_PUBLIC_API_NAME}.scene = ${LUA_CONTROLLER_PUBLIC_API_NAME}.scene or {}
+
+function ${LUA_CONTROLLER_PUBLIC_API_NAME}.quest.get_status(quest_id)
+  local value = runtime.snapshot['q:status:' .. tostring(quest_id)]
+  if type(value) == 'string' then
+    return value
+  end
+  return 'not_started'
+end
+
+function ${LUA_CONTROLLER_PUBLIC_API_NAME}.quest.is_unlocked(quest_id)
+  return runtime.snapshot['q:unlocked:' .. tostring(quest_id)] == true
+end
+
+function ${LUA_CONTROLLER_PUBLIC_API_NAME}.quest.get_objective(quest_id, objective_id)
+  local value =
+    runtime.snapshot['q:obj:' .. tostring(quest_id) .. ':' .. tostring(objective_id)]
+  if type(value) == 'number' then
+    return value
+  end
+  return 0
+end
+
+function ${LUA_CONTROLLER_PUBLIC_API_NAME}.inventory.get_item_count(item_id)
+  local value = runtime.snapshot['inv:' .. tostring(item_id)]
+  if type(value) == 'number' then
+    return value
+  end
+  return 0
+end
+
+function ${LUA_CONTROLLER_PUBLIC_API_NAME}.player.get_stats()
+  return {
+    name = runtime.snapshot['p:name'] or '',
+    level = runtime.snapshot['p:level'] or 0,
+    hp = runtime.snapshot['p:hp'] or 0,
+    max_hp = runtime.snapshot['p:max_hp'] or 0,
+    gold = runtime.snapshot['p:gold'] or 0
+  }
+end
+
+function ${LUA_CONTROLLER_PUBLIC_API_NAME}.scene.get_current_id()
+  return runtime.snapshot['scene:id'] or ''
+end
+
+-- Phase 3 쓰기 채널: 정수 수량/증가량 정규화(유효하지 않으면 1).
+local function get_event_amount(value)
+  if
+    type(value) == 'number'
+    and value == value
+    and value ~= math.huge
+    and value ~= -math.huge
+  then
+    return math.floor(value)
+  end
+  return 1
+end
+
+function ${LUA_CONTROLLER_PUBLIC_API_NAME}.quest.request_start(quest_id)
+  if quest_id == nil then return end
+  runtime.queued_events[#runtime.queued_events + 1] = {
+    kind = 'request-quest-start',
+    quest_id = tostring(quest_id)
+  }
+end
+
+function ${LUA_CONTROLLER_PUBLIC_API_NAME}.quest.request_progress(quest_id, objective_id, amount)
+  if quest_id == nil or objective_id == nil then return end
+  runtime.queued_events[#runtime.queued_events + 1] = {
+    kind = 'request-quest-progress',
+    quest_id = tostring(quest_id),
+    objective_id = tostring(objective_id),
+    amount = get_event_amount(amount)
+  }
+end
+
+function ${LUA_CONTROLLER_PUBLIC_API_NAME}.quest.request_complete(quest_id)
+  if quest_id == nil then return end
+  runtime.queued_events[#runtime.queued_events + 1] = {
+    kind = 'request-quest-complete',
+    quest_id = tostring(quest_id)
+  }
+end
+
+function ${LUA_CONTROLLER_PUBLIC_API_NAME}.inventory.request_add(item_id, quantity)
+  if item_id == nil then return end
+  runtime.queued_events[#runtime.queued_events + 1] = {
+    kind = 'request-inventory-add',
+    item_id = tostring(item_id),
+    quantity = get_event_amount(quantity)
+  }
+end
+
+function ${LUA_CONTROLLER_PUBLIC_API_NAME}.inventory.request_remove(item_id, quantity)
+  if item_id == nil then return end
+  runtime.queued_events[#runtime.queued_events + 1] = {
+    kind = 'request-inventory-remove',
+    item_id = tostring(item_id),
+    quantity = get_event_amount(quantity)
+  }
+end
+
+function ${LUA_CONTROLLER_PUBLIC_API_NAME}.self.set_config(key, value)
+  if key == nil then return end
+  runtime.queued_events[#runtime.queued_events + 1] = {
+    kind = 'set-config',
+    character_id = require_current_character_id(),
+    key = tostring(key),
+    value = tostring(value)
+  }
+end
+
+function ${LUA_CONTROLLER_PUBLIC_API_NAME}.scene.request_transition(scene_id, x, y)
+  if scene_id == nil then return end
+  runtime.queued_events[#runtime.queued_events + 1] = {
+    kind = 'request-scene-transition',
+    scene_id = tostring(scene_id),
+    x = (type(x) == 'number' and x == x) and x or 0,
+    y = (type(y) == 'number' and y == y) and y or 0
+  }
+end
+
+${LUA_CONTROLLER_PUBLIC_API_NAME}.audio = ${LUA_CONTROLLER_PUBLIC_API_NAME}.audio or {}
+
+function ${LUA_CONTROLLER_PUBLIC_API_NAME}.audio.play_sound(sound_id)
+  if sound_id == nil then return end
+  runtime.queued_events[#runtime.queued_events + 1] = {
+    kind = 'play-sound',
+    sound_id = tostring(sound_id)
+  }
+end
+
+-- Phase 5: 임의 Lua 값(테이블/문자열/숫자/불리언/nil)을 JSON 으로 인코딩한다.
+-- 빈 테이블은 배열([])로, 1..n 연속 정수 키면 배열, 그 외엔 객체로 본다.
+local function encode_lua_value(value)
+  local value_type = type(value)
+
+  if value == nil then
+    return 'null'
+  end
+
+  if value_type == 'boolean' then
+    return value and 'true' or 'false'
+  end
+
+  if value_type == 'number' then
+    if
+      value == math.floor(value)
+      and value ~= math.huge
+      and value ~= -math.huge
+    then
+      return string.format('%d', math.floor(value))
+    end
+    -- %.17g 는 IEEE double 을 무손실로 왕복시킨다(부동소수 규칙의 정확한 패리티를 위해).
+    return string.format('%.17g', value)
+  end
+
+  if value_type == 'string' then
+    return escape_json_string(value)
+  end
+
+  if value_type == 'table' then
+    local count = 0
+    for _ in pairs(value) do
+      count = count + 1
+    end
+
+    if count == 0 then
+      return '[]'
+    end
+
+    local is_array = true
+    for index = 1, count do
+      if value[index] == nil then
+        is_array = false
+        break
+      end
+    end
+
+    local parts = {}
+    if is_array then
+      for index = 1, count do
+        parts[index] = encode_lua_value(value[index])
+      end
+      return '[' .. table.concat(parts, ',') .. ']'
+    end
+
+    for key, entry in pairs(value) do
+      parts[#parts + 1] =
+        escape_json_string(tostring(key)) .. ':' .. encode_lua_value(entry)
+    end
+    return '{' .. table.concat(parts, ',') .. '}'
+  end
+
+  return 'null'
+end
+
+function ${LUA_CONTROLLER_LOAD_DATA_MODULE_FUNCTION_NAME}(source, chunk_name)
+  local chunk, load_error = load(source, chunk_name)
+
+  if type(chunk) ~= 'function' then
+    error('Lua data module syntax error: ' .. tostring(load_error))
+  end
+
+  local results = table.pack(pcall(chunk))
+
+  if not results[1] then
+    error(results[2])
+  end
+
+  return encode_lua_value(results[2])
+end
 `
 
 export const createLuaCharacterControllerRuntime = async ({
@@ -743,6 +1091,28 @@ export const createLuaCharacterControllerRuntime = async ({
         })
       }
     },
+    pushSnapshot: (snapshot) => {
+      if (isDestroyed) {
+        return
+      }
+
+      try {
+        syncSnapshotToState(lua, luaState, snapshot)
+        clearLoggedError(lastLoggedErrorByKey, 'runtime:push-snapshot')
+      } catch (error) {
+        reportLuaRuntimeError(lastLoggedErrorByKey, 'runtime:push-snapshot', error)
+      }
+    },
+    loadDataModule: (source) => {
+      const json = callLuaFunctionForString(
+        lua,
+        luaState,
+        LUA_CONTROLLER_LOAD_DATA_MODULE_FUNCTION_NAME,
+        [source, 'data-module']
+      )
+
+      return json ? (JSON.parse(json) as unknown) : null
+    },
     destroy: () => {
       if (isDestroyed) {
         return
@@ -916,6 +1286,38 @@ const syncControllerConfigToState = (
 
   for (const [configKey, configValue] of Object.entries(config)) {
     pushControllerConfigValueToState(lua, luaState, characterId, configKey, configValue)
+  }
+}
+
+// Phase 2: 전역 스냅샷을 Lua 로 밀어넣는다(읽기 채널). config 와 동일한 typed-setter 호출.
+const syncSnapshotToState = (
+  lua: LuaModule,
+  luaState: number,
+  snapshot: LuaRuntimeSnapshot
+) => {
+  callLuaFunction(lua, luaState, LUA_CONTROLLER_RESET_SNAPSHOT_HELPER_FUNCTION_NAME, [])
+
+  for (const [key, value] of Object.entries(snapshot.strings)) {
+    callLuaFunction(lua, luaState, LUA_CONTROLLER_SET_SNAPSHOT_STRING_HELPER_FUNCTION_NAME, [
+      key,
+      value
+    ])
+  }
+
+  for (const [key, value] of Object.entries(snapshot.numbers)) {
+    callLuaFunction(lua, luaState, LUA_CONTROLLER_SET_SNAPSHOT_NUMBER_HELPER_FUNCTION_NAME, [
+      key,
+      value
+    ])
+  }
+
+  for (const [key, value] of Object.entries(snapshot.booleans)) {
+    callLuaFunction(
+      lua,
+      luaState,
+      LUA_CONTROLLER_SET_SNAPSHOT_BOOLEAN_HELPER_FUNCTION_NAME,
+      [key, value ? 1 : 0]
+    )
   }
 }
 
@@ -1418,39 +1820,6 @@ const readLuaNumber = (
   }
 
   return lua._lua_tonumberx(luaState, index, 0)
-}
-
-const parseLuaControllerRuntimeEvents = (
-  serializedEvents: string
-): LuaControllerRuntimeEvent[] => {
-  const parsedEvents = JSON.parse(serializedEvents) as unknown
-
-  if (!Array.isArray(parsedEvents)) {
-    throw new Error('Lua runtime event drain did not return an array.')
-  }
-
-  return parsedEvents.flatMap((parsedEvent) => {
-    if (
-      typeof parsedEvent !== 'object' ||
-      parsedEvent === null ||
-      parsedEvent.kind !== 'show-character-message' ||
-      typeof parsedEvent.characterId !== 'string' ||
-      typeof parsedEvent.message !== 'string' ||
-      typeof parsedEvent.durationMilliseconds !== 'number' ||
-      !Number.isFinite(parsedEvent.durationMilliseconds)
-    ) {
-      throw new Error('Lua runtime event drain returned an invalid event.')
-    }
-
-    return [
-      {
-        kind: 'show-character-message',
-        characterId: parsedEvent.characterId,
-        message: parsedEvent.message,
-        durationMilliseconds: parsedEvent.durationMilliseconds
-      }
-    ]
-  })
 }
 
 const getOptionalScriptSource = (

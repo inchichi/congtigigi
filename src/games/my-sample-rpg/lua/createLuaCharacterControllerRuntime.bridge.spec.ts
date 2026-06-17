@@ -8,13 +8,34 @@ import {
   createNpcCharacter
 } from '../characterState'
 import { createLuaCharacterControllerRuntime } from './createLuaCharacterControllerRuntime'
+import { serializeToLuaDataModule } from './questCatalogLua'
+import { QUEST_DEFINITIONS } from '../questLog'
+import {
+  MONSTER_REWARDS_LUA,
+  createLuaMonsterRewards
+} from '../monsterRewardsLua'
+import {
+  getMonsterExperienceDropAmount,
+  getMonsterGoldDropAmount,
+  getMonsterSkillPointDropAmount
+} from '../monsterRewards'
+import { createLuaPlayerStatEffects } from '../playerStatEffectsLua'
+import {
+  getPlayerEvadeChance,
+  getPlayerMovementSpeedTilesPerSecond,
+  getPlayerPhysicalAttackPower
+} from '../playerStatEffects'
+import { createInitialPlayerProfile } from '../playerProfile'
+import { createLuaMonsterCombat } from '../monsterCombatLua'
+import { createMonsterCombatState } from '../monsterCombat'
+import { BLACKSMITH_SHOP_LUA } from '../blacksmithShopLua'
 
 const LUA_MODULE_JS_URL = new URL(
-  '../../../public/vendor/lua/lua-5.3.6.mjs',
+  '../../../../public/vendor/lua/lua-5.3.6.mjs',
   import.meta.url
 )
 const LUA_MODULE_WASM_URL = new URL(
-  '../../../public/vendor/lua/lua-5.3.6.wasm',
+  '../../../../public/vendor/lua/lua-5.3.6.wasm',
   import.meta.url
 )
 const BRIDGE_SCRIPT_ID = 'bridge-test'
@@ -222,6 +243,407 @@ end
           durationMilliseconds: 2250
         }
       ])
+    } finally {
+      runtime.destroy()
+    }
+  })
+
+  it('drains a show-npc-dialogue event emitted through engine.ui.show_dialogue', async () => {
+    const runtime = await createBridgeRuntime({
+      source: createControllerModuleSource(`
+function controller.register(id, home_x, home_y, radius)
+end
+
+function controller.step(id, dt, x, y)
+  return 0, 0
+end
+
+function controller.interact(id, source_id)
+  engine.ui.show_dialogue({ "첫 번째 줄", "", "두 번째 줄" }, 2.8)
+end
+`)
+    })
+    const character = createBridgeCharacter()
+    const player = createInitialPlayerCharacter({
+      mapWidth: 20,
+      mapHeight: 20
+    })
+
+    try {
+      runtime.attachCharacter(character, character.controller)
+
+      expect(
+        runtime.handleInteraction(character, character.controller, player)
+      ).toBeUndefined()
+      // 빈 줄은 걸러지고, 대사 묶음 전체가 한 이벤트로 전달된다.
+      expect(runtime.drainEvents()).toEqual([
+        {
+          kind: 'show-npc-dialogue',
+          characterId: character.id,
+          lines: ['첫 번째 줄', '두 번째 줄'],
+          durationMilliseconds: 2800
+        }
+      ])
+    } finally {
+      runtime.destroy()
+    }
+  })
+
+  it('round-trips quotes, newlines, and multi-byte characters through event marshaling', async () => {
+    const runtime = await createBridgeRuntime({
+      source: createControllerModuleSource(`
+function controller.register(id, home_x, home_y, radius)
+end
+
+function controller.step(id, dt, x, y)
+  return 0, 0
+end
+
+function controller.interact(id, source_id)
+  engine.ui.show_message("\\"인용\\" / 줄1\\n줄2 / \\\\끝", 1.5)
+end
+`)
+    })
+    const character = createBridgeCharacter()
+    const player = createInitialPlayerCharacter({
+      mapWidth: 20,
+      mapHeight: 20
+    })
+
+    try {
+      runtime.attachCharacter(character, character.controller)
+
+      expect(
+        runtime.handleInteraction(character, character.controller, player)
+      ).toBeUndefined()
+      // 따옴표/개행/역슬래시/한글이 Lua→JSON→JS 왕복에서 그대로 보존된다.
+      expect(runtime.drainEvents()).toEqual([
+        {
+          kind: 'show-character-message',
+          characterId: character.id,
+          message: '"인용" / 줄1\n줄2 / \\끝',
+          durationMilliseconds: 1500
+        }
+      ])
+    } finally {
+      runtime.destroy()
+    }
+  })
+
+  it('reads a host-pushed snapshot through engine quest/inventory/player/scene queries', async () => {
+    const runtime = await createBridgeRuntime({
+      source: createControllerModuleSource(`
+function controller.register(id, home_x, home_y, radius)
+end
+
+function controller.step(id, dt, x, y)
+  return 0, 0
+end
+
+function controller.interact(id, source_id)
+  local status = engine.quest.get_status("q001")
+  local unlocked = engine.quest.is_unlocked("q001")
+  local potions = engine.inventory.get_item_count("potion_hp")
+  local stats = engine.player.get_stats()
+  local scene = engine.scene.get_current_id()
+  engine.ui.show_message(
+    status
+      .. "/" .. tostring(unlocked)
+      .. "/" .. string.format("%d", potions)
+      .. "/" .. stats.name
+      .. "/lv" .. string.format("%d", stats.level)
+      .. "/" .. scene,
+    1.0
+  )
+end
+`)
+    })
+    const character = createBridgeCharacter()
+    const player = createInitialPlayerCharacter({ mapWidth: 20, mapHeight: 20 })
+
+    try {
+      runtime.attachCharacter(character, character.controller)
+      runtime.pushSnapshot({
+        strings: { 'q:status:q001': 'active', 'p:name': '리븐', 'scene:id': 'town' },
+        numbers: { 'inv:potion_hp': 3, 'p:level': 7 },
+        booleans: { 'q:unlocked:q001': true }
+      })
+
+      expect(
+        runtime.handleInteraction(character, character.controller, player)
+      ).toBeUndefined()
+      expect(runtime.drainEvents()).toEqual([
+        {
+          kind: 'show-character-message',
+          characterId: character.id,
+          message: 'active/true/3/리븐/lv7/town',
+          durationMilliseconds: 1000
+        }
+      ])
+    } finally {
+      runtime.destroy()
+    }
+  })
+
+  it('returns snapshot defaults when nothing has been pushed', async () => {
+    const runtime = await createBridgeRuntime({
+      source: createControllerModuleSource(`
+function controller.step(id, dt, x, y)
+  return 0, 0
+end
+
+function controller.interact(id, source_id)
+  engine.ui.show_message(
+    engine.quest.get_status("q001")
+      .. "/" .. tostring(engine.quest.is_unlocked("q001"))
+      .. "/" .. string.format("%d", engine.inventory.get_item_count("potion_hp"))
+      .. "/[" .. engine.scene.get_current_id() .. "]",
+    1.0
+  )
+end
+`)
+    })
+    const character = createBridgeCharacter()
+    const player = createInitialPlayerCharacter({ mapWidth: 20, mapHeight: 20 })
+
+    try {
+      runtime.attachCharacter(character, character.controller)
+      expect(
+        runtime.handleInteraction(character, character.controller, player)
+      ).toBeUndefined()
+      expect(runtime.drainEvents()).toEqual([
+        {
+          kind: 'show-character-message',
+          characterId: character.id,
+          message: 'not_started/false/0/[]',
+          durationMilliseconds: 1000
+        }
+      ])
+    } finally {
+      runtime.destroy()
+    }
+  })
+
+  it('emits Phase 3 action events through the write-channel engine APIs', async () => {
+    const runtime = await createBridgeRuntime({
+      source: createControllerModuleSource(`
+function controller.step(id, dt, x, y)
+  return 0, 0
+end
+
+function controller.interact(id, source_id)
+  engine.quest.request_start("q001")
+  engine.quest.request_progress("q001", "defeat-slimes", 2)
+  engine.quest.request_complete("q001")
+  engine.inventory.request_add("potion_hp", 3)
+  engine.inventory.request_remove("gold_coin", 1)
+  engine.self.set_config("already_greeted", "true")
+end
+`)
+    })
+    const character = createBridgeCharacter()
+    const player = createInitialPlayerCharacter({ mapWidth: 20, mapHeight: 20 })
+
+    try {
+      runtime.attachCharacter(character, character.controller)
+      expect(
+        runtime.handleInteraction(character, character.controller, player)
+      ).toBeUndefined()
+      expect(runtime.drainEvents()).toEqual([
+        { kind: 'request-quest-start', questId: 'q001' },
+        {
+          kind: 'request-quest-progress',
+          questId: 'q001',
+          objectiveId: 'defeat-slimes',
+          amount: 2
+        },
+        { kind: 'request-quest-complete', questId: 'q001' },
+        { kind: 'request-inventory-add', itemId: 'potion_hp', quantity: 3 },
+        { kind: 'request-inventory-remove', itemId: 'gold_coin', quantity: 1 },
+        {
+          kind: 'set-config',
+          characterId: character.id,
+          key: 'already_greeted',
+          value: 'true'
+        }
+      ])
+    } finally {
+      runtime.destroy()
+    }
+  })
+
+  it('emits Phase 4 scene-transition and play-sound action events', async () => {
+    const runtime = await createBridgeRuntime({
+      source: createControllerModuleSource(`
+function controller.step(id, dt, x, y)
+  return 0, 0
+end
+
+function controller.interact(id, source_id)
+  engine.scene.request_transition("cave", 96, 128)
+  engine.audio.play_sound("levelUp")
+end
+`)
+    })
+    const character = createBridgeCharacter()
+    const player = createInitialPlayerCharacter({ mapWidth: 20, mapHeight: 20 })
+
+    try {
+      runtime.attachCharacter(character, character.controller)
+      expect(
+        runtime.handleInteraction(character, character.controller, player)
+      ).toBeUndefined()
+      expect(runtime.drainEvents()).toEqual([
+        { kind: 'request-scene-transition', sceneId: 'cave', x: 96, y: 128 },
+        { kind: 'play-sound', soundId: 'levelUp' }
+      ])
+    } finally {
+      runtime.destroy()
+    }
+  })
+
+  it('round-trips the quest catalog through Lua data (Phase 5 golden equality)', async () => {
+    const runtime = await createBridgeRuntime({
+      source: createControllerModuleSource(`
+function controller.step(id, dt, x, y)
+  return 0, 0
+end
+`)
+    })
+
+    try {
+      // 실제 퀘스트 카탈로그를 Lua 데이터 모듈로 직렬화 → Lua 로 다시 읽어 마샬링 → 원본과 동일.
+      const luaSource = serializeToLuaDataModule(QUEST_DEFINITIONS)
+      const loaded = runtime.loadDataModule(luaSource)
+      expect(loaded).toEqual(QUEST_DEFINITIONS)
+    } finally {
+      runtime.destroy()
+    }
+  })
+
+  it('runs monster-reward game rules in Lua with parity to the TS reference', async () => {
+    const runtime = await createBridgeRuntime({
+      source: createControllerModuleSource(`
+function controller.step(id, dt, x, y)
+  return 0, 0
+end
+`)
+    })
+
+    try {
+      // (1) 규칙이 실제로 Lua 에서 실행됨을 직접 확인(폴백 우회).
+      expect(
+        runtime.loadDataModule(`${MONSTER_REWARDS_LUA}\nreturn monster_gold_drop(7)`)
+      ).toBe(10 + 7 * 4)
+
+      // (2) 호스트 호출부가 쓰는 팩토리가 TS 기준과 모든 레벨에서 동일.
+      const luaRewards = createLuaMonsterRewards((source) =>
+        runtime.loadDataModule(source)
+      )
+      for (const level of [1, 2, 5, 10, 20, 50]) {
+        expect(luaRewards.getMonsterGoldDropAmount(level)).toBe(
+          getMonsterGoldDropAmount(level)
+        )
+        expect(luaRewards.getMonsterExperienceDropAmount(level)).toBe(
+          getMonsterExperienceDropAmount(level)
+        )
+        expect(luaRewards.getMonsterSkillPointDropAmount(level)).toBe(
+          getMonsterSkillPointDropAmount(level)
+        )
+      }
+    } finally {
+      runtime.destroy()
+    }
+  })
+
+  it('runs player stat-effect rules in Lua with float-exact parity to TS', async () => {
+    const runtime = await createBridgeRuntime({
+      source: createControllerModuleSource(`
+function controller.step(id, dt, x, y)
+  return 0, 0
+end
+`)
+    })
+
+    try {
+      const luaStats = createLuaPlayerStatEffects((source) =>
+        runtime.loadDataModule(source)
+      )
+      const base = createInitialPlayerProfile()
+      const withStats = (strength: number, agility: number, luck: number) => ({
+        ...base,
+        stats: { ...base.stats, strength, agility, luck }
+      })
+
+      for (const [strength, agility, luck] of [
+        [1, 4, 0],
+        [5, 10, 3],
+        [20, 2, 30],
+        [8, 20, 15]
+      ]) {
+        const profile = withStats(strength, agility, luck)
+        expect(luaStats.getPlayerPhysicalAttackPower(profile)).toBe(
+          getPlayerPhysicalAttackPower(profile)
+        )
+        expect(luaStats.getPlayerMovementSpeedTilesPerSecond(profile)).toBe(
+          getPlayerMovementSpeedTilesPerSecond(profile)
+        )
+        expect(luaStats.getPlayerEvadeChance(profile)).toBe(
+          getPlayerEvadeChance(profile)
+        )
+      }
+    } finally {
+      runtime.destroy()
+    }
+  })
+
+  it('runs monster combat-state creation in Lua with object-out parity to TS', async () => {
+    const runtime = await createBridgeRuntime({
+      source: createControllerModuleSource(`
+function controller.step(id, dt, x, y)
+  return 0, 0
+end
+`)
+    })
+
+    try {
+      const luaCombat = createLuaMonsterCombat((source) =>
+        runtime.loadDataModule(source)
+      )
+      const cases: [number, { hpMultiplier?: number; damageMultiplier?: number }][] = [
+        [1, {}],
+        [5, {}],
+        [10, { hpMultiplier: 2 }],
+        [7, { damageMultiplier: 3 }],
+        [20, { hpMultiplier: 1.5, damageMultiplier: 2 }]
+      ]
+      for (const [level, options] of cases) {
+        expect(luaCombat.createMonsterCombatState(level, options)).toEqual(
+          createMonsterCombatState(level, options)
+        )
+      }
+    } finally {
+      runtime.destroy()
+    }
+  })
+
+  it('runs the blacksmith sell-price formula in Lua', async () => {
+    const runtime = await createBridgeRuntime({
+      source: createControllerModuleSource(`
+function controller.step(id, dt, x, y)
+  return 0, 0
+end
+`)
+    })
+
+    try {
+      for (const buyPrice of [1, 2, 3, 10, 99, 100, 250]) {
+        expect(
+          runtime.loadDataModule(
+            `${BLACKSMITH_SHOP_LUA}\nreturn blacksmith_sell_price(${buyPrice})`
+          )
+        ).toBe(Math.max(1, Math.floor(buyPrice * 0.5)))
+      }
     } finally {
       runtime.destroy()
     }

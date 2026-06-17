@@ -8,16 +8,23 @@ import playerSwordHitSoundUrl from '../assets/sounds/player-sword-hit.wav'
 import slimeAttackSoundUrl from '../assets/sounds/slime-attack.wav'
 import slimeDeathSoundUrl from '../assets/sounds/slime-death.wav'
 
-export type GameSoundEffectId =
-  | 'grassFootstep'
-  | 'levelUp'
-  | 'playerDamage'
-  | 'playerGameOver'
-  | 'playerRollWhoosh'
-  | 'playerSkill'
-  | 'playerSwordHit'
-  | 'slimeAttack'
-  | 'slimeDeath'
+export const GAME_SOUND_EFFECT_IDS = [
+  'grassFootstep',
+  'levelUp',
+  'playerDamage',
+  'playerGameOver',
+  'playerRollWhoosh',
+  'playerSkill',
+  'playerSwordHit',
+  'slimeAttack',
+  'slimeDeath'
+] as const
+
+export type GameSoundEffectId = (typeof GAME_SOUND_EFFECT_IDS)[number]
+
+// Phase 4: Lua 가 보낸 임의 문자열을 안전하게 사운드 id 로 좁힌다.
+export const isGameSoundEffectId = (value: string): value is GameSoundEffectId =>
+  (GAME_SOUND_EFFECT_IDS as readonly string[]).includes(value)
 
 type GameSoundEffectConfig = {
   url: string

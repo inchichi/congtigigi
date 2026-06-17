@@ -3,7 +3,9 @@ import type { GameStructureProfile } from './gameStructureProfile'
 import { generateEventJsonDraftWithClaude } from './claudeEventJsonGenerator'
 import { createGeneratedEventJsonValidationIssues } from './eventJsonSchema'
 import { createHolidayDialogueEventSpecFromGeneratedEventJson } from './eventCodeGenerator'
-import { savePendingEvent } from './pendingEvents'
+import { savePendingEvent, savePendingLuaScript } from './pendingEvents'
+import { generateLuaControllerDraftWithClaude } from './luaControllerGenerator'
+import { validateLuaControllerSource } from './luaControllerValidator'
 import { generateJson } from './llmProvider'
 import { createEntityLinesValidationIssues } from './entityLinesValidator'
 import type { BridgeApplyMessage } from './gameBridge'
@@ -147,39 +149,64 @@ export const rpgAdapter: GameAdapter = {
     }
 
     const targetHint = entity
-      ? ` 이 이벤트의 대상은 반드시 NPC id="${entity.id}"(${entity.name}, map=${entity.mapId})로 한다.`
-      : ''
-    // 퀘스트 2단계: 고른 후보가 있으면 그 방향대로 이벤트 JSON을 만들게 엮는다.
-    // candidate가 없으면 이 문자열은 빈 값이라 기존 단일 생성과 프롬프트가 동일하다.
-    const candidateHint = candidate
-      ? `\n\n선택된 퀘스트 후보를 그대로 구현한다:\n- 제목: ${candidate.title}\n- 내용: ${candidate.summary}` +
-        (candidate.target_hint ? `\n- 대상 NPC: ${candidate.target_hint}` : '')
+      ? ` 대상은 NPC id="${entity.id}"(${entity.name}, map=${entity.mapId})다.`
       : ''
     const feedbackHint = feedback ? buildFeedbackInstruction(feedback) : ''
-    const eventJson = await generateEventJsonDraftWithClaude({
-      apiKey,
-      userPrompt: `${userPrompt}${candidateHint}${targetHint}${feedbackHint}`,
-      profile
-    })
 
-    // 생성과 분리된 검증 단계: 필드 + map/npc/item ID 실존성 + 맵-NPC 일치.
-    const issues = createGeneratedEventJsonValidationIssues(eventJson, profile).map(
-      (issue) => `${issue.path} - ${issue.message}`
+    // 퀘스트 2단계(후보 선택) 경로는 기존 이벤트 JSON 생성을 유지한다(드라이런 검증·턴인 흐름 호환).
+    if (candidate) {
+      const candidateHint =
+        `\n\n선택된 퀘스트 후보를 그대로 구현한다:\n- 제목: ${candidate.title}\n- 내용: ${candidate.summary}` +
+        (candidate.target_hint ? `\n- 대상 NPC: ${candidate.target_hint}` : '')
+      const eventJson = await generateEventJsonDraftWithClaude({
+        apiKey,
+        userPrompt: `${userPrompt}${candidateHint}${targetHint}${feedbackHint}`,
+        profile
+      })
+      const issues = createGeneratedEventJsonValidationIssues(eventJson, profile).map(
+        (issue) => `${issue.path} - ${issue.message}`
+      )
+      return {
+        label: eventJson.event_name,
+        preview: JSON.stringify(eventJson, null, 2),
+        issues,
+        apply: () => {
+          const spec = createHolidayDialogueEventSpecFromGeneratedEventJson(eventJson)
+          if (spec) {
+            savePendingEvent(spec)
+          }
+        },
+        bridgePayload: null,
+        // 에디터가 드라이런 검증(dryRunEventApply)에 쓰도록 원본 이벤트 JSON을 노출한다.
+        eventJson
+      }
+    }
+
+    // 기본 경로(완전 Lua 기반): NPC 행동을 Lua 컨트롤러로 생성해 같은 origin localStorage 로
+    // 게임에 핫적용한다. 생성과 분리된 결정적 검증은 luaControllerValidator 가 담당한다.
+    const { lua_source } = await generateLuaControllerDraftWithClaude({
+      apiKey,
+      userPrompt: `${userPrompt}${targetHint}${feedbackHint}`,
+      targetCharacterName: entity?.name ?? '이 NPC'
+    })
+    const issues = validateLuaControllerSource(lua_source).map(
+      (issue) => `${issue.severity === 'error' ? '✗' : '⚠'} ${issue.message}`
     )
+    const targetCharacterId = entity?.id
 
     return {
-      label: eventJson.event_name,
-      preview: JSON.stringify(eventJson, null, 2),
+      label: entity ? `lua · ${entity.name}` : 'lua controller',
+      preview: lua_source,
       issues,
-      apply: () => {
-        const spec = createHolidayDialogueEventSpecFromGeneratedEventJson(eventJson)
-        if (spec) {
-          savePendingEvent(spec)
-        }
-      },
-      bridgePayload: null,
-      // 에디터가 드라이런 검증(dryRunEventApply)에 쓰도록 원본 이벤트 JSON을 노출한다.
-      eventJson
+      apply: targetCharacterId
+        ? () => {
+            savePendingLuaScript({
+              target_character_id: targetCharacterId,
+              source: lua_source
+            })
+          }
+        : null,
+      bridgePayload: null
     }
   }
 }

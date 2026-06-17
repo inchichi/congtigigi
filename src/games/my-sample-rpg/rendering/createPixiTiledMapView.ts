@@ -81,6 +81,7 @@ import {
   recordItemAcquireQuestProgress,
   recordItemUseQuestProgress,
   recordMonsterDefeatQuestProgress,
+  recordQuestObjectiveProgress,
   recordShopOpenQuestProgress,
   recordTalkQuestProgress,
   startQuest,
@@ -88,27 +89,29 @@ import {
   type QuestItemReward,
   type QuestLogState
 } from '../questLog'
+// 팀원(develop-chich) Lua 방식: 모듈별 Lua 래퍼 인스턴스 + 비변환 함수는 TS에서.
+import { createLuaPlayerStatEffects } from '../playerStatEffectsLua'
+import { grantPlayerExperience } from '../playerExperience'
+import { rollMonsterEquipmentDrop } from '../monsterEquipmentDrops'
+import { grantPlayerSkillPoints } from '../playerProgression'
 import {
+  createMonsterPatrolState,
   stepMonsterPatrol,
   type MonsterPatrolState
 } from '../monsterPatrol'
-import { type MonsterCombatState } from '../monsterCombat'
-// 그 외 게임 로직(전투/보상/드롭/플레이어 시스템)은 Lua 퍼사드로 실행한다(동일 시그니처).
 import {
   applyMonsterDamage,
-  createMonsterCombatState,
   isMonsterDefeated,
+  type MonsterCombatState
+} from '../monsterCombat'
+import { createLuaMonsterCombat } from '../monsterCombatLua'
+import { createLuaMonsterRewards } from '../monsterRewardsLua'
+import { createLuaBlacksmithPricing } from '../blacksmithShopLua'
+// 플레이어/캐릭터/스킬/조작/소비/장비 등 chichi가 변환한 로직은 chichi Lua 퍼사드로 실행(동일 시그니처).
+import {
   getMonsterDisplayName,
-  getMonsterExperienceDropAmount,
-  getMonsterGoldDropAmount,
-  getMonsterSkillPointDropAmount,
-  rollMonsterEquipmentDrop,
   findFirstEmptyPlayerInventorySlotIndex,
   setPlayerInventorySlot,
-  getPlayerMovementSpeedTilesPerSecond,
-  getPlayerPhysicalAttackPower,
-  shouldPlayerEvadeDamage,
-  grantPlayerSkillPoints,
   getPlayerEquipmentItemDefinitionById,
   usePlayerQuickslotConsumable,
   clearPlayerQuickslotAssignment,
@@ -133,9 +136,7 @@ import {
   getPlayerControlQuickslotIndexFromCode,
   isPlayerControlCaptureModifierKey,
   isPlayerControlPauseKey,
-  setPlayerControlBinding,
-  grantPlayerExperience,
-  createMonsterPatrolState
+  setPlayerControlBinding
 } from '../lua/luaGameLogic'
 import { resolveCharacterInteractionTarget } from '../interaction/resolveCharacterInteractionTarget'
 import {
@@ -169,10 +170,15 @@ import { createPlayerHudOverlay } from './createPlayerHudOverlay'
 import { createPlayerInventoryOverlay } from './createPlayerInventoryOverlay'
 import { createPlayerStatOverlay } from './createPlayerStatOverlay'
 import { createPlayerSkillOverlay } from './createPlayerSkillOverlay'
+import { createNpcDialogueOverlay } from './createNpcDialogueOverlay'
+import { buildLuaRuntimeSnapshot } from '../lua/buildLuaRuntimeSnapshot'
+import blacksmithPortraitUrl from '../assets/portraits/blacksmith-mozarchan.png'
+import potionMerchantPortraitUrl from '../assets/portraits/potion-merchant.png'
+import santaPortraitUrl from '../assets/portraits/santa.png'
 import type { MonsterAnimationTextures } from './monsterAnimationTextures'
 import { loadMonsterPigAnimationTextures } from './loadMonsterPigAnimationTextures'
 import { loadMonsterSlimeAnimationTextures } from './loadMonsterSlimeAnimationTextures'
-import { createGameSoundEffects } from './createGameSoundEffects'
+import { createGameSoundEffects, isGameSoundEffectId } from './createGameSoundEffects'
 import {
   createPauseMenuOverlay,
   type AudioSettings
@@ -500,6 +506,15 @@ const LEVEL_UP_TEXT_STYLE = new TextStyle({
 })
 const BLACKSMITH_SHOP_NPC_ID = 'blacksmith'
 const POTION_SHOP_NPC_ID = 'potion_merchant'
+
+// 비주얼노벨 대화창을 쓰는 NPC → 초상화 이미지. 여기 등록된 NPC 는 머리 위 말풍선 대신
+// 하단 대화창으로 대사를 보여준다. (우선 대장장이 모차르찬부터)
+const NPC_PORTRAITS: Record<string, string> = {
+  [BLACKSMITH_SHOP_NPC_ID]: blacksmithPortraitUrl,
+  [POTION_SHOP_NPC_ID]: potionMerchantPortraitUrl,
+  santa: santaPortraitUrl
+}
+
 const SIGN_POST_APPEARANCE_TYPE = 'sign_inn'
 const MONSTER_PIG_APPEARANCE_TYPE = 'monster_pig'
 const MONSTER_SLIME_APPEARANCE_TYPE = 'monster_slime'
@@ -1122,6 +1137,21 @@ export const createPixiTiledMapView = async ({
   let currentPlayerControlBindings = playerControlBindings
   const triggeredSkillSlotIndexes = new Set<number>()
   let currentQuestLog = questLog
+  // Phase 2 읽기 채널: 마지막으로 Lua 에 밀어넣은 스냅샷(변경 시에만 재푸시하기 위한 dirty 체크).
+  let lastPushedSnapshotJson = ''
+  // 게임 규칙을 Lua 로 실행한다(Lua 불가 시 TS 폴백). 호출부 시그니처는 TS 와 동일.
+  const monsterRewards = createLuaMonsterRewards((source) =>
+    controllerRuntime.loadDataModule(source)
+  )
+  const playerStatEffects = createLuaPlayerStatEffects((source) =>
+    controllerRuntime.loadDataModule(source)
+  )
+  const luaMonsterCombat = createLuaMonsterCombat((source) =>
+    controllerRuntime.loadDataModule(source)
+  )
+  const luaBlacksmithPricing = createLuaBlacksmithPricing((source) =>
+    controllerRuntime.loadDataModule(source)
+  )
   let currentBlacksmithInventory = merchantInventory
   let currentPotionMerchantInventory = potionMerchantInventory
   let playerAttackStartedAtMilliseconds: number | undefined
@@ -1373,7 +1403,7 @@ export const createPixiTiledMapView = async ({
     playerCharacter.controller = {
       ...playerCharacter.controller,
       moveSpeedTilesPerSecond:
-        getPlayerMovementSpeedTilesPerSecond(playerProfile)
+        playerStatEffects.getPlayerMovementSpeedTilesPerSecond(playerProfile)
     }
   }
   const showSceneIntroBanner = () => {
@@ -2450,7 +2480,8 @@ export const createPixiTiledMapView = async ({
         nextPlayerInventory
       )
       syncPlayerUiOverlays()
-    }
+    },
+    getSellPriceById: luaBlacksmithPricing.getSellPriceById
   })
   potionShopOverlay = createPotionShopOverlay({
     mountElement,
@@ -2499,6 +2530,7 @@ export const createPixiTiledMapView = async ({
     getQuestLog: () => currentQuestLog,
     onQuestLogChange: setQuestLog
   })
+  const npcDialogueOverlay = createNpcDialogueOverlay({ mountElement })
   // 인게임 시나리오 에디터 런처는 제거했다 — 콘텐츠 생성은 별도 에디터 페이지(/editor.html)가 담당한다.
 
   const syncRuntimeWarningBanner = () => {
@@ -2837,7 +2869,7 @@ export const createPixiTiledMapView = async ({
     if (isMonsterCharacter) {
       monsterCombatStates.set(
         character.id,
-        createMonsterCombatState(
+        luaMonsterCombat.createMonsterCombatState(
           character.level ?? 1,
           monsterCombatStateOptions
         )
@@ -3916,7 +3948,7 @@ export const createPixiTiledMapView = async ({
     )
     monsterCombatStates.set(
       characterId,
-      createMonsterCombatState(
+      luaMonsterCombat.createMonsterCombatState(
         nextCharacter.level ?? 1,
         monsterCombatStateOptions
       )
@@ -4357,7 +4389,7 @@ export const createPixiTiledMapView = async ({
 
     if (
       sourceCharacter &&
-      shouldPlayerEvadeDamage(playerProfile)
+      playerStatEffects.shouldPlayerEvadeDamage(playerProfile)
     ) {
       showCharacterDamageText(
         PLAYER_CHARACTER_ID,
@@ -4444,7 +4476,7 @@ export const createPixiTiledMapView = async ({
       monsterContactDamageLockedUntilById.delete(characterId)
       monsterPigAnimationModes.delete(characterId)
       monsterPigBehaviorStates.delete(characterId)
-      const experienceReward = getMonsterExperienceDropAmount(
+      const experienceReward = monsterRewards.getMonsterExperienceDropAmount(
         character.level ?? 1
       )
       grantPlayerExperienceReward(experienceReward)
@@ -4456,7 +4488,7 @@ export const createPixiTiledMapView = async ({
           character.position.y * map.tileHeight +
           (character.collisionSize.height * map.tileHeight) / 2
       }
-      const skillPointReward = getMonsterSkillPointDropAmount(
+      const skillPointReward = monsterRewards.getMonsterSkillPointDropAmount(
         character.level ?? 1
       )
       Object.assign(
@@ -4472,7 +4504,7 @@ export const createPixiTiledMapView = async ({
       } else {
         spawnMonsterGoldDrop(
           characterId,
-          getMonsterGoldDropAmount(character.level ?? 1),
+          monsterRewards.getMonsterGoldDropAmount(character.level ?? 1),
           dropPosition,
           now
         )
@@ -4532,7 +4564,7 @@ export const createPixiTiledMapView = async ({
     if (targetCharacter) {
       applyDamageToMonster(
         targetCharacter.id,
-        getPlayerPhysicalAttackPower(playerProfile),
+        playerStatEffects.getPlayerPhysicalAttackPower(playerProfile),
         now
       )
       playerAttackResolvedStartedAtMilliseconds =
@@ -4971,6 +5003,66 @@ export const createPixiTiledMapView = async ({
       item: { id: reward.id, label, quantity: reward.count }
     })
     onPlayerInventoryChange(currentPlayerInventory)
+  }
+
+  // Phase 3 쓰기 채널 적용기: Lua 가 요청한 액션을 기존 상태 변경 경로로 반영한다.
+  const grantInventoryItem = (itemId: string, quantity: number) => {
+    if (itemId.length === 0 || quantity <= 0) {
+      return
+    }
+    const slotIndex = findFirstEmptyPlayerInventorySlotIndex(currentPlayerInventory)
+    if (slotIndex === undefined) {
+      return
+    }
+    const label = getPlayerEquipmentItemDefinitionById(itemId)?.label ?? itemId
+    currentPlayerInventory = setPlayerInventorySlot({
+      inventory: currentPlayerInventory,
+      slotIndex,
+      item: { id: itemId, label, quantity }
+    })
+    onPlayerInventoryChange(currentPlayerInventory)
+  }
+
+  const removeInventoryItem = (itemId: string, quantity: number) => {
+    if (itemId.length === 0 || quantity <= 0) {
+      return
+    }
+    let remaining = quantity
+    const nextSlots = currentPlayerInventory.slots.map((slot) => {
+      if (!slot || slot.id !== itemId || remaining <= 0) {
+        return slot
+      }
+      const taken = Math.min(slot.quantity, remaining)
+      remaining -= taken
+      const nextQuantity = slot.quantity - taken
+      return nextQuantity > 0 ? { ...slot, quantity: nextQuantity } : undefined
+    })
+    currentPlayerInventory = { ...currentPlayerInventory, slots: nextSlots }
+    onPlayerInventoryChange(currentPlayerInventory)
+  }
+
+  // set-config: NPC 별 플래그를 컨트롤러 config 에 보관하고 재동기화한다(다음 상호작용에서
+  // get_controller_config 로 읽힌다). config 변경은 attachment 키를 바꿔 재부착을 유발한다.
+  const applyNpcConfigUpdate = (
+    characterId: string,
+    key: string,
+    value: string
+  ) => {
+    const character = characterStates.find((entry) => entry.id === characterId)
+    if (!character || character.controller.kind !== 'lua') {
+      return
+    }
+    const nextCharacter: CharacterState = {
+      ...character,
+      controller: {
+        ...character.controller,
+        config: { ...character.controller.config, [key]: value }
+      }
+    }
+    characterStates = characterStates.map((entry) =>
+      entry.id === characterId ? nextCharacter : entry
+    )
+    controllerRuntime.syncCharacters(characterStates)
   }
 
   const applyEventDraft = (
@@ -5633,6 +5725,19 @@ export const createPixiTiledMapView = async ({
       syncActiveMonsterGoldDrops(now)
       syncActiveMonsterEquipmentDrops(now)
 
+      // Phase 2 읽기 채널: 게임의 권위 있는 상태를 Lua 가 읽도록(변경 시에만) 밀어넣는다.
+      const runtimeSnapshot = buildLuaRuntimeSnapshot({
+        questLog: currentQuestLog,
+        inventory: currentPlayerInventory,
+        profile: playerProfile,
+        sceneId
+      })
+      const runtimeSnapshotJson = JSON.stringify(runtimeSnapshot)
+      if (runtimeSnapshotJson !== lastPushedSnapshotJson) {
+        controllerRuntime.pushSnapshot(runtimeSnapshot)
+        lastPushedSnapshotJson = runtimeSnapshotJson
+      }
+
       const interactionEvents = handleQuestInteractionEvents(
         gameEventQueue.drain(),
         now
@@ -5647,13 +5752,77 @@ export const createPixiTiledMapView = async ({
       })
 
       for (const event of emittedEvents) {
-        if (event.kind !== 'show-character-message') {
+        // Phase 3 쓰기 채널: Lua 가 요청한 액션을 기존 순수 reducer 로 적용한다(Lua=요청, TS=적용).
+        if (event.kind === 'request-quest-start') {
+          setQuestLog(startQuest(currentQuestLog, event.questId))
+          continue
+        }
+        if (event.kind === 'request-quest-progress') {
+          setQuestLog(
+            recordQuestObjectiveProgress(
+              currentQuestLog,
+              event.questId,
+              event.objectiveId,
+              event.amount
+            )
+          )
+          continue
+        }
+        if (event.kind === 'request-quest-complete') {
+          const completion = completeQuest(currentQuestLog, event.questId)
+          setQuestLog(completion.nextQuestLog)
+          grantQuestCompletionRewards(completion)
+          continue
+        }
+        if (event.kind === 'request-inventory-add') {
+          grantInventoryItem(event.itemId, event.quantity)
+          continue
+        }
+        if (event.kind === 'request-inventory-remove') {
+          removeInventoryItem(event.itemId, event.quantity)
+          continue
+        }
+        if (event.kind === 'set-config') {
+          applyNpcConfigUpdate(event.characterId, event.key, event.value)
+          continue
+        }
+        if (event.kind === 'request-scene-transition') {
+          onRequestSceneChange({
+            sceneId: event.sceneId,
+            spawn: { x: event.x, y: event.y }
+          })
+          continue
+        }
+        if (event.kind === 'play-sound') {
+          if (isGameSoundEffectId(event.soundId)) {
+            gameSoundEffects.play(event.soundId)
+          }
           continue
         }
 
-        if (event.characterId === POTION_SHOP_NPC_ID) {
+        if (event.kind === 'show-npc-dialogue') {
+          // Lua 컨트롤러(vn-dialogue)가 요청한 비주얼노벨 대화창. 대사는 Lua 가 보내고,
+          // 초상화/이름은 캐릭터에서 채운다. 대화가 다 끝나면 해당 NPC 의 상점을 연다.
           hideCharacterMessage(event.characterId)
-          setPotionShopOpen(true)
+          if (!npcDialogueOverlay.isOpen()) {
+            const portraitCharacter = getCharacterStateById(event.characterId)
+            const openShopOnComplete =
+              event.characterId === BLACKSMITH_SHOP_NPC_ID
+                ? () => setBlacksmithShopOpen(true)
+                : event.characterId === POTION_SHOP_NPC_ID
+                  ? () => setPotionShopOpen(true)
+                  : undefined
+            npcDialogueOverlay.show({
+              portraitUrl: NPC_PORTRAITS[event.characterId] ?? '',
+              name: portraitCharacter.displayText ?? '',
+              lines: event.lines,
+              onComplete: openShopOnComplete
+            })
+          }
+          continue
+        }
+
+        if (event.kind !== 'show-character-message') {
           continue
         }
 
@@ -5676,9 +5845,6 @@ export const createPixiTiledMapView = async ({
           )
         }
 
-        if (event.characterId === BLACKSMITH_SHOP_NPC_ID) {
-          setBlacksmithShopOpen(true)
-        }
       }
 
       pruneExpiredCharacterMessages(now)
@@ -6440,6 +6606,7 @@ export const createPixiTiledMapView = async ({
     potionShopOverlay.destroy()
     pauseMenuOverlay.destroy()
     questTrackerOverlay.destroy()
+    npcDialogueOverlay.destroy()
     gameSoundEffects.destroy()
     controllerRuntime.destroy()
     app.destroy({ removeView: true }, { children: true })

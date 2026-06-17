@@ -3,10 +3,16 @@ import type {
   GameEvent,
   ShowCharacterMessageGameEvent
 } from '../events/createGameEventQueue'
+
+import type { LuaControllerRuntimeEvent } from '../lua/luaControllerApi'
 import type {
   CharacterControllerRuntime,
   CharacterInteractionResponse
 } from '../createCharacterControllerRuntime'
+
+// 상호작용 처리 후 렌더러로 넘기는 이벤트: 표시용(말풍선/대화창) + Phase 3 액션(request-*/set-config).
+// 런타임 이벤트 유니온과 동일하다(렌더러가 kind 로 분기해 표시 또는 reducer 적용).
+type InteractionEmittedEvent = LuaControllerRuntimeEvent
 import { resolveCharacterInteractionTarget } from './resolveCharacterInteractionTarget'
 
 type ProcessInteractionEventsInput = {
@@ -26,10 +32,10 @@ export const processInteractionEvents = ({
   controllerRuntime,
   now,
   interactionLockUntilByCharacterPair
-}: ProcessInteractionEventsInput): ShowCharacterMessageGameEvent[] => {
-  const emittedEvents = events.filter(
-    (event): event is ShowCharacterMessageGameEvent =>
-      event.kind === 'show-character-message'
+}: ProcessInteractionEventsInput): InteractionEmittedEvent[] => {
+  const emittedEvents: InteractionEmittedEvent[] = events.filter(
+    (event): event is InteractionEmittedEvent =>
+      event.kind !== 'interaction-requested'
   )
 
   for (const event of events) {
@@ -115,11 +121,14 @@ const createShowCharacterMessageEvent = (
 })
 
 const getMaxMessageEventDuration = (
-  events: ShowCharacterMessageGameEvent[]
+  events: InteractionEmittedEvent[]
 ): number =>
   events.reduce(
     (maxDurationMilliseconds, event) =>
-      Math.max(maxDurationMilliseconds, event.durationMilliseconds),
+      Math.max(
+        maxDurationMilliseconds,
+        'durationMilliseconds' in event ? event.durationMilliseconds : 0
+      ),
     0
   )
 

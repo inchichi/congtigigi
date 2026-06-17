@@ -243,7 +243,7 @@ export const sellBlacksmithShopItem = ({
   }
 }
 
-const getBlacksmithShopTradeItemPriceById = (
+export const getBlacksmithShopTradeItemPriceById = (
   itemId: string
 ): number | undefined =>
   getPlayerEquipmentItemDefinitionById(itemId)?.price ??
