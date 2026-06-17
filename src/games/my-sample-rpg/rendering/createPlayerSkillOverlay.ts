@@ -4,15 +4,15 @@ import {
   getPlayerSkillPointCost,
   getPlayerSkillUserLevel,
   spendPlayerSkillPoint
-} from '../playerProgression'
+} from '../lua/luaGameLogic'
 import {
   PLAYER_SKILL_DRAG_MIME_TYPE
 } from '../playerSkillSlots'
 import {
   PLAYER_PROTECT_SKILL_ID,
-  getPlayerSkillDisplayInfoById,
-  isPlayerSkillUnlockedInProfile
+  getPlayerSkillDisplayInfoById
 } from '../playerSkills'
+import { isPlayerSkillUnlockedInProfile } from '../lua/luaGameLogic'
 import { PLAYER_SMASH_SKILL_ID } from '../playerSmashSkill'
 import { getResponsiveUiScale } from './getResponsiveUiScale'
 

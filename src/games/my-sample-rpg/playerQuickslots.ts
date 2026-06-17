@@ -6,7 +6,7 @@ export type PlayerQuickslots = {
   slots: Array<PlayerQuickslotAssignment | undefined>
 }
 
-const DEFAULT_PLAYER_QUICKSLOT_COUNT = 6
+export const DEFAULT_PLAYER_QUICKSLOT_COUNT = 6
 
 type CreateInitialPlayerQuickslotsInput = {
   slotCount?: number

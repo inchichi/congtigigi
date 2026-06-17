@@ -1,19 +1,17 @@
 import {
-  buyPotionShopItem,
-  getPotionShopBuyPriceById,
-  getPotionShopItemDefinitionById,
-  getPotionShopSellPriceById,
-  sellPotionShopItem
-} from '../potionShop'
-import {
-  getPlayerEquipmentItemDefinitionById,
-  getPlayerEquipmentSlotLabelById,
   type PlayerEquipmentIconKey,
   type PlayerEquipmentItemDefinition
 } from '../playerEquipment'
 import {
-  getPlayerInventoryFilledSlotCount
-} from '../playerInventory'
+  buyPotionShopItem,
+  getPotionShopBuyPriceById,
+  getPotionShopItemDefinitionById,
+  getPotionShopSellPriceById,
+  sellPotionShopItem,
+  getPlayerInventoryFilledSlotCount,
+  getPlayerEquipmentItemDefinitionById,
+  getPlayerEquipmentSlotLabelById
+} from '../lua/luaGameLogic'
 import type { PlayerInventory } from '../playerInventory'
 
 type CreatePotionShopOverlayInput = {

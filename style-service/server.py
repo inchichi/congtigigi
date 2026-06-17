@@ -27,6 +27,8 @@ from PIL import Image
 
 import adain_service
 import asset_store
+import external_assets
+import monster_stylize
 import object_extract
 import tile_stylize
 
@@ -75,6 +77,7 @@ def style_transfer(
     content_size: int = Form(512),
     style_size: int = Form(512),
     alpha_erode: int = Form(0),
+    preserve_size: int = Form(0),
 ):
     if not 0.0 <= alpha <= 1.0:
         return JSONResponse(status_code=422, content={"error": "alpha는 0.0~1.0 사이여야 합니다."})
@@ -98,12 +101,20 @@ def style_transfer(
     except OSError:
         return JSONResponse(status_code=422, content={"error": "이미지 파일을 해석할 수 없습니다."})
 
-    # 원본 유지(0)는 업로드 해상도가 곧 추론 해상도 — 상한 없이는 CPU 메모리가 무제한이다.
+    # 추론 해상도 상한 — 상한 없이는 CPU 메모리가 무제한이다. Resize(size)는 '짧은 변'을
+    # size로 맞추고 종횡비를 유지하므로, 종횡비가 극단적인 시트(예: 8192×64)는 size=512에서도
+    # 긴 변이 폭증한다. size==0(원본 유지)와 size!=0(짧은 변 환산) 모두 실효 면적으로 검사한다.
     for name, image, size in (("content", content_image, content_size), ("style", style_image, style_size)):
-        if size == 0 and image.width * image.height > 4096 * 4096:
+        short_edge = min(image.width, image.height)
+        if size == 0 or short_edge == 0:
+            model_px = image.width * image.height
+        else:
+            scale = size / short_edge
+            model_px = image.width * scale * image.height * scale
+        if model_px > 4096 * 4096:
             return JSONResponse(
                 status_code=422,
-                content={"error": f"{name} 이미지가 원본 유지 한도(4096×4096 픽셀)를 초과합니다. 변환 크기를 지정하세요."},
+                content={"error": f"{name} 이미지의 추론 해상도가 한도(4096×4096 픽셀 상당)를 초과합니다. 종횡비가 극단적이거나 너무 큰 이미지는 변환할 수 없습니다."},
             )
 
     try:
@@ -114,6 +125,7 @@ def style_transfer(
             content_size=content_size,
             style_size=style_size,
             alpha_erode=alpha_erode,
+            preserve_size=bool(preserve_size),
         )
     except FileNotFoundError as error:
         # 가중치/ADAIN 경로 미설정 — 원인 메시지를 그대로 전달한다.
@@ -197,6 +209,151 @@ def stylize_object(
         return JSONResponse(status_code=503, content={"error": str(error)})
 
     return {"object_png": _png_b64(preview), "tileset_png": _png_b64(patched)}
+
+
+@app.post("/stylize-monster")
+def stylize_monster(
+    style: UploadFile = File(...),
+    sheet_path: str = Form(...),
+    monster_key: str = Form(...),
+    alpha: float = Form(1.0),
+    alpha_erode: int = Form(0),
+):
+    """몬스터 시트를 전경만 스타일·배경 보존으로 변환한다. 항상 최초 원본에서 변환해
+    색 누적을 피하고, 게임의 프레임 슬라이싱이 깨지지 않게 한다."""
+    if not 0.0 <= alpha <= 1.0:
+        return JSONResponse(status_code=422, content={"error": "alpha는 0.0~1.0 사이여야 합니다."})
+    if not 0 <= alpha_erode <= 3:
+        return JSONResponse(status_code=422, content={"error": "alpha_erode는 0~3 사이여야 합니다."})
+    if monster_key not in ("pig", "slime"):
+        return JSONResponse(status_code=422, content={"error": f"알 수 없는 몬스터 종류: {monster_key}"})
+
+    try:
+        sheet_bytes = asset_store.read_original_or_current(sheet_path)
+    except ValueError as error:
+        return JSONResponse(status_code=422, content={"error": str(error)})
+    except FileNotFoundError as error:
+        return JSONResponse(status_code=404, content={"error": str(error)})
+
+    try:
+        sheet_image = Image.open(io.BytesIO(sheet_bytes))
+        sheet_image.load()
+        style_image = Image.open(io.BytesIO(style.file.read()))
+        style_image.load()
+    except OSError:
+        return JSONResponse(status_code=422, content={"error": "이미지 파일을 해석할 수 없습니다."})
+
+    try:
+        result = monster_stylize.stylize_monster_sheet(
+            sheet_image, style_image, monster_key, alpha=alpha, alpha_erode=alpha_erode
+        )
+    except ValueError as error:
+        return JSONResponse(status_code=422, content={"error": str(error)})
+    except FileNotFoundError as error:
+        return JSONResponse(status_code=503, content={"error": str(error)})
+
+    buffer = io.BytesIO()
+    result.save(buffer, format="PNG")
+    return Response(content=buffer.getvalue(), media_type="image/png")
+
+
+@app.post("/batch-apply")
+def batch_apply(
+    style: UploadFile = File(...),
+    targets: str = Form(...),
+    alpha: float = Form(1.0),
+    alpha_erode: int = Form(0),
+):
+    """여러 대상을 한 요청으로 스타일 변환·적용한다(일괄). 대상마다 자기 소스에서 변환 후
+    백업하고 덮어쓴다. 클라이언트가 하나씩 적용하면 첫 적용의 Vite 리로드로 루프가 끊기므로,
+    서버에서 전부 처리한다. 대상: {kind:'asset',path} | {kind:'object',key} | {kind:'monster',sheet_path,monster_key}."""
+    if not 0.0 <= alpha <= 1.0:
+        return JSONResponse(status_code=422, content={"error": "alpha는 0.0~1.0 사이여야 합니다."})
+    if not 0 <= alpha_erode <= 3:
+        return JSONResponse(status_code=422, content={"error": "alpha_erode는 0~3 사이여야 합니다."})
+    try:
+        target_list = json.loads(targets)
+        assert isinstance(target_list, list) and 0 < len(target_list) <= 64
+    except (json.JSONDecodeError, AssertionError):
+        return JSONResponse(status_code=422, content={"error": "targets 형식이 올바르지 않습니다(1~64개)."})
+
+    try:
+        style_image = Image.open(io.BytesIO(style.file.read()))
+        style_image.load()
+    except OSError:
+        return JSONResponse(status_code=422, content={"error": "스타일 이미지를 해석할 수 없습니다."})
+
+    def _png_bytes(image: Image.Image) -> bytes:
+        buffer = io.BytesIO()
+        image.save(buffer, format="PNG")
+        return buffer.getvalue()
+
+    # 변환을 모두 끝낸 뒤(아래 1단계) 파일 쓰기는 맨 마지막에 한 번에 한다(2단계). 쓰기를
+    # 변환 중간중간 하면 src/ 파일이 바뀔 때마다 Vite가 페이지를 새로고침해 N개면 N번
+    # 깜빡인다. 결과를 메모리(pending: 경로→이미지)에 모았다가 마지막에 몰아 쓰면, 쓰기들이
+    # 수 ms 안에 끝나 Vite 새로고침이 한 번으로 합쳐진다. 같은 타일셋을 쓰는 오브젝트들은
+    # 메모리에서 누적 패치해 그 타일셋도 한 번만 쓴다.
+    pending: dict[str, Image.Image] = {}
+
+    def _working(path: str) -> Image.Image:
+        if path not in pending:
+            image = Image.open(asset_store.resolve_asset_path(path))
+            image.load()
+            pending[path] = image
+        return pending[path]
+
+    applied: list[str] = []
+    failed: list[dict] = []
+    for target in target_list:
+        try:
+            kind = target.get("kind")
+            if kind == "asset":
+                path = target["path"]
+                source = Image.open(asset_store.resolve_asset_path(path))
+                source.load()
+                pending[path] = adain_service.style_transfer_image(
+                    source, style_image, alpha=alpha, alpha_erode=alpha_erode, preserve_size=True
+                )
+                applied.append(path)
+            elif kind == "object":
+                key = target["key"]
+                meta = object_extract.read_meta(key)
+                cutout = Image.open(io.BytesIO(object_extract.read_png(key)))
+                cutout.load()
+                # 누끼 컷아웃은 RGBA라 알파 경로가 원본 크기를 보존한다(역패치에 크기 정합 필요).
+                styled = adain_service.style_transfer_image(
+                    cutout, style_image, alpha=alpha, alpha_erode=alpha_erode
+                )
+                # 같은 타일셋을 공유하는 오브젝트들은 메모리상 working 이미지에 누적 패치한다.
+                pending[meta["tilesetPath"]] = tile_stylize.patch_tileset_from_object(
+                    _working(meta["tilesetPath"]),
+                    styled,
+                    meta["cells"],
+                    columns=meta["columns"],
+                    tile_width=meta["tileWidth"],
+                    tile_height=meta["tileHeight"],
+                )
+                applied.append(key)
+            elif kind == "monster":
+                path = target["sheet_path"]
+                sheet = Image.open(io.BytesIO(asset_store.read_original_or_current(path)))
+                sheet.load()
+                pending[path] = monster_stylize.stylize_monster_sheet(
+                    sheet, style_image, target["monster_key"], alpha=alpha, alpha_erode=alpha_erode
+                )
+                applied.append(path)
+            else:
+                failed.append({"target": str(target), "error": "알 수 없는 종류"})
+        except (KeyError, TypeError, ValueError, FileNotFoundError, OSError) as error:
+            failed.append({"target": str(target), "error": str(error)})
+
+    # 2단계: 모아둔 결과를 한 번에 쓴다 — Vite 새로고침이 한 번으로 합쳐진다.
+    for path, image in pending.items():
+        try:
+            asset_store.backup_and_write(path, _png_bytes(image))
+        except (ValueError, FileNotFoundError, OSError) as error:
+            failed.append({"target": path, "error": str(error)})
+    return {"applied": applied, "failed": failed, "written": list(pending.keys())}
 
 
 @app.get("/asset-status")
@@ -296,6 +453,31 @@ def revert_asset(path: str = Form(...)):
     return {"ok": True}
 
 
+@app.get("/styled-assets")
+def styled_assets() -> dict:
+    return {"assets": asset_store.list_styled_assets()}
+
+
+@app.post("/revert-assets")
+def revert_assets(payload: dict = Body(...)):
+    """여러 에셋을 한 요청으로 일괄 복원한다(전체/선택 되돌리기). 항목별 성공/실패를 모은다."""
+    paths = payload.get("paths")
+    if not isinstance(paths, list) or not 0 < len(paths) <= 1024:
+        return JSONResponse(status_code=422, content={"error": "paths 형식이 올바르지 않습니다."})
+    reverted: list[str] = []
+    failed: list[dict] = []
+    for path in paths:
+        if not isinstance(path, str):
+            failed.append({"path": str(path), "error": "경로가 문자열이 아닙니다."})
+            continue
+        try:
+            asset_store.revert_asset(path)
+            reverted.append(path)
+        except (ValueError, FileNotFoundError) as error:
+            failed.append({"path": path, "error": str(error)})
+    return {"reverted": reverted, "failed": failed}
+
+
 @app.post("/apply-asset")
 def apply_asset(file: UploadFile = File(...), path: str = Form(...)):
     data = file.file.read()
@@ -313,6 +495,180 @@ def apply_asset(file: UploadFile = File(...), path: str = Form(...)):
     except FileNotFoundError as error:
         return JSONResponse(status_code=404, content={"error": str(error)})
     return {"ok": True, "backup": backup}
+
+
+# ── 외부 게임 프로젝트(예: Love2D Legend of Lua) 스프라이트 직접 스타일 적용 ──
+# my-sample-rpg 에셋과 분리된 external_assets 게이트(originals-ext/, backups-ext/)를 쓴다.
+# 외부 폴더는 Vite 감시 밖이라 적용해도 에디터/게임 자동 리로드가 없다 — 게임을 다시
+# 실행하면 반영된다(스프라이트는 시작 시 1회 로드).
+
+
+def _ext_area_ok(image: Image.Image, content_size: int = 512) -> bool:
+    short_edge = min(image.width, image.height)
+    if short_edge == 0:
+        return False
+    scale = content_size / short_edge
+    return image.width * scale * image.height * scale <= 4096 * 4096
+
+
+@app.get("/ext/projects")
+def ext_projects() -> dict:
+    return {"projects": external_assets.get_projects()}
+
+
+@app.get("/ext/assets")
+def ext_assets(project: str):
+    try:
+        return {"assets": external_assets.list_assets(project)}
+    except ValueError as error:
+        return JSONResponse(status_code=404, content={"error": str(error)})
+
+
+@app.get("/ext/asset")
+def ext_asset(project: str, path: str):
+    """외부 스프라이트 원시 PNG(썸네일/미리보기용). 외부 폴더는 Vite가 서빙하지 않으므로
+    에디터는 이 엔드포인트로 이미지를 받는다."""
+    try:
+        return Response(content=external_assets.read_png(project, path), media_type="image/png")
+    except ValueError as error:
+        return JSONResponse(status_code=422, content={"error": str(error)})
+    except FileNotFoundError as error:
+        return JSONResponse(status_code=404, content={"error": str(error)})
+
+
+@app.get("/ext/asset-status")
+def ext_asset_status(project: str, path: str):
+    try:
+        return external_assets.asset_status(project, path)
+    except ValueError as error:
+        return JSONResponse(status_code=422, content={"error": str(error)})
+
+
+@app.get("/ext/styled")
+def ext_styled(project: str):
+    try:
+        return {"assets": external_assets.list_styled_assets(project)}
+    except ValueError as error:
+        return JSONResponse(status_code=404, content={"error": str(error)})
+
+
+@app.post("/ext/apply")
+def ext_apply(
+    style: UploadFile = File(...),
+    project: str = Form(...),
+    path: str = Form(...),
+    alpha: float = Form(1.0),
+    alpha_erode: int = Form(0),
+):
+    """외부 스프라이트 1장에 스타일을 적용해 백업 후 덮어쓴다. 항상 최초 원본에서 변환한다."""
+    if not 0.0 <= alpha <= 1.0:
+        return JSONResponse(status_code=422, content={"error": "alpha는 0.0~1.0 사이여야 합니다."})
+    if not 0 <= alpha_erode <= 3:
+        return JSONResponse(status_code=422, content={"error": "alpha_erode는 0~3 사이여야 합니다."})
+
+    try:
+        source_bytes = external_assets.read_original_or_current(project, path)
+    except ValueError as error:
+        return JSONResponse(status_code=422, content={"error": str(error)})
+    except FileNotFoundError as error:
+        return JSONResponse(status_code=404, content={"error": str(error)})
+
+    try:
+        source = Image.open(io.BytesIO(source_bytes))
+        source.load()
+        style_image = Image.open(io.BytesIO(style.file.read()))
+        style_image.load()
+    except OSError:
+        return JSONResponse(status_code=422, content={"error": "이미지 파일을 해석할 수 없습니다."})
+
+    if not _ext_area_ok(source) or not _ext_area_ok(style_image):
+        return JSONResponse(status_code=422, content={"error": "이미지의 추론 해상도가 한도(4096×4096 상당)를 초과합니다."})
+
+    try:
+        # preserve_size=True: 시트 프레임 좌표가 어긋나지 않게 원본 해상도 유지.
+        result = adain_service.style_transfer_image(
+            source, style_image, alpha=alpha, alpha_erode=alpha_erode, preserve_size=True
+        )
+    except FileNotFoundError as error:
+        return JSONResponse(status_code=503, content={"error": str(error)})
+
+    buffer = io.BytesIO()
+    result.save(buffer, format="PNG")
+    try:
+        backup = external_assets.backup_and_write(project, path, buffer.getvalue())
+    except ValueError as error:
+        return JSONResponse(status_code=422, content={"error": str(error)})
+    except FileNotFoundError as error:
+        return JSONResponse(status_code=404, content={"error": str(error)})
+    return {"ok": True, "backup": backup}
+
+
+@app.post("/ext/batch-apply")
+def ext_batch_apply(
+    style: UploadFile = File(...),
+    project: str = Form(...),
+    paths: str = Form(...),
+    alpha: float = Form(1.0),
+    alpha_erode: int = Form(0),
+):
+    """여러 외부 스프라이트에 한 스타일을 일괄 적용한다(스타일 1회 업로드)."""
+    if not 0.0 <= alpha <= 1.0:
+        return JSONResponse(status_code=422, content={"error": "alpha는 0.0~1.0 사이여야 합니다."})
+    if not 0 <= alpha_erode <= 3:
+        return JSONResponse(status_code=422, content={"error": "alpha_erode는 0~3 사이여야 합니다."})
+    try:
+        path_list = json.loads(paths)
+        assert isinstance(path_list, list) and 0 < len(path_list) <= 256
+    except (json.JSONDecodeError, AssertionError):
+        return JSONResponse(status_code=422, content={"error": "paths 형식이 올바르지 않습니다(1~256개)."})
+
+    try:
+        style_image = Image.open(io.BytesIO(style.file.read()))
+        style_image.load()
+    except OSError:
+        return JSONResponse(status_code=422, content={"error": "스타일 이미지를 해석할 수 없습니다."})
+    if not _ext_area_ok(style_image):
+        return JSONResponse(status_code=422, content={"error": "스타일 이미지의 추론 해상도가 한도를 초과합니다."})
+
+    applied: list[str] = []
+    failed: list[dict] = []
+    for path in path_list:
+        try:
+            source = Image.open(io.BytesIO(external_assets.read_original_or_current(project, path)))
+            source.load()
+            if not _ext_area_ok(source):
+                raise ValueError("추론 해상도 한도 초과")
+            result = adain_service.style_transfer_image(
+                source, style_image, alpha=alpha, alpha_erode=alpha_erode, preserve_size=True
+            )
+            buffer = io.BytesIO()
+            result.save(buffer, format="PNG")
+            external_assets.backup_and_write(project, path, buffer.getvalue())
+            applied.append(path)
+        except (ValueError, FileNotFoundError, OSError) as error:
+            failed.append({"path": str(path), "error": str(error)})
+    return {"applied": applied, "failed": failed}
+
+
+@app.post("/ext/revert")
+def ext_revert(payload: dict = Body(...)):
+    """외부 스프라이트를 최초 원본으로 일괄 복원한다(전체/선택 되돌리기)."""
+    project = payload.get("project")
+    paths = payload.get("paths")
+    if not isinstance(project, str) or not isinstance(paths, list) or not 0 < len(paths) <= 1024:
+        return JSONResponse(status_code=422, content={"error": "project/paths 형식이 올바르지 않습니다."})
+    reverted: list[str] = []
+    failed: list[dict] = []
+    for path in paths:
+        if not isinstance(path, str):
+            failed.append({"path": str(path), "error": "경로가 문자열이 아닙니다."})
+            continue
+        try:
+            external_assets.revert_asset(project, path)
+            reverted.append(path)
+        except (ValueError, FileNotFoundError) as error:
+            failed.append({"path": path, "error": str(error)})
+    return {"reverted": reverted, "failed": failed}
 
 
 if __name__ == "__main__":

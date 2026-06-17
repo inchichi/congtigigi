@@ -1,12 +1,19 @@
 import { openProjectDirectory } from './openProjectDirectory'
 import {
   buildTileClusterEntities,
+  findAllStyleTargetCells,
+  findFileByRelativeSource,
+  findObjectKindCells,
+  findTileClusterDetail,
   isTileClusterEntity,
   loadGame,
+  resolveRelativePath,
   type GameFile,
   type LoadedGame,
   type LoadedGameMap
 } from './loadGame'
+import { createGameBridge, type BridgeStatus } from './gameBridge'
+import { extractTilesetTileIdByType, extractTmxTilesetImageInfo } from './tmxTileEntities'
 import { analyzeGame, type GameAnalysis } from './analyzeGame'
 import { extractTmxLayerNames, extractTmxObjects, type TmxObject } from './tmxObjects'
 import { readLocalStorage, writeLocalStorage } from './safeStorage'
@@ -31,7 +38,7 @@ import { buildSessionMetrics, type SessionGenerationTally } from './sessionMetri
 import { editorIcon, type EditorIconName } from './editorIcons'
 import type { GameEntity, GenerationFeedback, GenerationResult } from './gameAdapter'
 import { generateQuestCandidates, type QuestCandidate } from './questCandidates'
-import { type DryRunReport } from './dryRunEventApply'
+// ── develop-chich: 퀘스트/NPC 생성 파이프라인 ──
 import { generateQuestJson } from './questJsonGenerator'
 import { dryRunQuestApply } from './dryRunQuestApply'
 import { convertGeneratedQuestToDefinition } from './questCodeGenerator'
@@ -54,7 +61,24 @@ import {
   convertLuaNpcToSpawnBridgePayload
 } from './luaNpcCodeGenerator'
 import { createGeneratedLuaNpcValidationIssues } from './luaNpcSchema'
-import { createGameBridge } from './gameBridge'
+// ── chan_merge(chichi): 스타일 변환 + 배치 팔레트 + 호버 미리보기 ──
+import { type DryRunReport } from './dryRunEventApply'
+import {
+  createStyleTransferModal,
+  type StyleTransferMapObject
+} from './createStyleTransferModal'
+import { createStyleRevertControl } from './createStyleRevertControl'
+import { createExternalSpriteStyler } from './createExternalSpriteStyler'
+import {
+  createPlacementPalette,
+  type NpcPaletteContext
+} from './createPlacementPalette'
+import {
+  createHoverPreview,
+  buildTileSlicePreview,
+  buildImagePreview,
+  buildCellsCanvasPreview
+} from './createHoverPreview'
 
 // 하드코딩 어댑터가 엔티티를 못 찾은 미지의 게임을, LLM 분석이 찾은 editable 그룹으로 채운다.
 const buildEntitiesFromAnalysis = (
@@ -111,6 +135,9 @@ const isLegendOfLuaGame = (game: LoadedGame): boolean => game.adapter.id === 'le
 
 const API_KEY_STORAGE_KEY = 'my-sample-rpg:anthropic-api-key'
 const MODEL_STORAGE_PREFIX = 'my-sample-rpg:model:'
+const BRIDGE_URL_STORAGE_KEY = 'my-sample-rpg:game-bridge-url'
+// 실행 중인 외부 게임(Love2D 등)의 로컬 HTTP 브리지 기본 주소.
+const DEFAULT_BRIDGE_URL = 'http://localhost:17320'
 
 // 종류별 게임풍 SVG 아이콘 매핑(editorIcons.ts에서 손으로 그린 것들). emoji는 쓰지 않는다.
 const KIND_ICON: Record<string, EditorIconName> = {
@@ -167,75 +194,8 @@ const KIND_LABEL: Record<string, string> = {
   window: '창문'
 }
 
-// 에셋 카테고리(표시 전용) — 인물/건축물/장식물/환경 4층으로 묶어 정보 구조를 만든다.
-const CATEGORY_ORDER = ['인물', '건축물', '장식물', '환경'] as const
-const CATEGORY_OF: Record<string, string> = {
-  npc: '인물',
-  character: '인물',
-  monster: '인물',
-  enemy: '인물',
-  building: '건축물',
-  sign: '건축물',
-  portal: '건축물',
-  clocktower: '건축물',
-  tent: '건축물',
-  window: '건축물',
-  stairs: '건축물',
-  tree: '환경',
-  hedge: '환경',
-  wall: '환경',
-  rock: '환경'
-}
-const categoryOf = (kind: string): string => CATEGORY_OF[kind] ?? '장식물'
 
-// 표시용 이름 정리(표시 전용) — 내부 id 느낌의 이름('villager_a' 등)을 발표용 라벨로 바꾼다.
-// 우선순위: 짧은 원본 이름 그대로 → 흔한 영문 키워드 한글화 → 구분자/확장자 정리.
-const displayNameOf = (rawName: string): string => {
-  const cleaned = rawName
-    .replace(/\.(png|jpe?g|json|tmx|lua)$/iu, '')
-    .replace(/[_-]+/gu, ' ')
-    .trim()
-  const lower = cleaned.toLowerCase()
-  const villager = lower.match(/^villager\s*([a-z0-9]*)$/u)
-  if (villager) {
-    const suffix = (villager[1] ?? '').toUpperCase()
-    return suffix ? `주민 ${suffix}` : '주민'
-  }
-  if (lower.startsWith('blacksmith')) {
-    return '대장장이'
-  }
-  if (lower.startsWith('merchant') || lower.startsWith('vendor')) {
-    return '상인'
-  }
-  if (lower.startsWith('mage') || lower.startsWith('wizard')) {
-    return '마법사'
-  }
-  if (lower.startsWith('guard')) {
-    return '경비병'
-  }
-  if (lower.startsWith('santa')) {
-    return '산타'
-  }
-  return cleaned
-}
 
-// NPC 역할별 아이콘(표시 전용) — 이름 키워드로 추정한다. 사용자는 이름보다 아이콘으로 먼저 구분한다.
-const npcIconFor = (name: string): EditorIconName => {
-  const lower = name.toLowerCase()
-  if (name.includes('마법') || lower.includes('mage') || lower.includes('wizard')) {
-    return 'orb'
-  }
-  if (name.includes('대장') || lower.includes('smith')) {
-    return 'sword'
-  }
-  if (name.includes('경비') || name.includes('기사') || lower.includes('guard') || lower.includes('knight')) {
-    return 'shield'
-  }
-  if (name.includes('상인') || name.includes('상점') || lower.includes('merchant') || lower.includes('shop') || lower.includes('vendor')) {
-    return 'loot'
-  }
-  return 'npc'
-}
 
 // 트리 그룹핑용 종류 정규화. LLM 분석이 'NPC'처럼 대소문자를 섞어 줄 수 있어 소문자로 맞추고,
 // enemy는 라벨·아이콘이 '몬스터'로 같아 monster 그룹에 합친다(그래서 위 맵에는 enemy 키가 없다).
@@ -243,6 +203,10 @@ const groupKindOf = (kind: string): string => {
   const normalized = kind.trim().toLowerCase()
   return normalized === 'enemy' ? 'monster' : normalized
 }
+
+// 부분 스타일 변환 대상에서 제외할 종류: 캐릭터·표지판·포털은 점 객체(스프라이트)라
+// 타일셋 패치 방식의 대상이 아니다. NPC는 LLM 생성 대상으로 이미 클릭이 점유돼 있다.
+const STYLE_TARGET_EXCLUDED_KINDS = new Set(['npc', 'monster', 'sign', 'portal'])
 
 const el = <K extends keyof HTMLElementTagNameMap>(
   tag: K,
@@ -278,20 +242,14 @@ const APPLY_BUTTON =
   'rounded-xl h-[46px] px-5 flex items-center justify-center bg-[#2d2d30] text-[#d9a85c] text-[15px] font-semibold border-2 border-[#c9923f] shadow-[inset_0_1px_0_rgba(255,255,255,0.08),0_0_8px_rgba(217,168,92,0.15)] transition duration-150 hover:bg-[#333333] hover:-translate-y-px hover:shadow-[0_0_10px_rgba(217,168,92,0.25)] active:translate-y-0 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:translate-y-0 disabled:shadow-none'
 const GHOST_BUTTON =
   'rounded-lg h-[40px] px-3.5 bg-[#2d2d30] text-[#9d9d9d] text-[13px] border border-[#d9a85c]/25 opacity-80 transition duration-150 hover:opacity-100 hover:bg-[#333333] hover:text-[#d4d4d4] hover:border-[#d5a14f]/50 active:border-[#d9a85c] disabled:opacity-50 disabled:cursor-not-allowed'
-// 종류 카드 — 게임 에디터의 선택 카드: 아이콘(46px) + 이름 + '8개' 카운트. 한 화면에 10개 이상 보이게 낮춘다.
-// 에셋 종류 카드 — 기본/hover는 테두리 없이 면(배경)으로만 구분, 선택된 카드만 금색 테두리.
-const KIND_CARD =
-  'relative h-[78px] flex flex-col items-center justify-center gap-1 rounded-xl px-2 text-center bg-[#2d2d30] border-2 border-transparent transition duration-150'
-const KIND_CARD_CLICKABLE =
-  'cursor-pointer hover:bg-[#333333] hover:shadow-[0_4px_12px_rgba(0,0,0,0.25)] hover:-translate-y-px'
-// 선택/펼침된 카드: 밝은 금색 테두리 + 살짝 밝은 그라데이션 + 은은한 glow.
-const KIND_CARD_ACTIVE =
-  'border-[#d9a85c] bg-gradient-to-b from-[#3a281b] to-[#2d2d30] shadow-[0_0_12px_rgba(217,168,92,0.35)]'
 // 구성원 pill(34px, 한 줄에 2개) — 짧은 한글 표시 이름은 잘리지 않고, 긴 이름은 툴팁으로 보완.
 const ENTITY_BASE =
   'h-[34px] min-w-0 flex items-center gap-1.5 rounded-lg px-2 text-left bg-[#2d2d30] border border-[#d9a85c]/18 text-[12px] text-[#e8d5a5] transition hover:bg-[#333333] hover:border-[#d5a14f]'
 const ENTITY_ACTIVE =
   'h-[34px] min-w-0 flex items-center gap-1.5 rounded-lg px-2 text-left bg-gradient-to-b from-[#3a281b] to-[#2d2d30] border-2 border-[#d7a14a] shadow-[0_0_10px_rgba(215,161,74,0.4)] text-[12px] text-[#e0e0e0] transition'
+// 종류별 접이식 그룹 헤더(원래 에디터의 리스트형 트리에서 사용).
+const ENTITY_GROUP_HEADER =
+  'w-full flex items-center gap-1.5 text-left rounded-lg px-2.5 py-2 text-sm text-zinc-200 font-medium transition hover:bg-white/[0.06] hover:text-zinc-100'
 // 게임 미리보기 위 맵 탭(마을/사냥터/동굴) — 둥근 나무 탭, 선택된 탭만 금색 그라데이션.
 const SCENE_TAB =
   'h-[26px] flex items-center gap-1.5 text-[14px] leading-none rounded-lg px-3 py-1 bg-[#2d2d30] border border-[#d9a85c]/22 text-[#9d9d9d] transition hover:bg-[#333333] hover:text-[#ead8b6]'
@@ -339,6 +297,15 @@ const MODEL_CHIP =
 const MODEL_CHIP_ACTIVE =
   'rounded-md px-2 py-1 text-[12px] leading-none bg-[#4a4a50] text-white border border-[#569cd6] ring-1 ring-[#569cd6]/40'
 
+// 폴더에서 만든 이미지 object URL을 정리한다(새 프로젝트를 열 때 옛 URL 누수 방지).
+const revokePreviewObjectUrls = (files: GameFile[]): void => {
+  for (const file of files) {
+    if (file.url?.startsWith('blob:')) {
+      URL.revokeObjectURL(file.url)
+    }
+  }
+}
+
 export const createEditorApp = ({
   mountElement,
   initialFiles,
@@ -363,8 +330,6 @@ export const createEditorApp = ({
   // 트리의 종류별 그룹(NPC/몬스터 등) 펼침 상태. 키는 `${mapId}:${kind}` — 트리를 다시 그려도 유지된다.
   // 기본은 접힘: 요소를 쭉 나열하면 목록이 길어 보기 불편하다는 피드백에 따른 동작.
   const expandedGroups = new Set<string>()
-  // 카테고리(인물/건축물/장식물/환경) 접힘 상태 — 표시 전용.
-  const collapsedCategories = new Set<string>()
   // 세션 내 생성 결과 누적(최신 우선, 최대 10개). 데모에서 여러 생성을 비교·재선택하려는 용도.
   const HISTORY_LIMIT = 10
   let history: Array<{ n: number; result: GenerationResult }> = []
@@ -441,8 +406,170 @@ export const createEditorApp = ({
   settingsButton.setAttribute('aria-label', '설정')
   settingsButton.append(editorIcon('gear', 16))
   settingsButton.type = 'button'
-  const headerRight = el('div', 'flex items-center gap-2 shrink-0')
-  headerRight.append(connection, settingsButton)
+  // 음소거 토글 — 소리는 게임(iframe)이 내므로 postMessage로 즉시 끄고, 게임 리로드/에디터
+  // 재시작에도 유지되도록 게임의 오디오 설정(localStorage, 같은 origin 공유)에 함께 기록한다.
+  const AUDIO_SETTINGS_KEY = 'my-sample-rpg:audio-settings'
+  const readStoredMuted = (): boolean => {
+    try {
+      const settings = JSON.parse(readLocalStorage(AUDIO_SETTINGS_KEY) ?? '{}') as { isMuted?: unknown }
+      return settings.isMuted === true
+    } catch {
+      return false
+    }
+  }
+  let isGameMuted = readStoredMuted()
+  const muteButton = el('button', 'rounded-lg px-2.5 py-1 text-sm bg-white/[0.04] border border-white/10 text-zinc-300 transition hover:bg-white/[0.08] hover:text-zinc-100') as HTMLButtonElement
+  muteButton.type = 'button'
+  const renderMuteButton = (): void => {
+    muteButton.textContent = isGameMuted ? '🔇' : '🔊'
+    muteButton.title = isGameMuted ? '음소거 해제' : '게임 소리 끄기'
+    muteButton.setAttribute('aria-pressed', String(isGameMuted))
+  }
+  renderMuteButton()
+  muteButton.addEventListener('click', () => {
+    isGameMuted = !isGameMuted
+    let settings: Record<string, unknown> = {}
+    try {
+      settings = JSON.parse(readLocalStorage(AUDIO_SETTINGS_KEY) ?? '{}') as Record<string, unknown>
+    } catch {
+      settings = {}
+    }
+    writeLocalStorage(AUDIO_SETTINGS_KEY, JSON.stringify({ ...settings, isMuted: isGameMuted }))
+    iframe.contentWindow?.postMessage({ type: 'editor:set-mute', isMuted: isGameMuted }, '*')
+    renderMuteButton()
+  })
+
+  // AdaIN 스타일 트랜스퍼 — 로컬 Python 서비스(/api/style 프록시)로 이미지를 변환하는 독립 모달.
+  // 되돌리기 컨트롤(전체/선택 복원)과 같은 백엔드(originals/)를 공유하므로, 적용/되돌리기 후
+  // 되돌리기 버튼의 활성 카운트가 즉시 갱신되도록 콜백을 연결한다.
+  const styleRevert = createStyleRevertControl()
+  // 현재 맵의 첫 타일셋 해석(에셋 경로 + 슬라이스 URL + 격자). 타일 스타일/배치 팔레트가 공유.
+  // my-sample-rpg 에셋 타일셋이 아니면 undefined(타일 기능 비활성).
+  const resolveCurrentTileset = ():
+    | {
+        tilesetSource: string
+        tilesetImagePath: string
+        tilesetImageUrl: string
+        columns: number
+        tileWidth: number
+        tileHeight: number
+      }
+    | undefined => {
+    if (currentMapId === undefined) {
+      return undefined
+    }
+    const map = game.maps.find((candidate) => candidate.id === currentMapId)
+    const mapFile = map ? currentFiles.find((file) => file.path === map.file) : undefined
+    if (!mapFile) {
+      return undefined
+    }
+    const tilesetTag = mapFile.text.match(/<tileset\b[^>]*>/)
+    const sourceMatch = tilesetTag?.[0].match(/\bsource="([^"]+)"/)
+    if (!sourceMatch) {
+      return undefined
+    }
+    const tsxFile = findFileByRelativeSource(currentFiles, mapFile.path, sourceMatch[1])
+    const info = tsxFile ? extractTmxTilesetImageInfo(tsxFile.text) : undefined
+    if (!tsxFile || !info) {
+      return undefined
+    }
+    const imagePath = resolveRelativePath(tsxFile.path, info.imageSource)
+    if (!imagePath.startsWith('src/games/my-sample-rpg/assets/')) {
+      return undefined
+    }
+    return {
+      tilesetSource: sourceMatch[1],
+      tilesetImagePath: imagePath,
+      tilesetImageUrl: `/${imagePath}`,
+      columns: info.columns,
+      tileWidth: info.tileWidth,
+      tileHeight: info.tileHeight
+    }
+  }
+  // AdaIN 스타일 트랜스퍼 — '타일' 탭이 현재 맵 타일셋의 타일을 골라 스타일을 입힌다.
+  const styleTransfer = createStyleTransferModal({
+    onAssetChanged: styleRevert.refresh,
+    getTileStyleTarget: () => {
+      const tileset = resolveCurrentTileset()
+      return tileset
+        ? {
+            tilesetImagePath: tileset.tilesetImagePath,
+            tilesetImageUrl: tileset.tilesetImageUrl,
+            columns: tileset.columns,
+            tileWidth: tileset.tileWidth,
+            tileHeight: tileset.tileHeight
+          }
+        : undefined
+    }
+  })
+  // 외부 게임(Love2D 등) 스프라이트 직접 스타일 — my-sample-rpg 에셋과 분리된 /ext/* 경로.
+  const externalStyler = createExternalSpriteStyler()
+  // NPC 탭 외형 목록 — tiny-dungeon-16의 캐릭터 타일(appearanceType)과 한국어 표시 이름.
+  // tileId는 .tsx에서 type으로 역해석하므로(아래) 시트가 바뀌어도 따라간다. 몬스터는 제외.
+  const NPC_APPEARANCE_OPTIONS: { appearanceType: string; label: string }[] = [
+    { appearanceType: 'character_villager_brown_tunic', label: '마을 주민 (갈색 튜닉)' },
+    { appearanceType: 'character_villager_flower_dress', label: '마을 주민 (꽃무늬 드레스)' },
+    { appearanceType: 'character_commoner_tan_tunic', label: '평민 (베이지 튜닉)' },
+    { appearanceType: 'character_bearded_apron_man', label: '앞치마 아저씨' },
+    { appearanceType: 'character_elder_gray_hair', label: '노인 (백발)' },
+    { appearanceType: 'character_wizard_purple', label: '마법사 (보라)' },
+    { appearanceType: 'character_ranger_green', label: '레인저 (초록)' },
+    { appearanceType: 'character_adventurer_brown_hair', label: '모험가 (갈색 머리)' },
+    { appearanceType: 'character_knight_open_helmet', label: '기사 (열린 투구)' },
+    { appearanceType: 'character_knight_closed_helmet', label: '기사 (닫힌 투구)' },
+    { appearanceType: 'character_knight_gray_helmet', label: '기사 (회색 투구)' }
+  ]
+  // NPC 탭 컨텍스트 — 캐릭터 타일셋(tiny-dungeon-16) 이미지/격자 + 외형 목록. NPC는 rpg 전용이라
+  // 현재 맵이 my-sample-rpg 에셋 맵일 때만(resolveCurrentTileset 기준) 제공한다.
+  const resolveNpcPaletteContext = (): NpcPaletteContext | undefined => {
+    if (resolveCurrentTileset() === undefined) {
+      return undefined
+    }
+    const tsxFile = currentFiles.find((file) => file.name === NPC_TILESET_TSX)
+    const info = tsxFile ? extractTmxTilesetImageInfo(tsxFile.text) : undefined
+    if (!tsxFile || !info) {
+      return undefined
+    }
+    const imagePath = resolveRelativePath(tsxFile.path, info.imageSource)
+    if (!imagePath.startsWith('src/games/my-sample-rpg/assets/')) {
+      return undefined
+    }
+    const appearances = NPC_APPEARANCE_OPTIONS.flatMap((option) => {
+      const tileId = extractTilesetTileIdByType(tsxFile.text, option.appearanceType)
+      return tileId === undefined
+        ? []
+        : [{ appearanceType: option.appearanceType, tileId, label: option.label }]
+    })
+    return {
+      tilesetImageUrl: `/${imagePath}`,
+      columns: info.columns,
+      tileWidth: info.tileWidth,
+      tileHeight: info.tileHeight,
+      appearances
+    }
+  }
+  // 마우스 에셋 배치: 현재 맵 타일셋(타일 팔레트)·NPC 외형·게임 통신·현재 맵 id를 팔레트에 공급한다.
+  const placementPalette = createPlacementPalette({
+    getCurrentMapId: () => currentMapId,
+    sendToGame: (message) => iframe.contentWindow?.postMessage(message, '*'),
+    getTilePaletteContext: () => {
+      const tileset = resolveCurrentTileset()
+      return tileset
+        ? {
+            tilesetSource: tileset.tilesetSource,
+            tilesetImageUrl: tileset.tilesetImageUrl,
+            columns: tileset.columns,
+            tileWidth: tileset.tileWidth,
+            tileHeight: tileset.tileHeight
+          }
+        : undefined
+    },
+    getNpcPaletteContext: resolveNpcPaletteContext
+  })
+  const headerRight = el('div', 'flex items-center gap-3')
+  // 에디터 미리보기(게임 iframe)는 항상 음소거된다(게임이 임베드를 감지해 강제 음소거) —
+  // 음소거 토글은 의미가 없어 헤더에서 제외한다(버튼/핸들러 정의는 호환을 위해 그대로 둔다).
+  headerRight.append(styleTransfer.openButton, styleRevert.button, externalStyler.button, placementPalette.button, settingsButton, connection)
   header.append(brand, headerRight)
 
   // LLM 챗 스타일 배치: 가운데가 라이브 게임(위 가득) + 프롬프트(아래), 오른쪽이 생성 결과.
@@ -482,6 +609,9 @@ export const createEditorApp = ({
   const resetButton = el('button', SETTINGS_BUTTON) as HTMLButtonElement
   resetButton.append(editorIcon('building', 20), el('span', '', '게임으로 복귀'))
   resetButton.type = 'button'
+  // 시작 화면(프로젝트 선택)으로 돌아가는 버튼 — 핸들러는 landingBackdrop 정의 이후에 붙인다.
+  const backToLandingButton = el('button', 'rounded-lg px-3 py-1.5 bg-white/5 text-xs text-zinc-400 text-left transition hover:bg-white/10 hover:text-zinc-200', '↩ 프로젝트 선택으로') as HTMLButtonElement
+  backToLandingButton.type = 'button'
   // 프로젝트 버튼(폴더 열기/분석/복귀)은 설정 모달로 이동했다. 사이드바는 엔티티 목록만.
   const treeHeaderTop = el('div', 'flex items-center justify-between gap-2')
   const treeTitle = el('div', 'flex items-center gap-2 text-[15px] font-semibold tracking-wide text-[#e6e6e6]')
@@ -1017,6 +1147,43 @@ export const createEditorApp = ({
     previewLoading.style.display = 'flex'
     iframe.src = src
   }
+  // 외부 게임(Love2D 등) 라이브 브리지 — applyMode가 'bridge'인 게임에서만 로컬 HTTP 서버를
+  // 폴링한다. 설정 모달의 '게임 브리지 URL' 필드와 base URL을 공유한다.
+  let bridgeStatus: BridgeStatus = 'disconnected'
+  const applyBridgeStatusToIndicator = (): void => {
+    if (bridgeStatus === 'connected') {
+      connection.className = 'h-7 flex items-center gap-1.5 text-[11px] rounded-full px-2.5 bg-[#72d36b]/10 border border-[#72d36b]/50 text-[#9fe296]'
+      connectionDot.className = 'w-2 h-2 rounded-full bg-[#72d36b] shadow-[0_0_6px_rgba(114,211,107,0.8)]'
+      connectionLabel.textContent = '게임 연결됨'
+    } else if (bridgeStatus === 'connecting') {
+      connection.className = 'h-7 flex items-center gap-1.5 text-[11px] rounded-full px-2.5 bg-[#2d2d30] border border-[#d9a85c]/28 text-[#9d9d9d]'
+      connectionDot.className = 'w-2 h-2 rounded-full bg-amber-400'
+      connectionLabel.textContent = '게임 연결 중…'
+    } else {
+      connection.className = 'h-7 flex items-center gap-1.5 text-[11px] rounded-full px-2.5 bg-[#2d2d30] border border-[#d9a85c]/28 text-[#9d9d9d]'
+      connectionDot.className = 'w-2 h-2 rounded-full bg-[#6e6e6e]'
+      connectionLabel.textContent = '게임 미연결'
+    }
+  }
+  const bridge = createGameBridge({
+    baseUrl: readLocalStorage(BRIDGE_URL_STORAGE_KEY) ?? DEFAULT_BRIDGE_URL,
+    onStatusChange: (next) => {
+      bridgeStatus = next
+      if (game.adapter.applyMode === 'bridge') {
+        applyBridgeStatusToIndicator()
+      }
+      render()
+    }
+  })
+  // 브리지 적용 게임이면 폴링을 켜고, 그 외에는 끈다.
+  const syncBridgeForGame = (): void => {
+    if (game.adapter.applyMode === 'bridge') {
+      bridge.start()
+      applyBridgeStatusToIndicator()
+    } else {
+      bridge.stop()
+    }
+  }
   // 상단 맵/씬 버튼은 로드된 게임에 맞춰 구성한다:
   // - my-sample-rpg: 큐레이션된 씬(마을/사냥터/동굴) + 아이콘, 'editor:switch-scene' 전송
   //   (게임이 'game:scene-changed'로 되보고 → currentMapId 갱신).
@@ -1133,7 +1300,9 @@ export const createEditorApp = ({
   // 화면의 주인공 '마을 의뢰서' — 다른 패널보다 밝은 배경 + 2px 금색 테두리,
   // 입력에 포커스되면 은은한 발광(focus-within)으로 "여기에 쓰면 된다"가 바로 보이게.
   // 게임 화면이 주인공 — 의뢰서는 화면의 약 1/3 이하로 압축한다.
-  const composer = el('div', 'settings-game-font shrink-0 max-h-[36%] overflow-y-auto rounded-xl box-grad-border box-grad-border--strong box-grad-border--thick [--bgb:#252526] text-[#d4d4d4] p-2.5 flex flex-col gap-1.5 transition focus-within:shadow-[0_0_20px_rgba(222,170,90,0.25)]')
+  // 높이는 미리보기↔컴포저 사이 드래그 핸들로 조절한다(아래 center.append 직전 로직). max-h 고정 대신
+  // 명시적 height를 주므로, 여기선 shrink-0 + 스크롤만 남긴다(내용이 높이를 넘으면 자체 스크롤).
+  const composer = el('div', 'settings-game-font shrink-0 overflow-y-auto rounded-xl box-grad-border box-grad-border--strong box-grad-border--thick [--bgb:#252526] text-[#d4d4d4] p-2.5 flex flex-col gap-1.5 transition focus-within:shadow-[0_0_20px_rgba(222,170,90,0.25)]')
   // 제목은 하나, 설명도 한 줄만 — 정보를 줄여 흐름(선택→작성→생성)이 먼저 읽히게.
   const composerTitle = el('div', 'flex flex-wrap items-baseline gap-x-2.5 gap-y-0.5 min-w-0')
   const composerTitleRow = el('div', 'flex items-center gap-2')
@@ -1190,7 +1359,66 @@ export const createEditorApp = ({
   // 최근 생성 결과 한 줄 — 처음엔 발표용 예시, 실제 결과가 생기면 그 라벨로 바뀐다(render()가 갱신).
   const recentResultLine = el('div', 'text-[10px] leading-[1.4] text-[#777777]')
   composer.append(composerTop, supportNote, quickStart, promptField, recommendBoard, actions, status, recentResultLine)
-  center.append(preview, composer)
+  // ---------- 미리보기 ↔ 컴포저 높이 조절 핸들 ----------
+  // 게임 미리보기(preview, flex-1)와 하단 컴포저 사이를 드래그해 컴포저 높이를 바꾼다.
+  // 컴포저에 명시적 height를 주면 flex-1인 preview가 나머지 공간을 채운다. 높이는 localStorage에 영속.
+  const COMPOSER_HEIGHT_KEY = 'editor:composer-height-px'
+  const resizeHandle = el('div', 'editor-resize-handle')
+  resizeHandle.append(el('div', 'editor-resize-handle__grip'))
+  resizeHandle.title = '드래그해서 입력창 높이 조절'
+  let composerHeight = Number.parseInt(readLocalStorage(COMPOSER_HEIGHT_KEY) ?? '', 10)
+  if (!Number.isFinite(composerHeight)) {
+    composerHeight = 0 // 0 = 미설정 → 첫 레이아웃에서 기본 36%로 채운다.
+  }
+  // 미리보기가 최소 200px는 남도록 컴포저 높이를 [120, center-220] 범위로 제한한다.
+  const clampComposerHeight = (height: number, centerHeight: number): number => {
+    const min = 120
+    const max = Math.max(min, centerHeight - 220)
+    return Math.round(Math.min(max, Math.max(min, height)))
+  }
+  const applyComposerHeight = (): void => {
+    const centerHeight = center.clientHeight
+    if (centerHeight <= 0) {
+      return
+    }
+    if (composerHeight <= 0) {
+      composerHeight = Math.round(centerHeight * 0.36)
+    }
+    composerHeight = clampComposerHeight(composerHeight, centerHeight)
+    composer.style.height = `${composerHeight}px`
+  }
+  let resizeStartY = 0
+  let resizeStartHeight = 0
+  resizeHandle.addEventListener('pointerdown', (event) => {
+    event.preventDefault()
+    resizeStartY = event.clientY
+    resizeStartHeight = composer.getBoundingClientRect().height
+    resizeHandle.setPointerCapture(event.pointerId)
+    document.body.classList.add('editor-row-resizing')
+  })
+  resizeHandle.addEventListener('pointermove', (event) => {
+    if (!resizeHandle.hasPointerCapture(event.pointerId)) {
+      return
+    }
+    // 위로 끌면(델타 양수) 컴포저가 커지고 게임 미리보기가 작아진다.
+    const delta = resizeStartY - event.clientY
+    composerHeight = clampComposerHeight(resizeStartHeight + delta, center.clientHeight)
+    composer.style.height = `${composerHeight}px`
+  })
+  const endComposerResize = (event: PointerEvent): void => {
+    if (resizeHandle.hasPointerCapture(event.pointerId)) {
+      resizeHandle.releasePointerCapture(event.pointerId)
+    }
+    document.body.classList.remove('editor-row-resizing')
+    if (composerHeight > 0) {
+      writeLocalStorage(COMPOSER_HEIGHT_KEY, String(composerHeight))
+    }
+  }
+  resizeHandle.addEventListener('pointerup', endComposerResize)
+  resizeHandle.addEventListener('pointercancel', endComposerResize)
+  // 창 크기가 바뀌면 현재 높이를 새 영역에 맞게 다시 클램프한다(미리보기가 사라지지 않게).
+  new ResizeObserver(applyComposerHeight).observe(center)
+  center.append(preview, resizeHandle, composer)
 
   // ---------- right: 생성 결과 사이드바 ----------
   // 결과 사이드는 보조 정보 — 패널 자체를 본문보다 살짝 더 어둡게 가라앉힌다.
@@ -1238,7 +1466,8 @@ export const createEditorApp = ({
   const modelSection = el('div', SETTINGS_SECTION)
   modelSection.append(modelField)
   const projectSection = el('div', SETTINGS_SECTION)
-  projectSection.append(el('span', SETTINGS_LABEL, '프로젝트'), openButton, analyzeButton, resetButton)
+  // ST 그래프트: '프로젝트 선택으로' 돌아가기 버튼을 프로젝트 섹션에 추가한다(랜딩 화면 복귀).
+  projectSection.append(el('span', SETTINGS_LABEL, '프로젝트'), openButton, analyzeButton, resetButton, backToLandingButton)
   // 고급 설정(API 키) — 일반 사용자에겐 보이지 않게 기본 접힘.
   // 개발자용 영역이라 기본적으로 눈에 띄지 않게 — 작고 연한 토글.
   const advancedToggle = el('button', 'self-start text-[13px] text-[#9d9d9d] transition hover:text-[#cccccc]', '▸ 고급 설정 (API 키)') as HTMLButtonElement
@@ -1251,7 +1480,23 @@ export const createEditorApp = ({
     advancedBody.hidden = !advancedBody.hidden
     advancedToggle.textContent = `${advancedBody.hidden ? '▸' : '▾'} 고급 설정 (API 키)`
   })
-  settingsPanel.append(settingsTitle, settingsClose, modelSection, projectSection, advancedToggle, advancedBody)
+
+  // ST 그래프트: 외부 게임(Love2D 등)의 라이브 브리지 주소. 게임이 띄운 로컬 HTTP 서버를 가리킨다.
+  const bridgeField = el('div', SETTINGS_SECTION)
+  bridgeField.append(el('span', SETTINGS_LABEL, '게임 브리지 URL — 외부 게임(Love2D 등) 라이브 적용'))
+  const bridgeInput = el('input', FIELD_INPUT) as HTMLInputElement
+  bridgeInput.type = 'text'
+  bridgeInput.placeholder = DEFAULT_BRIDGE_URL
+  bridgeInput.value = bridge.getBaseUrl()
+  bridgeInput.spellcheck = false
+  bridgeField.append(bridgeInput)
+  bridgeInput.addEventListener('change', () => {
+    const url = bridgeInput.value.trim() || DEFAULT_BRIDGE_URL
+    bridge.setBaseUrl(url)
+    writeLocalStorage(BRIDGE_URL_STORAGE_KEY, url)
+    bridgeInput.value = bridge.getBaseUrl()
+  })
+  settingsPanel.append(settingsTitle, settingsClose, modelSection, projectSection, advancedToggle, advancedBody, bridgeField)
   settingsBackdrop.append(settingsPanel)
 
   const closeSettings = (): void => {
@@ -1276,7 +1521,107 @@ export const createEditorApp = ({
   // 진행 단계 스트립 — 헤더 바로 아래 한 줄(퀘스트 진행 UI, 화살표 없음).
   const stepStrip = el('div', 'settings-game-font select-none shrink-0 flex px-4 py-1 border-b border-[#d9a85c]/22 bg-[#252526]')
   stepStrip.append(stepBar)
-  root.append(header, stepStrip, body, settingsBackdrop)
+
+  // ---------- 시작 화면: 프로젝트 선택 ----------
+  // 에디터는 특정 게임에 묶이지 않는다 — 첫 화면에서 어떤 프로젝트를 편집할지 고른 뒤에야
+  // 게임 로드(프리뷰 실행 포함)를 시작한다. 내장 샘플 게임도 자동 선택이 아니라 선택지 중 하나.
+  const landingBackdrop = el('div', 'fixed inset-0 z-40 bg-zinc-950 flex items-center justify-center p-6')
+  const landingPanel = el('div', 'w-full max-w-md flex flex-col gap-6')
+  const landingBrand = el('div', 'flex flex-col gap-1.5')
+  const landingBrandRow = el('div', 'flex items-center gap-2')
+  landingBrandRow.append(
+    el('span', 'w-2.5 h-2.5 rounded-full bg-indigo-500'),
+    el('span', 'text-lg font-semibold tracking-tight', 'Scenario Editor')
+  )
+  landingBrand.append(
+    landingBrandRow,
+    el('div', 'text-sm text-zinc-400', '편집할 게임 프로젝트를 선택하세요.')
+  )
+
+  const LANDING_CARD =
+    'w-full text-left rounded-2xl border border-white/10 bg-white/[0.03] p-5 flex flex-col gap-1 transition hover:bg-white/[0.06] hover:border-indigo-500/40 disabled:opacity-50 disabled:cursor-not-allowed'
+  const landingOpenButton = el('button', LANDING_CARD) as HTMLButtonElement
+  landingOpenButton.type = 'button'
+  landingOpenButton.append(
+    el('div', 'text-sm font-semibold text-zinc-100', '📂 게임 폴더 열기'),
+    el('div', 'text-xs text-zinc-400 leading-relaxed', '내 컴퓨터의 게임 프로젝트 폴더(.tmx 맵 포함)를 선택해 엽니다.')
+  )
+  const landingSampleButton = el('button', LANDING_CARD) as HTMLButtonElement
+  landingSampleButton.type = 'button'
+  landingSampleButton.append(
+    el('div', 'text-sm font-semibold text-zinc-100', '🎮 샘플 게임으로 시작'),
+    el('div', 'text-xs text-zinc-400 leading-relaxed', '내장 샘플(My Sample RPG)을 열어 라이브 프리뷰와 함께 에디터를 사용합니다.')
+  )
+  // 폴더 열기 실패 사유(맵 없음·권한 등)를 시작 화면 안에서 바로 보여준다 — 뒤의 상태줄은 가려져 안 보인다.
+  const landingError = el('div', 'text-xs text-amber-300 min-h-[1rem]')
+  landingPanel.append(landingBrand, landingOpenButton, landingSampleButton, landingError)
+  landingBackdrop.append(landingPanel)
+
+  // 선택이 끝나면 시작 화면을 닫고 편집을 시작한다(프리뷰·브리지 동기화 + 데모 흐름 포커스).
+  const startEditing = (): void => {
+    landingBackdrop.style.display = 'none'
+    syncPreviewToGame()
+    syncBridgeForGame()
+    // 데모 흐름: 키가 없으면 키 입력에, 있으면 바로 프롬프트에 포커스.
+    ;(apiKey.trim().length > 0 ? promptInput : apiKeyInput).focus()
+  }
+
+  // 선택한 프로젝트를 탭 세션에 기억한다 — 스타일 적용 등으로 Vite가 페이지를 새로고침해도
+  // 시작 화면으로 되돌아가지 않고 편집을 이어가게 한다. 샘플만 자동 복귀 대상이다(외부 폴더는
+  // FS 핸들이 새로고침 후 사라져 복원할 수 없다). 새 탭/새 방문에선 sessionStorage가 비어
+  // 정상적으로 시작 화면이 뜬다.
+  const ACTIVE_PROJECT_SESSION_KEY = 'my-sample-rpg:editor-active-project'
+  const rememberSampleProject = (): void => {
+    try {
+      sessionStorage.setItem(ACTIVE_PROJECT_SESSION_KEY, 'sample')
+    } catch {
+      // 저장 차단(프라이빗 모드 등)이면 자동 복귀만 안 될 뿐 동작엔 지장 없다.
+    }
+  }
+  const forgetActiveProject = (): void => {
+    try {
+      sessionStorage.removeItem(ACTIVE_PROJECT_SESSION_KEY)
+    } catch {
+      // 무시
+    }
+  }
+
+  landingSampleButton.addEventListener('click', () => {
+    // 샘플 게임 상태는 부팅 때 이미 로드돼 있다(트리·프로필) — 프리뷰 실행만 시작하면 된다.
+    rememberSampleProject()
+    startEditing()
+  })
+
+  // 설정의 '프로젝트 선택으로' — 시작 화면을 다시 띄우고 자동 복귀 기억을 끈다(새로고침해도 시작 화면 유지).
+  backToLandingButton.addEventListener('click', () => {
+    forgetActiveProject()
+    closeSettings()
+    landingError.textContent = ''
+    landingBackdrop.style.display = 'flex'
+  })
+  landingOpenButton.addEventListener('click', () => {
+    void (async () => {
+      landingOpenButton.disabled = true
+      landingSampleButton.disabled = true
+      const statusBefore = status.textContent
+      const opened = await runOpenProject()
+      landingOpenButton.disabled = false
+      landingSampleButton.disabled = false
+      if (opened) {
+        // 외부 폴더는 새로고침 후 복원 불가 — 샘플 자동 복귀 플래그를 끈다.
+        forgetActiveProject()
+        // runOpenProject가 프리뷰·브리지 동기화까지 끝냈다 — 화면만 닫고 포커스를 준다.
+        landingBackdrop.style.display = 'none'
+        ;(apiKey.trim().length > 0 ? promptInput : apiKeyInput).focus()
+        return
+      }
+      // 실패 사유는 상태줄에 적힌다. 단순 취소(메시지 무변화)면 조용히 시작 화면에 머문다.
+      landingError.textContent =
+        status.textContent !== statusBefore ? (status.textContent ?? '') : ''
+    })()
+  })
+
+  root.append(header, stepStrip, body, settingsBackdrop, styleTransfer.backdrop, styleRevert.backdrop, externalStyler.backdrop, placementPalette.backdrop, placementPalette.banner, landingBackdrop)
   mountElement.append(root)
 
   // ---------- behavior ----------
@@ -1369,6 +1714,290 @@ export const createEditorApp = ({
     }
   }
 
+  // 트리에서 클릭한 타일 군집(나무·분수·가로등 등)을 부분 스타일 변환 대상으로 변환한다.
+  // 셀·타일 id를 되찾고, 타일셋 .tsx에서 이미지 경로·격자 정보를 읽는다. 실패하면 undefined —
+  // 호출부가 상태줄로 알린다. 서비스는 src/games/my-sample-rpg/assets 안만 다루므로 다른 폴더로 연 게임은 대상 외.
+  const buildStyleObjectTarget = (
+    map: LoadedGameMap,
+    entity: GameEntity
+  ): StyleTransferMapObject | undefined => {
+    const mapFile = currentFiles.find((file) => file.path === map.file)
+    if (!mapFile) {
+      return undefined
+    }
+    let objects: TmxObject[] = []
+    try {
+      objects = extractTmxObjects(mapFile.text)
+    } catch {
+      return undefined
+    }
+    // 타일 군집(좌표 id)은 군집 재추출로, 영역 오브젝트(건물·분수·나무 장식 등)는
+    // 사각형 안의 같은 종류 타일 수집으로 셀 목록을 얻는다.
+    const detail = isTileClusterEntity(entity)
+      ? findTileClusterDetail(mapFile, currentFiles, objects, entity.id)
+      : findObjectKindCells(mapFile, currentFiles, objects, entity)
+    if (!detail || detail.cells.length === 0 || detail.tilesetSource === undefined) {
+      return undefined
+    }
+    const tsxFile = findFileByRelativeSource(currentFiles, mapFile.path, detail.tilesetSource)
+    const info = tsxFile ? extractTmxTilesetImageInfo(tsxFile.text) : undefined
+    if (!tsxFile || !info) {
+      return undefined
+    }
+    const imagePath = resolveRelativePath(tsxFile.path, info.imageSource)
+    if (!imagePath.startsWith('src/games/my-sample-rpg/assets/')) {
+      return undefined
+    }
+    const kind = groupKindOf(entity.kind)
+    return {
+      label: `${KIND_ICON[kind] ?? '•'} ${entity.name}`,
+      tilesetImagePath: imagePath,
+      tileWidth: info.tileWidth,
+      tileHeight: info.tileHeight,
+      columns: info.columns,
+      cells: detail.cells,
+      sharedOutsideCells: detail.sharedOutsideCells
+    }
+  }
+
+  // 몬스터 appearanceType → 전용 애니메이션 스프라이트 시트 파일(게임 로더가 하드코딩으로 import).
+  // 이 두 종류는 타일이 아니라 통짜 시트라, 시트 전체를 변환·적용한다.
+  const MONSTER_SHEET_BY_APPEARANCE: Record<string, string> = {
+    monster_pig: 'src/games/my-sample-rpg/assets/monsters/monster-pig-sheet.png',
+    monster_slime: 'src/games/my-sample-rpg/assets/monsters/몬스터-말캉이.png'
+  }
+  const NPC_TILESET_TSX = 'tiny-dungeon-16.tsx'
+
+  // 클릭한 캐릭터 엔티티의 외형(appearanceType)을 TMX에서 복구한다(GameEntity엔 없음).
+  // rpgAdapter의 id 규칙(object.name, 없으면 `${kind}-${object.id}`)을 역으로 매칭한다.
+  const getEntityAppearanceType = (
+    map: LoadedGameMap,
+    entity: GameEntity
+  ): string | undefined => {
+    const mapFile = currentFiles.find((file) => file.path === map.file)
+    if (!mapFile) {
+      return undefined
+    }
+    let objects: TmxObject[] = []
+    try {
+      objects = extractTmxObjects(mapFile.text)
+    } catch {
+      return undefined
+    }
+    const object =
+      objects.find((candidate) => candidate.name === entity.id) ??
+      objects.find((candidate) => `${entity.kind}-${candidate.id}` === entity.id)
+    const appearance = object?.properties.type ?? object?.properties.appearanceType
+    return appearance || undefined
+  }
+
+  // NPC(및 tiny-dungeon-16에 타일로 존재하는 캐릭터/몬스터)를 단일 타일 패치 대상으로 만든다.
+  // appearanceType → tiny-dungeon-16.tsx의 타일 id → (col,row) 단일 셀. 같은 외형의 다른
+  // 캐릭터도 같은 타일을 공유하므로 함께 바뀐다(배너로 안내).
+  const buildStyleCharacterTileTarget = (
+    appearanceType: string,
+    displayName: string
+  ): StyleTransferMapObject | undefined => {
+    const tsxFile = currentFiles.find((file) => file.name === NPC_TILESET_TSX)
+    if (!tsxFile) {
+      return undefined
+    }
+    const info = extractTmxTilesetImageInfo(tsxFile.text)
+    const tileId = extractTilesetTileIdByType(tsxFile.text, appearanceType)
+    if (!info || tileId === undefined) {
+      return undefined
+    }
+    const imagePath = resolveRelativePath(tsxFile.path, info.imageSource)
+    if (!imagePath.startsWith('src/games/my-sample-rpg/assets/')) {
+      return undefined
+    }
+    return {
+      label: displayName,
+      tilesetImagePath: imagePath,
+      tileWidth: info.tileWidth,
+      tileHeight: info.tileHeight,
+      columns: info.columns,
+      cells: [{ col: tileId % info.columns, row: Math.floor(tileId / info.columns), tileId }],
+      sharedOutsideCells: 0,
+      bannerText: `캐릭터: ${displayName} · ⚠ 같은 외형(${appearanceType})의 캐릭터가 모두 함께 바뀝니다`
+    }
+  }
+
+  // 캐릭터(NPC/몬스터) 엔티티 클릭 → 적절한 방식으로 스타일 변환 모달을 연다.
+  // 애니메이션 몬스터(pig/slime)는 시트 통째, 그 외(NPC·타일형 캐릭터)는 단일 타일 패치.
+  const openStyleForCharacter = (map: LoadedGameMap, entity: GameEntity): void => {
+    const appearanceType = getEntityAppearanceType(map, entity)
+    if (!appearanceType) {
+      setStatus('이 캐릭터의 외형 정보를 읽지 못해 스타일 변환을 열 수 없습니다.')
+      return
+    }
+    const monsterSheet = MONSTER_SHEET_BY_APPEARANCE[appearanceType]
+    if (monsterSheet) {
+      styleTransfer.openForAsset({
+        path: monsterSheet,
+        label: entity.name,
+        // 'monster_pig' → 'pig', 'monster_slime' → 'slime' — 배경 보존(전경만 스타일) 경로 선택.
+        monsterKey: appearanceType.replace('monster_', ''),
+        note: `몬스터 캐릭터(전경)만 스타일이 적용되고 배경은 보존됩니다 — 같은 종류(${entity.name}) 몬스터가 모두 바뀝니다.`
+      })
+      return
+    }
+    const target = buildStyleCharacterTileTarget(appearanceType, entity.name)
+    if (target) {
+      styleTransfer.openForMapObject(target)
+    } else {
+      setStatus('이 캐릭터의 타일 정보를 읽지 못해 스타일 변환을 열 수 없습니다.')
+    }
+  }
+
+  // 맵 인식 시점의 자동 누끼 추출: 현재 맵의 변환 가능 오브젝트들의 셀 정보를 모아 서비스에
+  // 배치로 보낸다. 서비스가 타일을 조립해 투명 PNG로 저장하고(이미 추출된 키는 스킵),
+  // 모달의 '추출 오브젝트' 탭이 그 목록을 쓴다. 백그라운드 fetch라 에디터 UI는 멈추지 않고,
+  // 서비스가 꺼져 있으면 조용히 무시한다. 성공한 맵은 세션 내 재전송하지 않는다.
+  const extractedMapIds = new Set<string>()
+  const extractMapObjectsInBackground = (mapId: string): void => {
+    if (game.adapter.id !== 'my-sample-rpg' || extractedMapIds.has(mapId)) {
+      return
+    }
+    const map = game.maps.find((candidate) => candidate.id === mapId)
+    if (!map) {
+      return
+    }
+    // 준비(파싱)는 scene-changed 핸들러의 페인트를 막지 않게 타이머로 미루고,
+    // 엔티티별 재파싱 대신 일괄 수집(맵당 파싱 2회)으로 메인 스레드 점유를 줄인다.
+    window.setTimeout(() => {
+      const mapFile = currentFiles.find((file) => file.path === map.file)
+      if (!mapFile) {
+        return
+      }
+      let objects: TmxObject[] = []
+      try {
+        objects = extractTmxObjects(mapFile.text)
+      } catch {
+        return
+      }
+      const styleable = map.entities.filter(
+        (entity) => !STYLE_TARGET_EXCLUDED_KINDS.has(groupKindOf(entity.kind))
+      )
+      const cellsByEntityId = findAllStyleTargetCells(mapFile, currentFiles, objects, styleable)
+
+      // 타일셋 .tsx 해석은 source별로 1회만.
+      type ResolvedTileset = { imagePath: string; tileWidth: number; tileHeight: number; columns: number }
+      const tilesetBySource = new Map<string, ResolvedTileset | undefined>()
+      const resolveTileset = (source: string): ResolvedTileset | undefined => {
+        if (!tilesetBySource.has(source)) {
+          const tsxFile = findFileByRelativeSource(currentFiles, mapFile.path, source)
+          const info = tsxFile ? extractTmxTilesetImageInfo(tsxFile.text) : undefined
+          const imagePath = tsxFile && info ? resolveRelativePath(tsxFile.path, info.imageSource) : undefined
+          tilesetBySource.set(
+            source,
+            info && imagePath && imagePath.startsWith('src/games/my-sample-rpg/assets/')
+              ? { imagePath, tileWidth: info.tileWidth, tileHeight: info.tileHeight, columns: info.columns }
+              : undefined
+          )
+        }
+        return tilesetBySource.get(source)
+      }
+
+      const targets: Array<StyleTransferMapObject & { id: string }> = []
+      for (const entity of styleable) {
+        const detail = cellsByEntityId.get(entity.id)
+        if (!detail || detail.cells.length === 0 || detail.tilesetSource === undefined) {
+          continue
+        }
+        const tileset = resolveTileset(detail.tilesetSource)
+        if (!tileset) {
+          continue
+        }
+        const kind = groupKindOf(entity.kind)
+        targets.push({
+          id: entity.id,
+          label: `${KIND_ICON[kind] ?? '•'} ${entity.name}`,
+          tilesetImagePath: tileset.imagePath,
+          tileWidth: tileset.tileWidth,
+          tileHeight: tileset.tileHeight,
+          columns: tileset.columns,
+          cells: detail.cells,
+          sharedOutsideCells: detail.sharedOutsideCells
+        })
+      }
+      if (targets.length === 0) {
+        return
+      }
+      // 현재 데이터는 맵당 타일셋이 하나라 첫 대상 기준으로 묶는다(다른 타일셋 대상은 제외).
+      const first = targets[0]
+      const sameTileset = targets.filter(
+        (candidate) => candidate.tilesetImagePath === first.tilesetImagePath
+      )
+      void fetch('/api/style/extract-objects', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tileset_path: first.tilesetImagePath,
+          tile_width: first.tileWidth,
+          tile_height: first.tileHeight,
+          columns: first.columns,
+          objects: sameTileset.map((candidate) => ({
+            id: candidate.id,
+            label: candidate.label,
+            cells: candidate.cells,
+            sharedOutsideCells: candidate.sharedOutsideCells
+          }))
+        })
+      })
+        .then((response) => {
+          if (response.ok) {
+            extractedMapIds.add(mapId)
+          }
+        })
+        .catch(() => undefined)
+    }, 0)
+  }
+
+  // 트리 엔티티 호버 미리보기 — 종류별로 가능한 이미지를 만들어 떠 있는 박스에 띄운다.
+  // 몬스터(전용 시트)→시트 이미지, 캐릭터/NPC(tiny-dungeon 타일)→단일 타일 슬라이스,
+  // 타일 군집·영역 오브젝트→셀들을 경계 사각형으로 조립한 캔버스. 못 구하면 undefined(미리보기 없음).
+  const treeHoverPreview = createHoverPreview()
+  const buildEntityPreviewContent = (
+    map: LoadedGameMap,
+    entity: GameEntity
+  ): HTMLElement | undefined | Promise<HTMLElement | undefined> => {
+    const appearanceType = getEntityAppearanceType(map, entity)
+    if (appearanceType) {
+      const monsterSheet = MONSTER_SHEET_BY_APPEARANCE[appearanceType]
+      if (monsterSheet) {
+        return buildImagePreview(`/${monsterSheet}`, { maxSize: 192 })
+      }
+      const characterTarget = buildStyleCharacterTileTarget(appearanceType, entity.name)
+      const characterCell = characterTarget?.cells[0]
+      if (characterTarget && characterCell) {
+        return buildTileSlicePreview({
+          imageUrl: `/${characterTarget.tilesetImagePath}`,
+          columns: characterTarget.columns,
+          tileWidth: characterTarget.tileWidth,
+          tileHeight: characterTarget.tileHeight,
+          tileId: characterCell.tileId,
+          targetSize: 128
+        })
+      }
+    }
+    const objectTarget = buildStyleObjectTarget(map, entity)
+    if (objectTarget) {
+      return buildCellsCanvasPreview({
+        imageUrl: `/${objectTarget.tilesetImagePath}`,
+        columns: objectTarget.columns,
+        tileWidth: objectTarget.tileWidth,
+        tileHeight: objectTarget.tileHeight,
+        cells: objectTarget.cells,
+        targetSize: 176
+      })
+    }
+    return undefined
+  }
+  const bindEntityPreview = (target: HTMLElement, map: LoadedGameMap, entity: GameEntity): void => {
+    treeHoverPreview.bind(target, () => buildEntityPreviewContent(map, entity))
+  }
+
   const renderTree = (): void => {
     entityButtons = []
     const groups: HTMLElement[] = []
@@ -1386,10 +2015,10 @@ export const createEditorApp = ({
       mapFilterToggle.hidden = false
       mapFilterToggle.textContent = showAllMaps ? '현재 맵만' : '전체 보기'
       treeSyncLine.replaceChildren(
-        el('span', 'inline-block w-1.5 h-1.5 rounded-full bg-[#7ba368] mr-1.5 align-middle'),
+        el('span', 'inline-block w-1.5 h-1.5 rounded-full bg-emerald-400 mr-1.5 align-middle'),
         showAllMaps
           ? document.createTextNode('전체 맵 표시 중')
-          : el('span', 'text-[#d4d4d4]', `현재 맵: ${focusMap.name}`)
+          : el('span', 'text-zinc-300', `현재 맵: ${focusMap.name}`)
       )
     } else {
       mapFilterToggle.hidden = true
@@ -1398,30 +2027,32 @@ export const createEditorApp = ({
         currentMapId === undefined ? '게임과 연결 대기 중…' : ''
     }
 
+    // 검색어가 있으면 이름으로 실시간 필터링(표시 전용).
+    const query = assetQuery.trim().toLowerCase()
+
     for (const map of mapsToShow) {
       // 객체도 레이어도 없는 맵만 건너뛴다(예: 파싱 실패). 몬스터만 있는 맵·지형만 있는 맵도 보여준다.
       if (map.entities.length === 0 && map.layers.length === 0) {
         continue
       }
 
-      const group = el('div', 'flex flex-col gap-1')
-      const isCurrent = map.id === currentMapId
-      const mapTitle = el('div', 'flex items-center gap-1.5 text-[12px] text-[#d4d4d4] font-semibold tracking-wide px-1')
-      mapTitle.append(
-        editorIcon('map', 13),
-        el('span', 'truncate', `${map.name}${isCurrent ? ' · 현재 맵' : ''}`)
-      )
-      group.append(mapTitle)
-
-      // 검색어가 있으면 이름으로 실시간 필터링(표시 전용).
-      const query = assetQuery.trim().toLowerCase()
+      // 검색 중이면 이름으로 거른다. 이 맵에 일치하는 에셋이 없으면 맵 자체를 건너뛴다.
       const visibleEntities = query
         ? map.entities.filter((entity) => entity.name.toLowerCase().includes(query))
         : map.entities
-      // 검색 중인데 이 맵에 일치하는 에셋이 없으면 맵 자체를 건너뛴다.
       if (query && visibleEntities.length === 0) {
         continue
       }
+
+      const group = el('div', 'flex flex-col gap-1')
+      const isCurrent = map.id === currentMapId
+      group.append(
+        el(
+          'div',
+          'text-xs text-zinc-300 font-medium px-1',
+          `🗺 ${map.name}${isCurrent ? ' · 현재 맵' : ''}`
+        )
+      )
 
       // 같은 종류끼리 접이식 그룹으로 묶는다(쭉 나열하면 길어서 보기 불편하다는 피드백).
       // NPC 그룹을 맨 위로, 나머지는 맵에 등장한 순서대로.
@@ -1449,119 +2080,47 @@ export const createEditorApp = ({
           : true)
 
       const selectableCount = visibleEntities.filter(isSelectableEntity).length
-      // 종류별 "아이콘 카드" 2열 그리드 — 파일 탐색기식 세로 리스트 대신 게임 건설 메뉴처럼.
-      // 카드는 큰 아이콘(52px)이 먼저 보이고, 이름·개수는 아래 작은 캡션으로만 붙는다.
-      // 카테고리(인물/건축물/장식물)로 한 층 더 묶는다 — 정보 구조가 한눈에 읽히게.
-      const byCategory = new Map<string, Array<[string, GameEntity[]]>>()
-      for (const entry of kindEntries) {
-        const category = categoryOf(entry[0])
-        const list = byCategory.get(category)
-        if (list) {
-          list.push(entry)
-        } else {
-          byCategory.set(category, [entry])
-        }
-      }
-      for (const category of CATEGORY_ORDER) {
-        const entriesInCategory = byCategory.get(category)
-        if (!entriesInCategory || entriesInCategory.length === 0) {
-          continue
-        }
-        // 그룹 제목 — 작고 은은한 금색 라벨 + 얇은 구분선. 클릭하면 접기/펼치기(검색 중엔 항상 펼침).
-        const categoryCollapsed = query.length === 0 && collapsedCategories.has(category)
-        const categoryHeader = el('button', 'w-full flex items-center gap-1.5 mt-1 px-1 py-1 text-left text-[13px] leading-none tracking-[0.5px] text-[#d9a85c] border-y border-[#d9a85c]/20 transition hover:text-[#f3d7a2]') as HTMLButtonElement
-        categoryHeader.type = 'button'
-        categoryHeader.append(
-          el('span', 'text-[10px] leading-none text-[#c9a96b]', categoryCollapsed ? '▸' : '▾'),
-          el('span', '', category)
-        )
-        categoryHeader.addEventListener('click', () => {
-          if (collapsedCategories.has(category)) {
-            collapsedCategories.delete(category)
-          } else {
-            collapsedCategories.add(category)
-          }
-          renderTree()
-          render()
-        })
-        group.append(categoryHeader)
-        if (categoryCollapsed) {
-          continue
-        }
-        const kindGrid = el('div', 'grid grid-cols-2 gap-2')
-        group.append(kindGrid)
-        for (const [kind, entities] of entriesInCategory) {
-          const groupKey = `${map.id}:${kind}`
-        const selectable = entities.filter(isSelectableEntity)
-        // 선택된 NPC가 속한 종류는 이번 렌더에서만 펼쳐 보인다(접혀 있으면 선택 표시가 가려진다).
+      for (const [kind, entities] of kindEntries) {
+        const groupKey = `${map.id}:${kind}`
+        // 선택된 NPC가 속한 그룹은 이번 렌더에서만 펼쳐 보인다(접혀 있으면 선택 표시가 가려진다).
         // Set에는 쓰지 않는다 — 영구 펼침으로 만들면 사용자가 접어도 다음 렌더마다 되돌아간다.
         const containsSelected =
           selectedEntity !== undefined && entities.some((entity) => entity === selectedEntity)
-        // 검색 중에는 결과를 바로 보여줘야 하므로 자동으로 펼친다.
-        const expanded =
-          selectable.length > 0 &&
-          (query.length > 0 || expandedGroups.has(groupKey) || containsSelected)
+        const expanded = expandedGroups.has(groupKey) || containsSelected
 
-        const card = el(
-          selectable.length > 0 ? 'button' : 'div',
-          `${KIND_CARD}${
-            containsSelected || expanded
-              ? ` ${KIND_CARD_ACTIVE}`
-              : selectable.length > 0
-                ? ` ${KIND_CARD_CLICKABLE}`
-                : ''
-          }`
+        const headerButton = el('button', ENTITY_GROUP_HEADER) as HTMLButtonElement
+        headerButton.type = 'button'
+        headerButton.setAttribute('aria-expanded', String(expanded))
+        const arrow = el('span', 'w-3 shrink-0 text-[10px] text-zinc-500', expanded ? '▾' : '▸')
+        arrow.setAttribute('aria-hidden', 'true')
+        headerButton.append(
+          arrow,
+          el('span', 'truncate', `${KIND_ICON[kind] ?? '•'} ${KIND_LABEL[kind] ?? kind}`),
+          el('span', 'ml-auto shrink-0 text-[10px] tabular-nums text-zinc-500', String(entities.length))
         )
-        // 카드 구성: 아이콘 → 이름(+펼침 화살표) → '8명/5개' 카운트. 전부 중앙 정렬.
-        const cardLabel = el('div', 'flex items-center justify-center gap-1')
-        cardLabel.append(
-          el('span', 'whitespace-nowrap text-[12px] leading-none font-semibold tracking-wide text-[#d4d4d4]', KIND_LABEL[kind] ?? kind)
-        )
-        if (selectable.length > 0) {
-          cardLabel.append(el('span', 'text-[9px] leading-none text-[#777777]', expanded ? '▾' : '▸'))
-        }
-        const countUnit = kind === 'npc' || kind === 'character' || kind === 'monster' ? '명' : '개'
-        // NPC는 가장 중요한 에셋 — '8명 존재'처럼 조금 더 살아있는 표현.
-        const countText = kind === 'npc' ? `${entities.length}명 존재` : `${entities.length}${countUnit}`
-        card.append(
-          editorIcon(KIND_ICON[kind] ?? 'prop', 44),
-          cardLabel,
-          el('div', 'whitespace-nowrap text-[10px] leading-none text-[#777777]', countText)
-        )
-        kindGrid.append(card)
 
-        // 보기 전용 종류(나무·가로등 등)는 카드로 개수만 보여주고 끝 — 펼칠 목록이 없다.
-        if (selectable.length === 0) {
-          continue
-        }
-
-        const cardButton = card as HTMLButtonElement
-        cardButton.type = 'button'
-        cardButton.setAttribute('aria-expanded', String(expanded))
-        cardButton.addEventListener('click', () => {
-          if (expandedGroups.has(groupKey)) {
-            expandedGroups.delete(groupKey)
-          } else {
+        const body = el('div', 'flex flex-col gap-0.5 pl-3')
+        body.id = `entity-group-${groupKey}`.replace(/[^A-Za-z0-9_-]/gu, '-')
+        headerButton.setAttribute('aria-controls', body.id)
+        body.hidden = !expanded
+        // 토글은 이 그룹의 DOM만 만지고 트리를 다시 그리지 않는다 — 선택 상태·버튼 참조가 그대로 유지된다.
+        headerButton.addEventListener('click', () => {
+          const nextExpanded = body.hidden
+          if (nextExpanded) {
             expandedGroups.add(groupKey)
+          } else {
+            expandedGroups.delete(groupKey)
           }
-          renderTree()
-          render()
+          body.hidden = !nextExpanded
+          arrow.textContent = nextExpanded ? '▾' : '▸'
+          headerButton.setAttribute('aria-expanded', String(nextExpanded))
         })
 
-        // 펼친 종류의 구성원 선택 그리드 — 카드 바로 아래 한 줄 전체를 쓴다(인벤토리 상세 칸 느낌).
-        if (expanded) {
-          const memberGrid = el('div', 'col-span-2 grid grid-cols-2 gap-1.5 rounded-lg border border-[#c98a3a]/25 bg-[#252526] p-1.5')
-          for (const entity of selectable) {
-            const node = el('button', entity === selectedEntity ? ENTITY_ACTIVE : ENTITY_BASE) as HTMLButtonElement
+        for (const entity of entities) {
+          if (isSelectableEntity(entity)) {
+            // 생성 대상은 클릭 가능한 버튼으로 — 선택하면 그 엔티티로 생성한다.
+            const node = el('button', ENTITY_BASE, entity.name) as HTMLButtonElement
             node.type = 'button'
-            // 이름이 길어도 hover로 전체 이름·타입을 볼 수 있다(CSS 툴팁).
-            node.setAttribute('data-tip', `${entity.name} · ${KIND_LABEL[kind] ?? kind}`)
-            // NPC는 역할(마법사/대장장이/상인/경비) 아이콘으로 먼저 구분되게 한다.
-            const memberIcon = kind === 'npc' ? npcIconFor(entity.name) : (KIND_ICON[kind] ?? 'prop')
-            node.append(
-              editorIcon(memberIcon, 16),
-              el('span', 'truncate', displayNameOf(entity.name))
-            )
             node.addEventListener('click', () => {
               selectedEntity = entity
               // 대상을 바꾸면 이전 생성 결과는 무효 — 새로 생성하게 한다.
@@ -1569,28 +2128,97 @@ export const createEditorApp = ({
               render()
             })
             entityButtons.push({ entity, node })
-            memberGrid.append(node)
+            bindEntityPreview(node, map, entity)
+            // NPC는 행 클릭이 LLM 생성 선택에 쓰이므로, 스타일 변환은 별도 🎨 버튼으로 분리한다.
+            // 선택 버튼은 flex-1(인라인 스타일 — render()의 className 덮어쓰기에도 유지됨).
+            if (game.adapter.id === 'my-sample-rpg' && groupKindOf(entity.kind) === 'npc') {
+              node.style.flex = '1 1 0%'
+              node.style.minWidth = '0'
+              const styleButton = el(
+                'button',
+                'shrink-0 rounded-lg px-2 py-2 text-sm text-zinc-500 transition hover:bg-white/[0.06] hover:text-zinc-200',
+                '🎨'
+              ) as HTMLButtonElement
+              styleButton.type = 'button'
+              styleButton.title = '이 NPC를 스타일 변환합니다 (같은 외형의 NPC가 함께 바뀔 수 있습니다)'
+              styleButton.addEventListener('click', (event) => {
+                event.stopPropagation()
+                openStyleForCharacter(map, entity)
+              })
+              const row = el('div', 'flex items-center gap-1')
+              row.append(node, styleButton)
+              body.append(row)
+            } else {
+              body.append(node)
+            }
+          } else if (
+            game.adapter.id === 'my-sample-rpg' &&
+            groupKindOf(entity.kind) === 'monster'
+          ) {
+            // 몬스터: 생성 대상은 아니지만 클릭하면 그 몬스터 스프라이트를 스타일 변환한다.
+            const node = el(
+              'button',
+              'flex items-center gap-1 text-left rounded-lg px-2.5 py-2 text-sm text-zinc-400 transition hover:bg-white/[0.06] hover:text-zinc-200'
+            ) as HTMLButtonElement
+            node.type = 'button'
+            node.title = '클릭하면 이 몬스터를 스타일 변환합니다 (같은 종류의 몬스터가 함께 바뀝니다)'
+            bindEntityPreview(node, map, entity)
+            node.append(
+              el('span', 'truncate', entity.name),
+              el('span', 'ml-auto shrink-0 text-[10px]', '🎨')
+            )
+            node.addEventListener('click', () => {
+              openStyleForCharacter(map, entity)
+            })
+            body.append(node)
+          } else if (
+            game.adapter.id === 'my-sample-rpg' &&
+            !STYLE_TARGET_EXCLUDED_KINDS.has(groupKindOf(entity.kind))
+          ) {
+            // 타일 구조물·장식 오브젝트: LLM 생성 대상은 아니지만, 클릭하면 그 오브젝트만 스타일 변환한다.
+            const node = el(
+              'button',
+              'flex items-center gap-1 text-left rounded-lg px-2.5 py-2 text-sm text-zinc-400 transition hover:bg-white/[0.06] hover:text-zinc-200'
+            ) as HTMLButtonElement
+            node.type = 'button'
+            node.title = '클릭하면 이 오브젝트를 스타일 변환합니다 (같은 타일을 쓰는 다른 곳도 함께 바뀔 수 있습니다)'
+            bindEntityPreview(node, map, entity)
+            node.append(
+              el('span', 'truncate', entity.name),
+              el('span', 'ml-auto shrink-0 text-[10px]', '🎨')
+            )
+            node.addEventListener('click', () => {
+              const target = buildStyleObjectTarget(map, entity)
+              if (target) {
+                styleTransfer.openForMapObject(target)
+              } else {
+                setStatus('이 오브젝트의 타일 정보를 읽지 못해 스타일 변환을 열 수 없습니다.')
+              }
+            })
+            body.append(node)
+          } else {
+            // 몬스터·표지판·포털(및 다른 게임의 구조물)은 맵에 있음을 보여주되(보기 전용), 생성 대상은 아니다.
+            const row = el('div', 'truncate rounded-lg px-2.5 py-2 text-sm text-zinc-400', entity.name)
+            bindEntityPreview(row, map, entity)
+            body.append(row)
           }
-          kindGrid.append(memberGrid)
         }
-        }
+
+        group.append(headerButton, body)
       }
 
       // 요소는 있는데 생성 대상이 하나도 없는 맵(사냥터·동굴 등)에선, 왜 클릭할 게 없는지 알려준다.
-      if (selectableCount === 0 && map.entities.length > 0) {
+      if (selectableCount === 0 && visibleEntities.length > 0) {
         group.append(
-          el('div', 'px-1 text-[11px] text-[#777777] italic', '생성 대상이 없는 맵 — 위 요소는 보기 전용입니다.')
+          el('div', 'px-1 text-[11px] text-zinc-500 italic', '생성 대상이 없는 맵 — 위 요소는 보기 전용입니다.')
         )
       }
 
       // "ground" 같은 타일/지형 레이어 — 객체가 아니라 맵 자체의 구성. 보기 전용 정보로 한 줄에 보여준다.
       if (map.layers.length > 0) {
-        const layersLine = el('div', 'px-1 pt-0.5 flex items-center gap-1.5 text-[11px] text-[#777777]')
-        layersLine.append(
-          editorIcon('layers', 12),
-          el('span', 'truncate', `타일 레이어: ${map.layers.join(' · ')}`)
+        group.append(
+          el('div', 'px-1 pt-0.5 text-[11px] text-zinc-500', `🗂 타일 레이어: ${map.layers.join(' · ')}`)
         )
-        group.append(layersLine)
       }
 
       groups.push(group)
@@ -1598,12 +2226,12 @@ export const createEditorApp = ({
 
     if (groups.length === 0) {
       const message =
-        assetQuery.trim().length > 0
+        query.length > 0
           ? `'${assetQuery.trim()}' 검색 결과가 없습니다.`
           : focusMap && !showAllMaps
             ? `현재 맵(${focusMap.name})에서 읽을 요소가 없습니다. ‘전체 보기’로 다른 맵을 볼 수 있어요.`
             : '로드된 맵이 없습니다. "게임 폴더 열기"로 프로젝트를 여세요.'
-      groups.push(el('div', 'text-xs text-[#9d9d9d] leading-relaxed', message))
+      groups.push(el('div', 'text-xs text-zinc-500 leading-relaxed', message))
     }
 
     treeList.replaceChildren(...groups)
@@ -2510,17 +3138,21 @@ export const createEditorApp = ({
     setStatus(`내보냄: ${fileName}`)
   }
 
-  const runOpenProject = async (): Promise<void> => {
+  // ST 그래프트: 시작 화면(landingOpenButton)·설정의 '폴더 열기'가 성공 여부를 보고 후속
+  // 동작(화면 닫기·포커스)을 결정하므로 boolean을 반환한다.
+  const runOpenProject = async (): Promise<boolean> => {
     try {
       const files = await openProjectDirectory()
       const loaded = loadGame(files)
 
       if (loaded.maps.length === 0) {
         setStatus('선택한 폴더에서 .tmx 맵을 찾지 못했습니다.')
-        return
+        return false
       }
 
       game = loaded
+      // ST 그래프트: 이전 프로젝트의 이미지 object URL을 정리하기 위해 교체 전 파일 목록을 잡아둔다.
+      const previousFiles = currentFiles
       currentFiles = files
       // 새 게임에 맞춰 프리뷰 iframe을 다시 가리키고(예: legend-of-lua면 love.js 빌드), 상단 맵/씬
       // 버튼도 그 게임의 실제 맵으로 다시 구성한다.
@@ -2547,6 +3179,12 @@ export const createEditorApp = ({
       renderTree()
       renderAnalysis()
       render()
+      // ST 그래프트: 외부 게임 브리지 동기화 + 배치 팔레트 캐시 무효화 + 이전 프로젝트 URL 정리.
+      // (syncPreviewToGame은 위에서 이미 호출됨 — 중복 호출은 생략.)
+      syncBridgeForGame()
+      // 배치 팔레트의 캐시된 타일/오브젝트/NPC 그리드는 이전 게임 것 — 새 컨텍스트로 다시 만들게 무효화.
+      placementPalette.invalidate()
+      revokePreviewObjectUrls(previousFiles)
       // 엔티티(어댑터가 찾은 개체)와 타일 구조물(보기 전용)을 나눠 세서, 수치가 부풀어 보이지 않게 한다.
       const allEntities = game.maps.flatMap((map) => map.entities)
       const tileCount = allEntities.filter(isTileClusterEntity).length
@@ -2559,11 +3197,13 @@ export const createEditorApp = ({
       if (apiKey.trim().length > 0) {
         void runAnalyze()
       }
+      return true
     } catch (error) {
       if (error instanceof DOMException && error.name === 'AbortError') {
-        return
+        return false
       }
       setStatus(error instanceof Error ? error.message : String(error))
+      return false
     }
   }
 
@@ -2591,6 +3231,11 @@ export const createEditorApp = ({
     renderTree()
     renderAnalysis()
     render()
+    // ST 그래프트: 외부 게임 브리지 동기화 + 배치 팔레트 캐시 무효화.
+    // (syncPreviewToGame은 위에서 이미 호출됨. runReset에는 previousFiles가 없어 URL 정리는 생략 —
+    //  initialFiles로 복귀하므로 되돌릴 object URL 자체가 없다.)
+    syncBridgeForGame()
+    placementPalette.invalidate()
     setStatus(`내 게임으로 복귀했습니다.${parseErrorNote()}`)
   }
 
@@ -2737,7 +3382,12 @@ export const createEditorApp = ({
   // 폴더 열기/분석은 결과가 중앙(분석 패널·상태줄)에 나오므로, 설정 모달을 닫아 그걸 가리지 않게 한다.
   openButton.addEventListener('click', () => {
     closeSettings()
-    void runOpenProject()
+    void (async () => {
+      if (await runOpenProject()) {
+        // 외부 폴더로 바꾸면 샘플 자동 복귀를 끈다(새로고침 시 폴더가 아니라 시작 화면으로).
+        forgetActiveProject()
+      }
+    })()
   })
   analyzeButton.addEventListener('click', () => {
     closeSettings()
@@ -2777,11 +3427,27 @@ export const createEditorApp = ({
     showAllMaps = false
     renderTree()
     render()
+    // ST 그래프트: 맵 인식 시점의 자동 오브젝트 추출 — 백그라운드라 UI를 막지 않는다.
+    // 스타일 변환 대상(맵 오브젝트 누끼)을 미리 준비해 둔다.
+    extractMapObjectsInBackground(currentMapId)
   })
 
   renderTree()
   renderAnalysis()
   render()
+  // 프리뷰·브리지 동기화와 포커스는 여기서 하지 않는다 — 시작 화면(프로젝트 선택)에서 선택한
+  // 뒤에 startEditing/runOpenProject가 수행한다. 선택 전엔 게임이 자동 실행되지 않는다.
+  // 단, 같은 탭에서 이미 샘플로 시작했다면(스타일 적용 등으로 새로고침된 경우) 시작 화면을
+  // 건너뛰고 바로 편집을 이어간다 — 부팅 시 game은 항상 샘플이라 안전하다.
+  let resumeSample = false
+  try {
+    resumeSample = sessionStorage.getItem(ACTIVE_PROJECT_SESSION_KEY) === 'sample'
+  } catch {
+    resumeSample = false
+  }
+  if (resumeSample) {
+    startEditing()
+  }
   if (game.parseErrors.length > 0) {
     setStatus(`기본 맵 일부를 읽지 못했습니다${parseErrorNote()}`)
   }

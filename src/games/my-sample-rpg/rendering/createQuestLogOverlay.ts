@@ -1,4 +1,9 @@
 import {
+  type QuestDefinition,
+  type QuestLogState,
+  type QuestProgress
+} from '../questLog'
+import {
   BLACKSMITH_NPC_ID,
   POTION_MERCHANT_NPC_ID,
   WIZARD_NPC_ID,
@@ -7,10 +12,7 @@ import {
   getQuestDefinition,
   getQuestProgress,
   getVisibleQuestDefinitions,
-  setQuestTrackerVisible,
-  type QuestDefinition,
-  type QuestLogState,
-  type QuestProgress
+  setQuestTrackerVisible
 } from '../questLog'
 import { getResponsiveUiScale } from './getResponsiveUiScale'
 import { createQuestTargetLink } from './questObjectiveTargetView'

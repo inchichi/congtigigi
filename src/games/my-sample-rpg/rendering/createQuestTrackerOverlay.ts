@@ -1,8 +1,10 @@
 import {
-  getVisibleQuestTrackers,
-  hideVisibleQuestTrackers,
   type QuestLogState
 } from '../questLog'
+import {
+  getVisibleQuestTrackers,
+  hideVisibleQuestTrackers
+} from '../lua/luaGameLogic'
 import { getResponsiveUiScale } from './getResponsiveUiScale'
 import { createQuestTargetLink } from './questObjectiveTargetView'
 

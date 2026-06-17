@@ -1,10 +1,10 @@
 import {
-  getCharacterControllerIntent,
   type CharacterAction,
   type CharacterControllerIntent,
   type CharacterMoveDirection,
   type CharacterState
 } from './characterState'
+import { getCharacterControllerIntent } from './lua/luaGameLogic'
 import type {
   LuaCharacterControllerRuntime,
   LuaControllerScriptSource
@@ -182,25 +182,61 @@ const createKeyboardControllerAttachment = (): CharacterControllerAttachment => 
   handleInteraction: () => undefined
 })
 
-const createNpcControllerAttachment = (): CharacterControllerAttachment => ({
-  attachCharacter: () => {},
-  detachCharacter: () => {},
-  getIntent: ({ character, deltaMilliseconds }) =>
-    getCharacterControllerIntent({
-      character,
-      deltaMilliseconds
-    }),
-  canReceiveInteraction: (character) =>
-    isMonsterCharacter(character) && character.blocksMovement,
-  handleInteraction: ({ targetCharacter }) =>
-    isMonsterCharacter(targetCharacter) && targetCharacter.blocksMovement
-      ? {
+const NPC_DIALOGUE_MESSAGE_DURATION_MILLISECONDS = 2600
+
+// 수기 배치 NPC의 대사 줄을 상호작용마다 순환시키기 위해 캐릭터별 다음 줄 인덱스를 보관한다.
+const getNpcDialogueLines = (character: CharacterState): string[] =>
+  character.controller.kind === 'npc'
+    ? (character.controller.dialogueLines ?? [])
+    : []
+
+const createNpcControllerAttachment = (): CharacterControllerAttachment => {
+  const dialogueCursorById = new Map<string, number>()
+
+  return {
+    attachCharacter: () => {},
+    detachCharacter: (character) => {
+      dialogueCursorById.delete(character.id)
+    },
+    getIntent: ({ character, deltaMilliseconds }) =>
+      getCharacterControllerIntent({
+        character,
+        deltaMilliseconds
+      }),
+    canReceiveInteraction: (character) =>
+      getNpcDialogueLines(character).length > 0 ||
+      (isMonsterCharacter(character) && character.blocksMovement),
+    handleInteraction: ({ targetCharacter }) => {
+      const dialogueLines = getNpcDialogueLines(targetCharacter)
+
+      if (dialogueLines.length > 0) {
+        const cursor = dialogueCursorById.get(targetCharacter.id) ?? 0
+        const message = dialogueLines[cursor % dialogueLines.length]
+        dialogueCursorById.set(targetCharacter.id, cursor + 1)
+
+        const durationMilliseconds =
+          targetCharacter.controller.kind === 'npc'
+            ? targetCharacter.controller.messageDurationMilliseconds ??
+              NPC_DIALOGUE_MESSAGE_DURATION_MILLISECONDS
+            : NPC_DIALOGUE_MESSAGE_DURATION_MILLISECONDS
+
+        return {
           kind: 'message',
-          message: '!',
-          durationMilliseconds: 600
+          message,
+          durationMilliseconds
         }
-      : undefined
-})
+      }
+
+      return isMonsterCharacter(targetCharacter) && targetCharacter.blocksMovement
+        ? {
+            kind: 'message',
+            message: '!',
+            durationMilliseconds: 600
+          }
+        : undefined
+    }
+  }
+}
 
 const createLuaControllerAttachment = (
   luaControllerRuntime?: LuaCharacterControllerRuntime
@@ -291,7 +327,7 @@ const getControllerAttachmentKey = (character: CharacterState): string => {
     case 'keyboard':
       return `keyboard:${character.controller.moveSpeedTilesPerSecond}`
     case 'npc':
-      return `npc:${character.controller.behavior}:${character.controller.moveSpeedTilesPerSecond}`
+      return `npc:${character.controller.behavior}:${character.controller.moveSpeedTilesPerSecond}:${JSON.stringify(character.controller.dialogueLines ?? [])}:${character.controller.messageDurationMilliseconds ?? ''}`
     case 'lua':
       return `lua:${character.controller.scriptId}:${character.controller.radiusInTiles}:${character.controller.moveSpeedTilesPerSecond}:${JSON.stringify(character.controller.config)}`
   }

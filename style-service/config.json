@@ -4,6 +4,13 @@
   "decoderPath": "models/decoder.pth",
   "projectDir": "..",
   "assetsSubdir": "src/games/my-sample-rpg/assets",
+  "externalProjects": {
+    "lol": {
+      "name": "Legend of Lua",
+      "root": "../../LOL",
+      "assetsSubdir": "sprites"
+    }
+  },
   "host": "127.0.0.1",
   "port": 8765
 }
