@@ -60,11 +60,14 @@ const LOVE_EMBED_BRIDGE_SCRIPT = `
     var M = window.Module;
     if (!M || !M.FS_createDataFile) return false;
     var name = 'editorcmd-' + (counter + 1) + '.txt';
+    // 한글 등 비ASCII가 Latin1로 잘려 깨진 UTF-8이 되면 게임의 love.graphics.print가 죽는다.
+    // UTF-8 바이트로 인코딩해 써서 Lua가 올바른 UTF-8을 읽게 한다.
+    var bytes = new TextEncoder().encode(text);
     var wroteAnywhere = false;
     var okDirs = [];
     for (var i = 0; i < DIRS.length; i++) {
       try {
-        M.FS_createDataFile(DIRS[i], name, text, true, true);
+        M.FS_createDataFile(DIRS[i], name, bytes, true, true);
         wroteAnywhere = true;
         okDirs.push(DIRS[i]);
       } catch (e) { /* 그 디렉터리가 없으면 무시 */ }
@@ -90,6 +93,16 @@ const LOVE_EMBED_BRIDGE_SCRIPT = `
     if (data.type === 'editor:goto-map' && data.mapId) {
       console.log('[editor-bridge] goto-map 큐:', data.mapId);
       queue.push('goto-map:' + data.mapId);
+      flush();
+    } else if (
+      data.type === 'editor:apply' &&
+      data.payload &&
+      data.payload.kind === 'spawn_npc' &&
+      typeof data.payload.lua === 'string'
+    ) {
+      // NPC 생성 '적용' — 에디터가 직렬화한 한 줄 Lua 테이블을 그대로 게임에 넘긴다.
+      console.log('[editor-bridge] spawn-npc 큐:', data.payload.npc && data.payload.npc.name);
+      queue.push('spawn-npc:' + data.payload.lua);
       flush();
     } else if (
       data.type === 'editor:apply' &&

@@ -1,18 +1,19 @@
 import {
   BLACKSMITH_NPC_ID,
   POTION_MERCHANT_NPC_ID,
-  QUEST_DEFINITIONS,
   WIZARD_NPC_ID,
   abandonQuest,
   formatQuestText,
   getQuestDefinition,
   getQuestProgress,
+  getVisibleQuestDefinitions,
   setQuestTrackerVisible,
   type QuestDefinition,
   type QuestLogState,
   type QuestProgress
 } from '../questLog'
 import { getResponsiveUiScale } from './getResponsiveUiScale'
+import { createQuestTargetLink } from './questObjectiveTargetView'
 
 type CreateQuestLogOverlayInput = {
   mountElement: HTMLElement
@@ -46,6 +47,12 @@ const WIZARD_PORTRAIT_FRAME: QuestGiverPortraitFrame = {
   width: 16,
   height: 16
 }
+const VILLAGER_PORTRAIT_FRAME: QuestGiverPortraitFrame = {
+  x: 16,
+  y: 112,
+  width: 16,
+  height: 16
+}
 const BLACKSMITH_PORTRAIT_FRAME: QuestGiverPortraitFrame = {
   x: 32,
   y: 112,
@@ -63,6 +70,8 @@ export const QUEST_GIVER_PORTRAIT_FRAME_BY_NPC_ID: Partial<Record<
   QuestGiverPortraitFrame
 >> = {
   [WIZARD_NPC_ID]: WIZARD_PORTRAIT_FRAME,
+  santa: VILLAGER_PORTRAIT_FRAME,
+  villager_1: VILLAGER_PORTRAIT_FRAME,
   [BLACKSMITH_NPC_ID]: BLACKSMITH_PORTRAIT_FRAME,
   [POTION_MERCHANT_NPC_ID]: POTION_MERCHANT_PORTRAIT_FRAME
 }
@@ -212,7 +221,7 @@ export const createQuestLogOverlay = ({
     }
 
     const questLog = getQuestLog()
-    const visibleDefinitions = getVisibleQuestDefinitions(questLog)
+    const visibleDefinitions = getActiveQuestDefinitions(questLog)
 
     if (
       selectedQuestId === undefined ||
@@ -337,7 +346,16 @@ export const createQuestLogOverlay = ({
         const objectiveRow = document.createElement('div')
 
         objectiveRow.className = 'quest-log-overlay__objective-row'
-        objectiveRow.textContent = `${objective.label}: ${quest.objectives[objective.id] ?? 0}/${objective.required}`
+        objectiveRow.append(
+          document.createTextNode(
+            `${objective.label}: ${quest.objectives[objective.id] ?? 0}/${objective.required}`
+          )
+        )
+        // 대상(몬스터/아이템)에 파란 밑줄 링크 — 클릭하면 이미지 팝업.
+        const targetLink = createQuestTargetLink(objective)
+        if (targetLink) {
+          objectiveRow.append(document.createTextNode(' '), targetLink)
+        }
         return objectiveRow
       })
     )
@@ -404,13 +422,14 @@ export const createQuestLogOverlay = ({
   }
 }
 
-const getVisibleQuestDefinitions = (
+const getActiveQuestDefinitions = (
   questLog: QuestLogState
 ): QuestDefinition[] =>
-  QUEST_DEFINITIONS.filter((definition) => {
-    const quest = getQuestProgress(questLog, definition.id)
+  // 정적 + 동적(에디터 생성) 퀘스트를 모두 본다. 진행도 항목이 아직 없는 동적 퀘스트는 건너뛴다.
+  getVisibleQuestDefinitions().filter((definition) => {
+    const quest = questLog.progressByQuestId[definition.id]
 
-    return quest.status === 'active' || quest.status === 'ready-to-turn-in'
+    return quest?.status === 'active' || quest?.status === 'ready-to-turn-in'
   })
 
 export const getQuestGiverPortraitFrame = (

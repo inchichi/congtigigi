@@ -57,8 +57,17 @@ import {
 } from './playerControls'
 import {
   createInitialQuestLog,
-  recordSceneEnterQuestProgress
+  clearDynamicQuestDefinitions,
+  ensureQuestProgressEntries,
+  recordSceneEnterQuestProgress,
+  registerDynamicQuestDefinitions,
+  setQuestDefinitionVisibilityFilter
 } from './questLog'
+import {
+  clearPendingQuests,
+  loadPendingQuests,
+  PENDING_QUESTS_STORAGE_KEY
+} from '../../editor/pendingQuests'
 import { getSceneIntroMessage } from './sceneIntro'
 import { createPixiTiledMapView } from './rendering/createPixiTiledMapView'
 import {
@@ -187,12 +196,27 @@ let playerSkillSlots =
   storedPlayerSaveState?.skillSlots ?? createInitialPlayerSkillSlots()
 let playerControlBindings = readStoredPlayerControlBindings()
 let questLog = createInitialQuestLog()
+// 에디터가 생성·주입한 동적 퀘스트를 런타임 퀘스트 엔진에 등록하고, 진행도 항목을 채운다.
+// 부팅 전에 questLog를 갱신해야 bootstrapScene이 그걸 렌더러로 넘긴다(배지·추적·완료 전부 작동).
+const applyPendingQuests = (): void => {
+  const pendingQuests = loadPendingQuests()
+  clearDynamicQuestDefinitions()
+  registerDynamicQuestDefinitions(pendingQuests)
+  setQuestDefinitionVisibilityFilter(pendingQuests.map((quest) => quest.id))
+  if (pendingQuests.length > 0) {
+    clearPendingQuests()
+  }
+  questLog = ensureQuestProgressEntries(questLog)
+}
+applyPendingQuests()
 let merchantInventory = createInitialBlacksmithInventory()
 let potionMerchantInventory = createInitialPotionInventory()
 let activeControllerRuntime:
   | ReturnType<typeof createCharacterControllerRuntime>
   | undefined
 let activeSceneRenderer: SceneRenderer | undefined
+// 라이브 퀘스트 주입 시 다시 부팅할 현재 씬. bootstrapScene이 매번 갱신한다.
+let activeSceneId: SceneId = 'town'
 let activeSceneMusic: HTMLAudioElement | undefined
 let activeSceneMusicUrl = ''
 let isSceneMusicRetryQueued = false
@@ -210,6 +234,9 @@ const bootstrapScene = async (
   if (!sceneMap) {
     throw new Error(`Unknown scene "${sceneId}"`)
   }
+
+  // 현재 씬을 기억한다 — 에디터가 퀘스트를 라이브로 주입하면 이 씬을 다시 부팅해 반영한다.
+  activeSceneId = sceneId
 
   // 에디터 프리뷰(부모 창)에 현재 맵을 알린다 — 에디터가 그 맵의 편집 가능한 요소만 보여줄 수 있게.
   // 모든 맵 전환(초기 로드·포털 이동·에디터 맵 버튼)이 이 함수를 거치므로 여기 한 곳이면 전부 커버된다.
@@ -917,6 +944,14 @@ function applyPendingLuaScript(pendingLuaScript: PendingLuaScript): void {
 // 에디터(별도 page/iframe)가 이벤트/Lua를 저장하면 같은 origin의 다른 문서에서 storage 이벤트가
 // 발생한다. 게임 프리뷰가 열려 있으면 새로고침 없이 즉시 적용한다.
 window.addEventListener('storage', (event) => {
+  // 에디터가 퀘스트를 주입하면 동적 퀘스트를 등록하고 현재 씬을 다시 부팅해 반영한다(렌더러는
+  // 부팅 시 갱신된 questLog를 받으므로 배지·추적·완료가 모두 새 퀘스트에 작동한다).
+  if (event.key === PENDING_QUESTS_STORAGE_KEY) {
+    applyPendingQuests()
+    void bootstrapScene(activeSceneId).catch(renderFatalError)
+    return
+  }
+
   if (event.key === PENDING_EVENTS_STORAGE_KEY) {
     for (const pendingEvent of loadPendingEvents()) {
       activeSceneRenderer?.applyEventDraft(pendingEvent, {
@@ -970,6 +1005,7 @@ window.addEventListener('message', (event) => {
   const sceneId = data.sceneId
 
   if (sceneId === 'town' || sceneId === 'hunting-ground' || sceneId === 'cave') {
+    questLog = recordSceneEnterQuestProgress(questLog, sceneId)
     void bootstrapScene(sceneId).catch(renderFatalError)
   }
 })

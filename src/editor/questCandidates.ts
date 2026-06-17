@@ -44,6 +44,34 @@ const normalizeCandidate = (candidate: Partial<QuestCandidate>): QuestCandidate 
   target_hint: (candidate.target_hint ?? '').trim()
 })
 
+const createQuestCandidatesSchema = (profile: GameStructureProfile): object => {
+  const targetHintEnum = ['', ...profile.npcs.map((npc) => npc.id)]
+
+  return {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      candidates: {
+        type: 'array',
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            title: { type: 'string' },
+            summary: { type: 'string' },
+            target_hint: {
+              type: 'string',
+              enum: targetHintEnum
+            }
+          },
+          required: ['title', 'summary', 'target_hint']
+        }
+      }
+    },
+    required: ['candidates']
+  }
+}
+
 export const generateQuestCandidates = async ({
   apiKey,
   userPrompt,
@@ -64,30 +92,11 @@ export const generateQuestCandidates = async ({
     instructions:
       `'${profile.game_title}' 게임에 어울리는 서로 다른 퀘스트 아이디어를 정확히 ${QUEST_CANDIDATE_COUNT}개 제안한다. ` +
       '각 후보는 전체 코드가 아니라 짧은 자연어 요약(title 1줄 + summary 2~3문장)이다. ' +
-      'target_hint는 주어진 NPC id 중 하나이거나 빈 문자열이다. ' +
+      'target_hint는 주어진 NPC id 중 하나이거나 빈 문자열이다. target_hint는 퀘스트의 대상 NPC 힌트이지 기버가 아니다. ' +
       'title/summary는 한국어로, 서로 충분히 다른 방향으로 작성한다.',
     input: `시나리오: ${userPrompt}${targetLine}${contextLine}${buildGroundingContext(profile)}${feedbackLine}`,
     schemaName: 'quest_candidates',
-    schema: {
-      type: 'object',
-      additionalProperties: false,
-      properties: {
-        candidates: {
-          type: 'array',
-          items: {
-            type: 'object',
-            additionalProperties: false,
-            properties: {
-              title: { type: 'string' },
-              summary: { type: 'string' },
-              target_hint: { type: 'string' }
-            },
-            required: ['title', 'summary', 'target_hint']
-          }
-        }
-      },
-      required: ['candidates']
-    }
+    schema: createQuestCandidatesSchema(profile)
   })
 
   // LLM이 개수를 안 지켜도(2개·0개) throw하지 않는다 — 호출부가 받은 만큼 보여주고 재생성하게 둔다.

@@ -145,24 +145,32 @@ return bridge
 
 --[[ ── applyToGame 예시 (게임 구조에 맞게 고쳐 쓰기) ──
 
+-- 퀘스트는 quest_runtime.lua가 처리한다(설치: docs/quest-runtime.lua / 계약: docs/legend-of-lua-quest-contract.md).
+local quest_runtime = require("quest_runtime")
+
 -- 맵별 엔티티 레지스트리가 { [mapId] = { [entityId] = entity } } 형태라고 가정.
 function applyToGame(message)
-  if message.kind ~= "entity_lines" then
-    return false, "지원하지 않는 종류: " .. tostring(message.kind)
+  -- 퀘스트(신규): 받은 퀘스트 데이터를 런타임에 등록한다. 실제 추적은 게임이 연결한 훅이 한다.
+  if message.kind == "quest" then
+    return quest_runtime.register(message.quest)
   end
 
-  local target = message.target
-  if not target then
-    return false, "적용 대상이 없습니다."
+  if message.kind == "entity_lines" then
+    local target = message.target
+    if not target then
+      return false, "적용 대상이 없습니다."
+    end
+
+    local mapEntities = MAP_ENTITIES[target.mapId]
+    local entity = mapEntities and mapEntities[target.id]
+    if not entity then
+      return false, ("대상을 찾지 못함: %s @ %s"):format(target.id, target.mapId)
+    end
+
+    entity.dialogue = message.lines  -- 라이브 반영
+    return true
   end
 
-  local mapEntities = MAP_ENTITIES[target.mapId]
-  local entity = mapEntities and mapEntities[target.id]
-  if not entity then
-    return false, ("대상을 찾지 못함: %s @ %s"):format(target.id, target.mapId)
-  end
-
-  entity.dialogue = message.lines  -- 라이브 반영
-  return true
+  return false, "지원하지 않는 종류: " .. tostring(message.kind)
 end
 --]]

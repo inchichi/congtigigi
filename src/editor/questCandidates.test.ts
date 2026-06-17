@@ -42,6 +42,19 @@ describe('generateQuestCandidates', () => {
 
     const args = mockGenerateJson.mock.calls[0][0]
     expect(args.schemaName).toBe('quest_candidates')
+    expect(
+      (args.schema as {
+        properties?: {
+          candidates?: {
+            items?: {
+              properties?: {
+                target_hint?: { enum?: string[] }
+              }
+            }
+          }
+        }
+      }).properties?.candidates?.items?.properties?.target_hint?.enum
+    ).toEqual(['', ...profile.npcs.map((npc) => npc.id)])
     // 접지: profile의 실재 NPC/아이템 id가 프롬프트 입력에 들어가야 한다.
     expect(args.input).toContain('blacksmith')
     expect(args.input).toContain('health-potion')

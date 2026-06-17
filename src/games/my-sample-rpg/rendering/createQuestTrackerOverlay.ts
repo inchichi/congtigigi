@@ -4,6 +4,7 @@ import {
   type QuestLogState
 } from '../questLog'
 import { getResponsiveUiScale } from './getResponsiveUiScale'
+import { createQuestTargetLink } from './questObjectiveTargetView'
 
 type CreateQuestTrackerOverlayInput = {
   mountElement: HTMLElement
@@ -84,7 +85,14 @@ export const createQuestTrackerOverlay = ({
         const objective = document.createElement('div')
 
         objective.className = 'quest-tracker-overlay__objective'
-        objective.textContent = item.text
+        objective.append(document.createTextNode(item.text))
+        // 활성 목표의 대상(몬스터/아이템)을 파란 밑줄 링크로 — 클릭 시 이미지 팝업.
+        const targetLink = item.objective
+          ? createQuestTargetLink(item.objective)
+          : undefined
+        if (targetLink) {
+          objective.append(document.createTextNode(' '), targetLink)
+        }
         return objective
       })
     )
