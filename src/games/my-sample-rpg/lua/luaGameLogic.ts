@@ -58,8 +58,16 @@ import {
   createPlayerProgressionLua,
   type PlayerProgressionLua
 } from './playerProgressionLua'
+import {
+  createPlayerEquipmentLua,
+  type PlayerEquipmentLua
+} from './playerEquipmentLua'
+import {
+  createPlayerPotionShopLua,
+  type PlayerPotionShopLua
+} from './playerPotionShopLua'
 
-// 위 4개 모듈의 TS 폴백 + 게임 호출부 시그니처용 타입.
+// 위 모듈들의 TS 폴백 + 게임 호출부 시그니처용 타입.
 import {
   getPlayerPhysicalAttackPower as tsGetPlayerPhysicalAttackPower,
   getPlayerMovementSpeedTilesPerSecond as tsGetPlayerMovementSpeedTilesPerSecond,
@@ -96,12 +104,41 @@ import {
   getPlayerMaxManaBySkillUserLevel as tsGetPlayerMaxManaBySkillUserLevel,
   getPlayerMaxManaForProfile as tsGetPlayerMaxManaForProfile
 } from '../playerProgression'
+import {
+  createInitialPlayerEquipment as tsCreateInitialPlayerEquipment,
+  getPlayerEquipmentSlotLabelById as tsGetPlayerEquipmentSlotLabelById,
+  createPlayerEquipmentItemFromDefinition as tsCreatePlayerEquipmentItemFromDefinition,
+  getPlayerEquipmentItemDefinitionById as tsGetPlayerEquipmentItemDefinitionById,
+  getPlayerEquipmentItemDefinitionBySlotId as tsGetPlayerEquipmentItemDefinitionBySlotId,
+  getPlayerEquipmentSlotById as tsGetPlayerEquipmentSlotById,
+  findPlayerEquipmentSlotIndexById as tsFindPlayerEquipmentSlotIndexById,
+  setPlayerEquipmentSlot as tsSetPlayerEquipmentSlot,
+  clearPlayerEquipmentSlot as tsClearPlayerEquipmentSlot,
+  type PlayerEquipment,
+  type PlayerEquipmentItem,
+  type PlayerEquipmentItemDefinition,
+  type PlayerEquipmentSlot,
+  type PlayerEquipmentSlotId
+} from '../playerEquipment'
+import {
+  createInitialPotionInventory as tsCreateInitialPotionInventory,
+  getPotionShopItemDefinitionById as tsGetPotionShopItemDefinitionById,
+  getPotionShopBuyPriceById as tsGetPotionShopBuyPriceById,
+  getPotionShopSellPriceById as tsGetPotionShopSellPriceById,
+  buyPotionShopItem as tsBuyPotionShopItem,
+  sellPotionShopItem as tsSellPotionShopItem,
+  type PotionShopInventory,
+  type PotionShopItemDefinition,
+  type PotionShopTransactionResult
+} from '../potionShop'
 
 let host: LuaLogicHost | undefined
 let statEffects: PlayerStatEffectsLua | undefined
 let inventory: PlayerInventoryLua | undefined
 let profile: PlayerProfileLua | undefined
 let progression: PlayerProgressionLua | undefined
+let equipmentLua: PlayerEquipmentLua | undefined
+let potionShop: PlayerPotionShopLua | undefined
 
 // 부팅 시 1회 호출 — Lua VM을 띄우고 변환된 모듈들을 모두 로드한다. 이후 아래 함수들이 Lua를 쓴다.
 export const initLuaGameLogic = async (
@@ -121,6 +158,9 @@ export const initLuaGameLogic = async (
   inventory = await createPlayerInventoryLua({ host: next })
   profile = await createPlayerProfileLua({ host: next })
   progression = await createPlayerProgressionLua({ host: next })
+  equipmentLua = await createPlayerEquipmentLua({ host: next })
+  // potionShop 은 인벤토리 전역(inventory_*)에 의존하므로 inventory 로드 이후에 만든다.
+  potionShop = await createPlayerPotionShopLua({ host: next })
 }
 
 export const isLuaGameLogicReady = (): boolean => host !== undefined
@@ -137,6 +177,10 @@ export const closeLuaGameLogic = (): void => {
   profile = undefined
   progression?.close()
   progression = undefined
+  equipmentLua?.close()
+  equipmentLua = undefined
+  potionShop?.close()
+  potionShop = undefined
 }
 
 // ── monsterRewards ──
@@ -408,3 +452,120 @@ export const getPlayerMaxManaForProfile = (
   progression
     ? progression.getPlayerMaxManaForProfile(playerProfile)
     : tsGetPlayerMaxManaForProfile(playerProfile)
+
+// ── playerEquipment ──
+export const createInitialPlayerEquipment = (): PlayerEquipment =>
+  equipmentLua
+    ? equipmentLua.createInitialPlayerEquipment()
+    : tsCreateInitialPlayerEquipment()
+
+export const getPlayerEquipmentSlotLabelById = (
+  slotId: PlayerEquipmentSlotId
+): string =>
+  equipmentLua
+    ? equipmentLua.getPlayerEquipmentSlotLabelById(slotId)
+    : tsGetPlayerEquipmentSlotLabelById(slotId)
+
+export const createPlayerEquipmentItemFromDefinition = (
+  definition: PlayerEquipmentItemDefinition
+): PlayerEquipmentItem =>
+  equipmentLua
+    ? equipmentLua.createPlayerEquipmentItemFromDefinition(definition)
+    : tsCreatePlayerEquipmentItemFromDefinition(definition)
+
+export const getPlayerEquipmentItemDefinitionById = (
+  itemId: string
+): PlayerEquipmentItemDefinition | undefined =>
+  equipmentLua
+    ? equipmentLua.getPlayerEquipmentItemDefinitionById(itemId)
+    : tsGetPlayerEquipmentItemDefinitionById(itemId)
+
+export const getPlayerEquipmentItemDefinitionBySlotId = (
+  slotId: PlayerEquipmentSlotId
+): PlayerEquipmentItemDefinition | undefined =>
+  equipmentLua
+    ? equipmentLua.getPlayerEquipmentItemDefinitionBySlotId(slotId)
+    : tsGetPlayerEquipmentItemDefinitionBySlotId(slotId)
+
+export const getPlayerEquipmentSlotById = (
+  equipment: PlayerEquipment,
+  slotId: PlayerEquipmentSlotId
+): PlayerEquipmentSlot | undefined =>
+  equipmentLua
+    ? equipmentLua.getPlayerEquipmentSlotById(equipment, slotId)
+    : tsGetPlayerEquipmentSlotById(equipment, slotId)
+
+export const findPlayerEquipmentSlotIndexById = (
+  equipment: PlayerEquipment,
+  slotId: PlayerEquipmentSlotId
+): number =>
+  equipmentLua
+    ? equipmentLua.findPlayerEquipmentSlotIndexById(equipment, slotId)
+    : tsFindPlayerEquipmentSlotIndexById(equipment, slotId)
+
+export const setPlayerEquipmentSlot = (input: {
+  equipment: PlayerEquipment
+  slotId: PlayerEquipmentSlotId
+  item: PlayerEquipmentItem
+}): PlayerEquipment =>
+  equipmentLua
+    ? equipmentLua.setPlayerEquipmentSlot(input)
+    : tsSetPlayerEquipmentSlot(input)
+
+export const clearPlayerEquipmentSlot = (input: {
+  equipment: PlayerEquipment
+  slotId: PlayerEquipmentSlotId
+}): PlayerEquipment =>
+  equipmentLua
+    ? equipmentLua.clearPlayerEquipmentSlot(input)
+    : tsClearPlayerEquipmentSlot(input)
+
+// ── potionShop (포션 상점 — 인벤토리 전역에 의존, 같은 호스트 공유) ──
+export const createInitialPotionInventory = (input?: {
+  slotCount?: number
+  gold?: number
+}): PotionShopInventory =>
+  potionShop
+    ? potionShop.createInitialPotionInventory(input)
+    : tsCreateInitialPotionInventory(input)
+
+export const getPotionShopItemDefinitionById = (
+  itemId: string
+): PotionShopItemDefinition | undefined =>
+  potionShop
+    ? potionShop.getPotionShopItemDefinitionById(itemId)
+    : tsGetPotionShopItemDefinitionById(itemId)
+
+export const getPotionShopBuyPriceById = (
+  itemId: string
+): number | undefined =>
+  potionShop
+    ? potionShop.getPotionShopBuyPriceById(itemId)
+    : tsGetPotionShopBuyPriceById(itemId)
+
+export const getPotionShopSellPriceById = (
+  itemId: string
+): number | undefined =>
+  potionShop
+    ? potionShop.getPotionShopSellPriceById(itemId)
+    : tsGetPotionShopSellPriceById(itemId)
+
+export const buyPotionShopItem = (input: {
+  playerInventory: PlayerInventory
+  merchantInventory: PlayerInventory
+  merchantSlotIndex: number
+  quantity?: number
+}): PotionShopTransactionResult =>
+  potionShop
+    ? potionShop.buyPotionShopItem(input)
+    : tsBuyPotionShopItem(input)
+
+export const sellPotionShopItem = (input: {
+  playerInventory: PlayerInventory
+  merchantInventory: PlayerInventory
+  playerSlotIndex: number
+  quantity?: number
+}): PotionShopTransactionResult =>
+  potionShop
+    ? potionShop.sellPotionShopItem(input)
+    : tsSellPotionShopItem(input)

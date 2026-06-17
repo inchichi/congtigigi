@@ -29,6 +29,18 @@ import {
   grantPlayerLevelUpRewards as tsLevelUp,
   getPlayerMaxManaForProfile as tsMaxMana
 } from '../playerProgression'
+import {
+  createInitialPlayerEquipment as tsCreateEquip,
+  getPlayerEquipmentItemDefinitionById as tsEquipDefById
+} from '../playerEquipment'
+import {
+  createInitialPotionInventory as tsCreatePotionInv,
+  getPotionShopItemDefinitionById as tsPotionDefById,
+  getPotionShopBuyPriceById as tsPotionBuy,
+  getPotionShopSellPriceById as tsPotionSell,
+  buyPotionShopItem as tsBuyPotion,
+  sellPotionShopItem as tsSellPotion
+} from '../potionShop'
 
 import {
   initLuaGameLogic,
@@ -49,7 +61,15 @@ import {
   getPlayerJobDisplayName,
   getPlayerJobPrimaryStatId,
   grantPlayerLevelUpRewards,
-  getPlayerMaxManaForProfile
+  getPlayerMaxManaForProfile,
+  createInitialPlayerEquipment,
+  getPlayerEquipmentItemDefinitionById,
+  createInitialPotionInventory,
+  getPotionShopItemDefinitionById,
+  getPotionShopBuyPriceById,
+  getPotionShopSellPriceById,
+  buyPotionShopItem,
+  sellPotionShopItem
 } from './luaGameLogic'
 
 // 단일 호스트 퍼사드(게임이 실제로 쓰는 경로)가 모든 함수에서 TS와 동등한지 실제 WASM으로 검증.
@@ -137,6 +157,42 @@ describe('luaGameLogic facade (real wasm)', () => {
       )
       expect(getPlayerJobPrimaryStatId(job)).toBe(tsPrimaryStat(job))
     }
+
+    // playerEquipment 위임도 TS와 동등해야 한다(set/clear 등 상세는 per-module 스펙이 검증).
+    expect(createInitialPlayerEquipment()).toEqual(tsCreateEquip())
+    expect(getPlayerEquipmentItemDefinitionById('iron-sword')).toEqual(
+      tsEquipDefById('iron-sword')
+    )
+    expect(getPlayerEquipmentItemDefinitionById('does-not-exist')).toBeUndefined()
+
+    // playerPotionShop 위임도 TS와 동등해야 한다(정의/가격 + 구매·판매 트랜잭션, 장비 매입가 폴백 포함).
+    expect(createInitialPotionInventory()).toEqual(tsCreatePotionInv())
+    expect(createInitialPotionInventory({ slotCount: 4 })).toEqual(
+      tsCreatePotionInv({ slotCount: 4 })
+    )
+    for (const id of ['health-potion', 'mana-potion', 'iron-sword', 'does-not-exist']) {
+      expect(getPotionShopItemDefinitionById(id)).toEqual(tsPotionDefById(id))
+      expect(getPotionShopBuyPriceById(id)).toBe(tsPotionBuy(id))
+      expect(getPotionShopSellPriceById(id)).toBe(tsPotionSell(id))
+    }
+    const buyMerchant = tsCreatePotionInv()
+    const buyPlayer = tsCreateInv()
+    const buyInput = {
+      playerInventory: buyPlayer,
+      merchantInventory: buyMerchant,
+      merchantSlotIndex: 0,
+      quantity: 2
+    }
+    expect(buyPotionShopItem(buyInput)).toEqual(tsBuyPotion(buyInput))
+    const sellPlayer = tsCreatePotionInv()
+    const sellMerchant = tsCreatePotionInv()
+    const sellInput = {
+      playerInventory: sellPlayer,
+      merchantInventory: sellMerchant,
+      playerSlotIndex: 0,
+      quantity: 1
+    }
+    expect(sellPotionShopItem(sellInput)).toEqual(tsSellPotion(sellInput))
   })
 
   it('falls back to TS before init', () => {

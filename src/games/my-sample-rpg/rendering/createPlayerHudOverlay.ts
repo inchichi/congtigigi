@@ -4,9 +4,9 @@ import {
 } from '../playerProfile'
 import {
   getPlayerExperienceToNextLevel,
-  getPlayerJobDisplayName
+  getPlayerJobDisplayName,
+  getPlayerEquipmentItemDefinitionById
 } from '../lua/luaGameLogic'
-import { getPlayerEquipmentItemDefinitionById } from '../playerEquipment'
 import type { PlayerInventory } from '../playerInventory'
 import {
   clearPlayerQuickslotAssignment,

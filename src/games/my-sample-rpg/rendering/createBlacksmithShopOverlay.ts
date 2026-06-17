@@ -1,10 +1,7 @@
 import {
-  getPlayerEquipmentItemDefinitionById,
-  getPlayerEquipmentSlotLabelById,
   type PlayerEquipmentIconKey,
   type PlayerEquipmentSlotId
 } from '../playerEquipment'
-import { getPotionShopItemDefinitionById } from '../potionShop'
 import {
   buyBlacksmithShopItem,
   getBlacksmithShopBuyPriceById,
@@ -13,7 +10,10 @@ import {
 } from '../blacksmithShop'
 import {
   findFirstEmptyPlayerInventorySlotIndex,
-  getPlayerInventoryFilledSlotCount
+  getPlayerInventoryFilledSlotCount,
+  getPlayerEquipmentItemDefinitionById,
+  getPlayerEquipmentSlotLabelById,
+  getPotionShopItemDefinitionById
 } from '../lua/luaGameLogic'
 import type { PlayerInventory } from '../playerInventory'
 

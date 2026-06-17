@@ -3,15 +3,15 @@ import type {
   PlayerEquipmentIconKey,
   PlayerEquipmentSlotId
 } from '../playerEquipment'
-import {
-  getPlayerEquipmentItemDefinitionById,
-  getPlayerEquipmentSlotLabelById
-} from '../playerEquipment'
 import { PLAYER_CHARACTER_APPEARANCE_TYPE } from '../characterState'
 import type { PlayerInventory } from '../playerInventory'
 import type { PlayerProfile } from '../playerProfile'
 import { PLAYER_MAX_LEVEL } from '../playerProfile'
-import { getPlayerJobDisplayName } from '../lua/luaGameLogic'
+import {
+  getPlayerJobDisplayName,
+  getPlayerEquipmentItemDefinitionById,
+  getPlayerEquipmentSlotLabelById
+} from '../lua/luaGameLogic'
 import {
   equipPlayerInventorySlot,
   unequipPlayerEquipmentSlot

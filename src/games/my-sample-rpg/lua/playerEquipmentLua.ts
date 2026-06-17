@@ -19,7 +19,8 @@ import {
 
 import {
   createLuaLogicHost,
-  type CreateLuaLogicHostInput
+  type CreateLuaLogicHostInput,
+  type LuaLogicHost
 } from './luaLogicHost'
 
 // Lua는 빈 슬롯의 item 을 null 로 반환 → TS PlayerEquipmentSlot 의 undefined 로 정규화.
@@ -71,9 +72,9 @@ export type PlayerEquipmentLua = {
 }
 
 export const createPlayerEquipmentLua = async (
-  input: CreateLuaLogicHostInput = {}
+  input: CreateLuaLogicHostInput & { host?: LuaLogicHost } = {}
 ): Promise<PlayerEquipmentLua> => {
-  const host = await createLuaLogicHost(input)
+  const host = input.host ?? (await createLuaLogicHost(input))
   host.runModule(playerEquipmentSource, '@player-equipment.lua')
 
   return {
@@ -156,7 +157,9 @@ export const createPlayerEquipmentLua = async (
         host.callJson<RawEquipment>('equipment_clear_slot', equipment, slotId)
       ),
     close: (): void => {
-      host.close()
+      if (!input.host) {
+        host.close()
+      }
     }
   }
 }

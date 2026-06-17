@@ -3,10 +3,10 @@ import type {
   PlayerEquipmentIconKey
 } from '../playerEquipment'
 import {
+  getPlayerInventoryFilledSlotCount,
   getPlayerEquipmentItemDefinitionById,
   getPlayerEquipmentSlotLabelById
-} from '../playerEquipment'
-import { getPlayerInventoryFilledSlotCount } from '../lua/luaGameLogic'
+} from '../lua/luaGameLogic'
 import type { PlayerInventory } from '../playerInventory'
 import type { PlayerProfile } from '../playerProfile'
 import {

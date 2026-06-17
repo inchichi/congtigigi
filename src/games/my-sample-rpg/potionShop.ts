@@ -35,18 +35,18 @@ type SellPotionShopItemInput = {
   quantity?: number
 }
 
-type PotionShopItemDefinition = {
+export type PotionShopItemDefinition = {
   id: 'health-potion' | 'mana-potion'
   label: string
   description: string
   price: number
 }
 
-const DEFAULT_POTION_INVENTORY_SLOT_COUNT = 12
-const DEFAULT_POTION_INVENTORY_GOLD = 1_000_000_000_000_000
-const POTION_SALE_RATIO = 0.5
-const DEFAULT_POTION_STOCK_QUANTITY = 999_999
-const POTION_ITEM_DEFINITIONS: PotionShopItemDefinition[] = [
+export const DEFAULT_POTION_INVENTORY_SLOT_COUNT = 12
+export const DEFAULT_POTION_INVENTORY_GOLD = 1_000_000_000_000_000
+export const POTION_SALE_RATIO = 0.5
+export const DEFAULT_POTION_STOCK_QUANTITY = 999_999
+export const POTION_ITEM_DEFINITIONS: PotionShopItemDefinition[] = [
   {
     id: 'health-potion',
     label: '체력 회복 포션',

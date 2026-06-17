@@ -21,12 +21,14 @@ import {
 } from './characterState'
 import { createCharacterControllerRuntime } from './createCharacterControllerRuntime'
 import { createInitialBlacksmithInventory } from './blacksmithShop'
-import { createInitialPotionInventory } from './potionShop'
 import { createLuaCharacterControllerRuntime } from './lua/createLuaCharacterControllerRuntime'
-import { initLuaGameLogic } from './lua/luaGameLogic'
+import {
+  initLuaGameLogic,
+  createInitialPlayerEquipment,
+  createInitialPotionInventory
+} from './lua/luaGameLogic'
 import { createNpcCharactersFromEventLayers } from './tiled/createNpcCharactersFromEventLayers'
 import { parseTiledMap, parseTiledTileset } from './tiled/parseTiledMap'
-import { createInitialPlayerEquipment } from './playerEquipment'
 import { createInitialPlayerInventory } from './playerInventory'
 import { createInitialPlayerProfile } from './playerProfile'
 import { createInitialPlayerQuickslots } from './playerQuickslots'

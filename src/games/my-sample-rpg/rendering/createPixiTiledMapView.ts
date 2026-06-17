@@ -50,7 +50,6 @@ import type { EventReward, HolidayDialogueEventSpec } from '../eventGeneration'
 import { processInteractionEvents } from '../interaction/processInteractionEvents'
 import { usePlayerQuickslotConsumable } from '../playerConsumables'
 import {
-  getPlayerEquipmentItemDefinitionById,
   type PlayerEquipment,
   type PlayerEquipmentSlotId
 } from '../playerEquipment'
@@ -142,7 +141,8 @@ import {
   getPlayerMovementSpeedTilesPerSecond,
   getPlayerPhysicalAttackPower,
   shouldPlayerEvadeDamage,
-  grantPlayerSkillPoints
+  grantPlayerSkillPoints,
+  getPlayerEquipmentItemDefinitionById
 } from '../lua/luaGameLogic'
 import { resolveCharacterInteractionTarget } from '../interaction/resolveCharacterInteractionTarget'
 import {
