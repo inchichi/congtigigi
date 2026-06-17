@@ -77,6 +77,9 @@ const createLuaNpcSystemPrompt = (catalog: LuaQuestCatalog): string =>
     'position is in tile coordinates; keep it small and sensible (e.g. near the map center).',
     'behavior.type is "wander" (radius > 0, roams near its home) or "stationary" (radius 0).',
     'dialogue_lines are short interaction lines the NPC says when talked to (1 to 4 lines).',
+    // 게임 내 비트맵 폰트가 영문만 렌더한다 — 한글 대사는 글자가 깨진다. 사용자 프롬프트가 한국어여도
+    // 화면에 표시되는 텍스트(이름·대사)는 반드시 영어로 쓰게 한다(gameAdapter의 entity_lines와 동일 제약).
+    'The in-game font renders English (ASCII) only. Write name and dialogue_lines in English even if the user prompt is in Korean — Korean text shows as broken glyphs in-game.',
     `Allowed appearance ids: ${LUA_NPC_APPEARANCES.join(', ')}`,
     `Allowed map ids: ${uniqueStrings(catalog.scenes).join(', ') || '(none)'}`,
     'Return JSON only. The editor renders the Lua module and validates after generation.',

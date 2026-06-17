@@ -182,6 +182,8 @@ const createLuaQuestSystemPrompt = (
     `Scene ids for reach: ${sceneIds.join(', ') || '(none)'}`,
     'Use 1 to 3 objectives only.',
     'Reward items use free-form labels, not ids.',
+    // 게임 내 비트맵 폰트가 영문만 렌더한다 — 한글은 깨진다. 화면에 뜨는 모든 텍스트를 영어로 쓰게 한다.
+    'The in-game font renders English (ASCII) only. Write all in-game text — title, request_text, guide_text, every dialogue line, objective labels, and reward labels — in English even if the user prompt is in Korean. Korean text shows as broken glyphs in-game.',
     ...(selectedNpcLine ? [selectedNpcLine] : []),
     buildLuaQuestCatalogText(catalog)
   ].join('\n')
