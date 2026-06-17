@@ -57,6 +57,9 @@ export type BridgeQuestMessage = {
   id: string
   kind: 'quest'
   quest: BridgeQuestData
+  // 게임 quest-runtime이 loadstring으로 바로 로드할 한 줄 Lua 테이블 리터럴(host page 다리가 'quest:'로 전달).
+  // NPC의 spawn_npc.lua와 같은 방식 — 구조화 quest와 같은 내용을 게임이 읽을 수 있는 Lua로 직렬화한 것.
+  lua: string
   generatedAt: number
 }
 

@@ -94,15 +94,56 @@ export const renderGeneratedLuaQuestModule = (
   return lines.join('\n')
 }
 
+// 브리지 quest 데이터를 게임 quest-runtime이 loadstring할 수 있는 Lua 테이블 리터럴로 직렬화한다.
+// editorInbox가 'quest:' 명령으로 받아 `loadstring("return " .. arg)`로 로드 → questRuntime:register.
+// (NPC의 spawn_npc.lua와 같은 역할. 출력 "언어"가 Lua라는 점만 다르고 데이터는 동일하다.)
+const renderLuaQuestBridgeTable = (quest: BridgeQuestMessage['quest']): string => {
+  const objectives = quest.objectives
+    .map((objective) => {
+      const targetParts: string[] = []
+      if (objective.target.entityId) {
+        targetParts.push(`entityId = ${luaString(objective.target.entityId)}`)
+      }
+      if (objective.target.mapId) {
+        targetParts.push(`mapId = ${luaString(objective.target.mapId)}`)
+      }
+      return (
+        `{ type = ${luaString(objective.type)}, label = ${luaString(objective.label)}, ` +
+        `required = ${objective.required}, target = { ${targetParts.join(', ')} } }`
+      )
+    })
+    .join(', ')
+
+  const items = quest.rewards.items
+    .map((item) => `{ label = ${luaString(item.label)}, quantity = ${item.quantity} }`)
+    .join(', ')
+
+  const inline = (values: string[]): string =>
+    `{ ${values.map((value) => luaString(value)).join(', ')} }`
+
+  return (
+    '{ ' +
+    `quest_id = ${luaString(quest.quest_id)}, ` +
+    `title = ${luaString(quest.title)}, ` +
+    `giver_entity_id = ${luaString(quest.giver_entity_id)}, ` +
+    `request_text = ${luaString(quest.request_text)}, ` +
+    `guide_text = ${luaString(quest.guide_text)}, ` +
+    `dialogue = { start = ${inline(quest.dialogue.start)}, ` +
+    `active = ${inline(quest.dialogue.active)}, ` +
+    `complete = ${inline(quest.dialogue.complete)} }, ` +
+    `objectives = { ${objectives} }, ` +
+    `rewards = { gold = ${quest.rewards.gold}, experience = ${quest.rewards.experience}, ` +
+    `items = { ${items} } }` +
+    ' }'
+  )
+}
+
 // 라이브 적용용 브리지 페이로드(kind:'quest'). 실행 중인 게임의 quest-runtime이 이 데이터를
-// 받아 퀘스트를 등록·추적한다. Lua 코드 문자열과 같은 내용을 구조화 데이터로 보낸다.
+// 받아 퀘스트를 등록·추적한다. Lua 코드 문자열(lua)과 같은 내용을 구조화 데이터(quest)로도 보낸다.
 export const convertLuaQuestToBridgePayload = (
   quest: GeneratedLuaQuestJson
-): BridgeQuestMessage => ({
-  id: `quest-${quest.quest_id}-${Date.now()}`,
-  kind: 'quest',
-  generatedAt: Date.now(),
-  quest: {
+): BridgeQuestMessage => {
+  const questData: BridgeQuestMessage['quest'] = {
     quest_id: quest.quest_id,
     title: quest.title,
     giver_entity_id: quest.giver_npc_entity_id,
@@ -133,4 +174,12 @@ export const convertLuaQuestToBridgePayload = (
       }))
     }
   }
-})
+
+  return {
+    id: `quest-${quest.quest_id}-${Date.now()}`,
+    kind: 'quest',
+    generatedAt: Date.now(),
+    quest: questData,
+    lua: renderLuaQuestBridgeTable(questData)
+  }
+}
