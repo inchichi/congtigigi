@@ -37,9 +37,9 @@ type SellBlacksmithShopItemInput = {
   playerSlotIndex: number
 }
 
-const DEFAULT_BLACKSMITH_INVENTORY_GOLD = 1_000_000_000_000_000
-const BLACKSMITH_SALE_RATIO = 0.5
-const BLACKSMITH_INITIAL_STOCK_ITEM_IDS = [
+export const DEFAULT_BLACKSMITH_INVENTORY_GOLD = 1_000_000_000_000_000
+export const BLACKSMITH_SALE_RATIO = 0.5
+export const BLACKSMITH_INITIAL_STOCK_ITEM_IDS = [
   'basic-sword',
   'basic-armor',
   'basic-boots',
@@ -61,7 +61,7 @@ const BLACKSMITH_INITIAL_STOCK_ITEM_IDS = [
   'leather-boots',
   'smith-charm'
 ] as const
-const DEFAULT_BLACKSMITH_INVENTORY_SLOT_COUNT =
+export const DEFAULT_BLACKSMITH_INVENTORY_SLOT_COUNT =
   BLACKSMITH_INITIAL_STOCK_ITEM_IDS.length
 
 export const createInitialBlacksmithInventory = ({

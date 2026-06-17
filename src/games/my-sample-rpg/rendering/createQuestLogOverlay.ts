@@ -1,4 +1,9 @@
 import {
+  type QuestDefinition,
+  type QuestLogState,
+  type QuestProgress
+} from '../questLog'
+import {
   BLACKSMITH_NPC_ID,
   POTION_MERCHANT_NPC_ID,
   QUEST_DEFINITIONS,
@@ -7,11 +12,8 @@ import {
   formatQuestText,
   getQuestDefinition,
   getQuestProgress,
-  setQuestTrackerVisible,
-  type QuestDefinition,
-  type QuestLogState,
-  type QuestProgress
-} from '../questLog'
+  setQuestTrackerVisible
+} from '../lua/luaGameLogic'
 import { getResponsiveUiScale } from './getResponsiveUiScale'
 
 type CreateQuestLogOverlayInput = {

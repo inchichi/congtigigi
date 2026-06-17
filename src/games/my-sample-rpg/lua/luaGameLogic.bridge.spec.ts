@@ -41,6 +41,24 @@ import {
   buyPotionShopItem as tsBuyPotion,
   sellPotionShopItem as tsSellPotion
 } from '../potionShop'
+import {
+  createInitialPlayerQuickslots as tsCreateQuickslots,
+  getPlayerQuickslotAssignment as tsGetQuickslotAssignment
+} from '../playerQuickslots'
+import { createInitialPlayerSkillSlots as tsCreateSkillSlots } from '../playerSkillSlots'
+import {
+  isPlayerSkillUnlockedInProfile as tsIsSkillUnlocked,
+  getPlayerSkillManaCostById as tsSkillManaCost
+} from '../playerSkills'
+import { usePlayerInventoryConsumable as tsUseConsumable } from '../playerConsumables'
+import { equipPlayerInventorySlot as tsEquipInventorySlot } from '../playerLoadout'
+import { getBlacksmithShopBuyPriceById as tsBlacksmithBuy } from '../blacksmithShop'
+import {
+  createInitialQuestLog as tsCreateQuestLog,
+  recordMonsterDefeatQuestProgress as tsRecordMonsterDefeat,
+  startQuest as tsStartQuest,
+  FIRST_SLIME_HUNT_QUEST_ID
+} from '../questLog'
 
 import {
   initLuaGameLogic,
@@ -69,7 +87,17 @@ import {
   getPotionShopBuyPriceById,
   getPotionShopSellPriceById,
   buyPotionShopItem,
-  sellPotionShopItem
+  sellPotionShopItem,
+  createInitialPlayerQuickslots,
+  getPlayerQuickslotAssignment,
+  createInitialPlayerSkillSlots,
+  isPlayerSkillUnlockedInProfile,
+  getPlayerSkillManaCostById,
+  usePlayerInventoryConsumable,
+  equipPlayerInventorySlot,
+  getBlacksmithShopBuyPriceById,
+  createInitialQuestLog,
+  recordMonsterDefeatQuestProgress
 } from './luaGameLogic'
 
 // 단일 호스트 퍼사드(게임이 실제로 쓰는 경로)가 모든 함수에서 TS와 동등한지 실제 WASM으로 검증.
@@ -193,6 +221,65 @@ describe('luaGameLogic facade (real wasm)', () => {
       quantity: 1
     }
     expect(sellPotionShopItem(sellInput)).toEqual(tsSellPotion(sellInput))
+
+    // ── 신규 7개 모듈 스팟 체크 ──
+
+    // playerQuickslots
+    expect(createInitialPlayerQuickslots()).toEqual(tsCreateQuickslots())
+    const qs = tsCreateQuickslots()
+    expect(getPlayerQuickslotAssignment(qs, 0)).toBe(
+      tsGetQuickslotAssignment(qs, 0)
+    )
+
+    // playerSkillSlots
+    expect(createInitialPlayerSkillSlots()).toEqual(tsCreateSkillSlots())
+
+    // playerSkills
+    expect(isPlayerSkillUnlockedInProfile(profile, 'smash')).toBe(
+      tsIsSkillUnlocked(profile, 'smash')
+    )
+    expect(getPlayerSkillManaCostById(profile, 'smash')).toBe(
+      tsSkillManaCost(profile, 'smash')
+    )
+
+    // playerConsumables — 체력 회복 포션 사용 (슬롯에 아이템이 없으면 undefined)
+    const consumableInv = tsCreateInv()
+    const consumableInput = { profile, inventory: consumableInv, slotIndex: 0 }
+    expect(usePlayerInventoryConsumable(consumableInput)).toEqual(
+      tsUseConsumable(consumableInput)
+    )
+
+    // playerLoadout — iron-sword 장착 시도 (인벤토리가 비어있으면 undefined)
+    const loadoutEquip = tsCreateEquip()
+    const loadoutInv = tsCreateInv()
+    const loadoutInput = { equipment: loadoutEquip, inventory: loadoutInv, slotIndex: 0 }
+    expect(equipPlayerInventorySlot(loadoutInput)).toEqual(
+      tsEquipInventorySlot(loadoutInput)
+    )
+
+    // blacksmithShop
+    expect(getBlacksmithShopBuyPriceById('iron-sword')).toBe(
+      tsBlacksmithBuy('iron-sword')
+    )
+    expect(getBlacksmithShopBuyPriceById('does-not-exist')).toBe(
+      tsBlacksmithBuy('does-not-exist')
+    )
+
+    // questLog
+    expect(createInitialQuestLog()).toEqual(tsCreateQuestLog())
+    const questLog = tsCreateQuestLog()
+    const startedQuestLog = tsStartQuest(questLog, FIRST_SLIME_HUNT_QUEST_ID)
+    expect(
+      recordMonsterDefeatQuestProgress(startedQuestLog, {
+        sceneId: 'hunting-ground',
+        appearanceType: 'monster_slime'
+      })
+    ).toEqual(
+      tsRecordMonsterDefeat(startedQuestLog, {
+        sceneId: 'hunting-ground',
+        appearanceType: 'monster_slime'
+      })
+    )
   })
 
   it('falls back to TS before init', () => {

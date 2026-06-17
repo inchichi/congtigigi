@@ -66,6 +66,34 @@ import {
   createPlayerPotionShopLua,
   type PlayerPotionShopLua
 } from './playerPotionShopLua'
+import {
+  createPlayerQuickslotsLua,
+  type PlayerQuickslotsLua
+} from './playerQuickslotsLua'
+import {
+  createPlayerSkillSlotsLua,
+  type PlayerSkillSlotsLua
+} from './playerSkillSlotsLua'
+import {
+  createPlayerSkillsLua,
+  type PlayerSkillsLua
+} from './playerSkillsLua'
+import {
+  createPlayerConsumablesLua,
+  type PlayerConsumablesLua
+} from './playerConsumablesLua'
+import {
+  createPlayerLoadoutLua,
+  type PlayerLoadoutLua
+} from './playerLoadoutLua'
+import {
+  createBlacksmithShopLua,
+  type BlacksmithShopLua
+} from './blacksmithShopLua'
+import {
+  createQuestLogLua,
+  type QuestLogLua
+} from './questLogLua'
 
 // 위 모듈들의 TS 폴백 + 게임 호출부 시그니처용 타입.
 import {
@@ -131,6 +159,84 @@ import {
   type PotionShopItemDefinition,
   type PotionShopTransactionResult
 } from '../potionShop'
+import {
+  createInitialPlayerQuickslots as tsCreateInitialPlayerQuickslots,
+  setPlayerQuickslotAssignment as tsSetPlayerQuickslotAssignment,
+  clearPlayerQuickslotAssignment as tsClearPlayerQuickslotAssignment,
+  findPlayerQuickslotIndexByInventorySlotIndex as tsFindPlayerQuickslotIndexByInventorySlotIndex,
+  getPlayerQuickslotAssignment as tsGetPlayerQuickslotAssignment,
+  type PlayerQuickslots,
+  type PlayerQuickslotAssignment
+} from '../playerQuickslots'
+import {
+  createInitialPlayerSkillSlots as tsCreateInitialPlayerSkillSlots,
+  setPlayerSkillSlotAssignment as tsSetPlayerSkillSlotAssignment,
+  clearPlayerSkillSlotAssignment as tsClearPlayerSkillSlotAssignment,
+  findPlayerSkillSlotIndexBySkillId as tsFindPlayerSkillSlotIndexBySkillId,
+  getPlayerSkillSlotAssignment as tsGetPlayerSkillSlotAssignment,
+  getPlayerSkillSlotIndexFromCode as tsGetPlayerSkillSlotIndexFromCode,
+  type PlayerSkillSlots,
+  type PlayerSkillSlotAssignment
+} from '../playerSkillSlots'
+import {
+  isPlayerSkillUnlockedInProfile as tsIsPlayerSkillUnlockedInProfile,
+  getPlayerSkillLevelById as tsGetPlayerSkillLevelById,
+  getPlayerSkillDamageById as tsGetPlayerSkillDamageById,
+  getPlayerSkillDamageBonusById as tsGetPlayerSkillDamageBonusById,
+  getPlayerSkillManaCostById as tsGetPlayerSkillManaCostById,
+  getPlayerProtectSkillDurationByLevel as tsGetPlayerProtectSkillDurationByLevel
+} from '../playerSkills'
+import {
+  usePlayerInventoryConsumable as tsUsePlayerInventoryConsumable,
+  usePlayerQuickslotConsumable as tsUsePlayerQuickslotConsumable,
+  type UsePlayerInventoryConsumableResult,
+  type UsePlayerQuickslotConsumableResult
+} from '../playerConsumables'
+import {
+  unequipPlayerEquipmentSlot as tsUnequipPlayerEquipmentSlot,
+  equipPlayerInventorySlot as tsEquipPlayerInventorySlot,
+  type PlayerLoadoutState
+} from '../playerLoadout'
+import {
+  createInitialBlacksmithInventory as tsCreateInitialBlacksmithInventory,
+  getBlacksmithShopItemPriceById as tsGetBlacksmithShopItemPriceById,
+  getBlacksmithShopBuyPriceById as tsGetBlacksmithShopBuyPriceById,
+  getBlacksmithShopSellPriceById as tsGetBlacksmithShopSellPriceById,
+  buyBlacksmithShopItem as tsBuyBlacksmithShopItem,
+  sellBlacksmithShopItem as tsSellBlacksmithShopItem,
+  type BlacksmithInventory,
+  type BlacksmithShopTransactionResult
+} from '../blacksmithShop'
+import {
+  createInitialQuestLog as tsCreateInitialQuestLog,
+  getQuestProgress as tsGetQuestProgress,
+  getQuestDefinition as tsGetQuestDefinition,
+  startQuest as tsStartQuest,
+  recordQuestObjectiveProgress as tsRecordQuestObjectiveProgress,
+  recordMonsterDefeatQuestProgress as tsRecordMonsterDefeatQuestProgress,
+  recordItemUseQuestProgress as tsRecordItemUseQuestProgress,
+  recordShopOpenQuestProgress as tsRecordShopOpenQuestProgress,
+  recordSceneEnterQuestProgress as tsRecordSceneEnterQuestProgress,
+  recordTalkQuestProgress as tsRecordTalkQuestProgress,
+  setQuestTrackerVisible as tsSetQuestTrackerVisible,
+  hideVisibleQuestTrackers as tsHideVisibleQuestTrackers,
+  abandonQuest as tsAbandonQuest,
+  completeQuest as tsCompleteQuest,
+  getVisibleQuestTrackers as tsGetVisibleQuestTrackers,
+  getQuestNpcBadgeKind as tsGetQuestNpcBadgeKind,
+  getQuestNpcBadgeKindForNpc as tsGetQuestNpcBadgeKindForNpc,
+  getNextQuestInteractionForNpc as tsGetNextQuestInteractionForNpc,
+  formatQuestText as tsFormatQuestText,
+  formatQuestTextLines as tsFormatQuestTextLines,
+  type QuestLogState,
+  type QuestProgress,
+  type QuestDefinition,
+  type QuestNpcBadgeKind,
+  type NpcQuestInteraction,
+  type CompleteQuestResult,
+  type QuestTrackerItem,
+  type QuestTextFormatContext
+} from '../questLog'
 
 let host: LuaLogicHost | undefined
 let statEffects: PlayerStatEffectsLua | undefined
@@ -139,6 +245,13 @@ let profile: PlayerProfileLua | undefined
 let progression: PlayerProgressionLua | undefined
 let equipmentLua: PlayerEquipmentLua | undefined
 let potionShop: PlayerPotionShopLua | undefined
+let quickslots: PlayerQuickslotsLua | undefined
+let skillSlots: PlayerSkillSlotsLua | undefined
+let skills: PlayerSkillsLua | undefined
+let loadout: PlayerLoadoutLua | undefined
+let consumables: PlayerConsumablesLua | undefined
+let blacksmith: BlacksmithShopLua | undefined
+let questLogLua: QuestLogLua | undefined
 
 // 부팅 시 1회 호출 — Lua VM을 띄우고 변환된 모듈들을 모두 로드한다. 이후 아래 함수들이 Lua를 쓴다.
 export const initLuaGameLogic = async (
@@ -161,6 +274,14 @@ export const initLuaGameLogic = async (
   equipmentLua = await createPlayerEquipmentLua({ host: next })
   // potionShop 은 인벤토리 전역(inventory_*)에 의존하므로 inventory 로드 이후에 만든다.
   potionShop = await createPlayerPotionShopLua({ host: next })
+  quickslots = await createPlayerQuickslotsLua({ host: next })
+  skillSlots = await createPlayerSkillSlotsLua({ host: next })
+  skills = await createPlayerSkillsLua({ host: next })
+  loadout = await createPlayerLoadoutLua({ host: next })
+  // consumables 는 quickslots 전역이 이미 로드된 이후에 만든다.
+  consumables = await createPlayerConsumablesLua({ host: next })
+  blacksmith = await createBlacksmithShopLua({ host: next })
+  questLogLua = await createQuestLogLua({ host: next })
 }
 
 export const isLuaGameLogicReady = (): boolean => host !== undefined
@@ -181,6 +302,13 @@ export const closeLuaGameLogic = (): void => {
   equipmentLua = undefined
   potionShop?.close()
   potionShop = undefined
+  quickslots?.close(); quickslots = undefined
+  skillSlots?.close(); skillSlots = undefined
+  skills?.close(); skills = undefined
+  loadout?.close(); loadout = undefined
+  consumables?.close(); consumables = undefined
+  blacksmith?.close(); blacksmith = undefined
+  questLogLua?.close(); questLogLua = undefined
 }
 
 // ── monsterRewards ──
@@ -569,3 +697,410 @@ export const sellPotionShopItem = (input: {
   potionShop
     ? potionShop.sellPotionShopItem(input)
     : tsSellPotionShopItem(input)
+
+// ── playerQuickslots ──
+export const createInitialPlayerQuickslots = (input?: {
+  slotCount?: number
+}): PlayerQuickslots =>
+  quickslots
+    ? quickslots.createInitialPlayerQuickslots(input)
+    : tsCreateInitialPlayerQuickslots(input)
+
+export const setPlayerQuickslotAssignment = (input: {
+  quickslots: PlayerQuickslots
+  quickslotIndex: number
+  inventorySlotIndex: number
+}): PlayerQuickslots =>
+  quickslots
+    ? quickslots.setPlayerQuickslotAssignment(input)
+    : tsSetPlayerQuickslotAssignment(input)
+
+export const clearPlayerQuickslotAssignment = (input: {
+  quickslots: PlayerQuickslots
+  quickslotIndex: number
+}): PlayerQuickslots =>
+  quickslots
+    ? quickslots.clearPlayerQuickslotAssignment(input)
+    : tsClearPlayerQuickslotAssignment(input)
+
+export const findPlayerQuickslotIndexByInventorySlotIndex = (
+  qs: PlayerQuickslots,
+  inventorySlotIndex: number
+): number | undefined =>
+  quickslots
+    ? quickslots.findPlayerQuickslotIndexByInventorySlotIndex(qs, inventorySlotIndex)
+    : tsFindPlayerQuickslotIndexByInventorySlotIndex(qs, inventorySlotIndex)
+
+export const getPlayerQuickslotAssignment = (
+  qs: PlayerQuickslots,
+  quickslotIndex: number
+): PlayerQuickslotAssignment | undefined =>
+  quickslots
+    ? quickslots.getPlayerQuickslotAssignment(qs, quickslotIndex)
+    : tsGetPlayerQuickslotAssignment(qs, quickslotIndex)
+
+// ── playerSkillSlots ──
+export const createInitialPlayerSkillSlots = (input?: {
+  slotCount?: number
+  initialSkillIds?: readonly (string | undefined)[]
+}): PlayerSkillSlots =>
+  skillSlots
+    ? skillSlots.createInitialPlayerSkillSlots(input)
+    : tsCreateInitialPlayerSkillSlots(input)
+
+export const setPlayerSkillSlotAssignment = (input: {
+  skillSlots: PlayerSkillSlots
+  skillSlotIndex: number
+  skillId: string
+}): PlayerSkillSlots =>
+  skillSlots
+    ? skillSlots.setPlayerSkillSlotAssignment(input)
+    : tsSetPlayerSkillSlotAssignment(input)
+
+export const clearPlayerSkillSlotAssignment = (input: {
+  skillSlots: PlayerSkillSlots
+  skillSlotIndex: number
+}): PlayerSkillSlots =>
+  skillSlots
+    ? skillSlots.clearPlayerSkillSlotAssignment(input)
+    : tsClearPlayerSkillSlotAssignment(input)
+
+export const findPlayerSkillSlotIndexBySkillId = (
+  ss: PlayerSkillSlots,
+  skillId: string
+): number | undefined =>
+  skillSlots
+    ? skillSlots.findPlayerSkillSlotIndexBySkillId(ss, skillId)
+    : tsFindPlayerSkillSlotIndexBySkillId(ss, skillId)
+
+export const getPlayerSkillSlotAssignment = (
+  ss: PlayerSkillSlots,
+  skillSlotIndex: number
+): PlayerSkillSlotAssignment | undefined =>
+  skillSlots
+    ? skillSlots.getPlayerSkillSlotAssignment(ss, skillSlotIndex)
+    : tsGetPlayerSkillSlotAssignment(ss, skillSlotIndex)
+
+export const getPlayerSkillSlotIndexFromCode = (
+  code: string
+): number | undefined =>
+  skillSlots
+    ? skillSlots.getPlayerSkillSlotIndexFromCode(code)
+    : tsGetPlayerSkillSlotIndexFromCode(code)
+
+export { PLAYER_SKILL_SLOT_HOTKEY_CODES } from '../playerSkillSlots'
+
+// ── playerSkills ──
+export const isPlayerSkillUnlockedInProfile = (
+  profile: Pick<PlayerProfile, 'skills'>,
+  skillId: string
+): boolean =>
+  skills
+    ? skills.isPlayerSkillUnlockedInProfile(profile, skillId)
+    : tsIsPlayerSkillUnlockedInProfile(profile, skillId)
+
+export const getPlayerSkillLevelById = (
+  profile: Pick<PlayerProfile, 'skills'>,
+  skillId: string
+): number | undefined =>
+  skills
+    ? skills.getPlayerSkillLevelById(profile, skillId)
+    : tsGetPlayerSkillLevelById(profile, skillId)
+
+export const getPlayerSkillDamageById = (
+  profile: Pick<PlayerProfile, 'skills'>,
+  skillId: string
+): number =>
+  skills
+    ? skills.getPlayerSkillDamageById(profile, skillId)
+    : tsGetPlayerSkillDamageById(profile, skillId)
+
+export const getPlayerSkillDamageBonusById = (
+  profile: Pick<PlayerProfile, 'skills'>,
+  skillId: string
+): number =>
+  skills
+    ? skills.getPlayerSkillDamageBonusById(profile, skillId)
+    : tsGetPlayerSkillDamageBonusById(profile, skillId)
+
+export const getPlayerSkillManaCostById = (
+  profile: Pick<PlayerProfile, 'skills'>,
+  skillId: string
+): number =>
+  skills
+    ? skills.getPlayerSkillManaCostById(profile, skillId)
+    : tsGetPlayerSkillManaCostById(profile, skillId)
+
+export const getPlayerProtectSkillDurationByLevel = (
+  skillLevel: number
+): number =>
+  skills
+    ? skills.getPlayerProtectSkillDurationByLevel(skillLevel)
+    : tsGetPlayerProtectSkillDurationByLevel(skillLevel)
+
+// getPlayerSkillDisplayInfoById 는 Lua 변환 대상 아님 (Vite 에셋 URL) — 원본 그대로 재내보냄.
+export { getPlayerSkillDisplayInfoById } from '../playerSkills'
+
+// ── playerConsumables ──
+export const usePlayerInventoryConsumable = (input: {
+  profile: PlayerProfile
+  inventory: PlayerInventory
+  slotIndex: number
+}): UsePlayerInventoryConsumableResult | undefined =>
+  consumables
+    ? consumables.usePlayerInventoryConsumable(input)
+    : tsUsePlayerInventoryConsumable(input)
+
+export const usePlayerQuickslotConsumable = (input: {
+  profile: PlayerProfile
+  inventory: PlayerInventory
+  quickslots: { slots: ({ inventorySlotIndex: number } | undefined)[] }
+  quickslotIndex: number
+}): UsePlayerQuickslotConsumableResult | undefined =>
+  consumables
+    ? consumables.usePlayerQuickslotConsumable(input)
+    : tsUsePlayerQuickslotConsumable(input)
+
+// ── playerLoadout ──
+export const unequipPlayerEquipmentSlot = (input: {
+  equipment: PlayerEquipment
+  inventory: PlayerInventory
+  slotId: PlayerEquipmentSlotId
+}): PlayerLoadoutState | undefined =>
+  loadout
+    ? loadout.unequipPlayerEquipmentSlot(input)
+    : tsUnequipPlayerEquipmentSlot(input)
+
+export const equipPlayerInventorySlot = (input: {
+  equipment: PlayerEquipment
+  inventory: PlayerInventory
+  slotIndex: number
+}): PlayerLoadoutState | undefined =>
+  loadout
+    ? loadout.equipPlayerInventorySlot(input)
+    : tsEquipPlayerInventorySlot(input)
+
+// ── blacksmithShop ──
+export const createInitialBlacksmithInventory = (input?: {
+  slotCount?: number
+  gold?: number
+}): BlacksmithInventory =>
+  blacksmith
+    ? blacksmith.createInitialBlacksmithInventory(input)
+    : tsCreateInitialBlacksmithInventory(input)
+
+export const getBlacksmithShopItemPriceById = (
+  itemId: string
+): number | undefined =>
+  blacksmith
+    ? blacksmith.getBlacksmithShopBuyPriceById(itemId)
+    : tsGetBlacksmithShopItemPriceById(itemId)
+
+export const getBlacksmithShopBuyPriceById = (
+  itemId: string
+): number | undefined =>
+  blacksmith
+    ? blacksmith.getBlacksmithShopBuyPriceById(itemId)
+    : tsGetBlacksmithShopBuyPriceById(itemId)
+
+export const getBlacksmithShopSellPriceById = (
+  itemId: string
+): number | undefined =>
+  blacksmith
+    ? blacksmith.getBlacksmithShopSellPriceById(itemId)
+    : tsGetBlacksmithShopSellPriceById(itemId)
+
+export const buyBlacksmithShopItem = (input: {
+  playerInventory: PlayerInventory
+  merchantInventory: PlayerInventory
+  merchantSlotIndex: number
+}): BlacksmithShopTransactionResult =>
+  blacksmith
+    ? blacksmith.buyBlacksmithShopItem(input)
+    : tsBuyBlacksmithShopItem(input)
+
+export const sellBlacksmithShopItem = (input: {
+  playerInventory: PlayerInventory
+  merchantInventory: PlayerInventory
+  playerSlotIndex: number
+}): BlacksmithShopTransactionResult =>
+  blacksmith
+    ? blacksmith.sellBlacksmithShopItem(input)
+    : tsSellBlacksmithShopItem(input)
+
+// ── questLog ──
+// 상수·데이터는 TS 소유 — 정적 값이므로 Lua 위임 없이 원본에서 직접 재내보냄.
+export {
+  QUEST_DEFINITIONS,
+  FIRST_SLIME_HUNT_QUEST_ID,
+  POTION_SURVIVAL_BASICS_QUEST_ID,
+  PIG_TROUBLE_QUEST_ID,
+  BLACKSMITH_PREPARATION_QUEST_ID,
+  CAVE_ENTRANCE_INVESTIGATION_QUEST_ID,
+  SLIME_BOSS_SHADOW_QUEST_ID,
+  FINAL_SUPPLIES_QUEST_ID,
+  PIG_BOSS_THREAT_QUEST_ID,
+  FIRST_SLIME_HUNT_OBJECTIVE_ID,
+  FIRST_SLIME_HUNT_REQUIRED_SLIME_DEFEATS,
+  FIRST_SLIME_HUNT_REWARD_GOLD,
+  FIRST_SLIME_HUNT_REWARD_EXPERIENCE,
+  WIZARD_NPC_ID,
+  POTION_MERCHANT_NPC_ID,
+  BLACKSMITH_NPC_ID,
+  QUEST_GIVER_NPC_IDS
+} from '../questLog'
+
+export const createInitialQuestLog = (): QuestLogState =>
+  questLogLua
+    ? questLogLua.createInitialQuestLog()
+    : tsCreateInitialQuestLog()
+
+export const getQuestProgress = (
+  questLog: QuestLogState,
+  questId: string
+): QuestProgress =>
+  questLogLua
+    ? questLogLua.getQuestProgress(questLog, questId)
+    : tsGetQuestProgress(questLog, questId)
+
+export const getQuestDefinition = (questId: string): QuestDefinition =>
+  questLogLua
+    ? questLogLua.getQuestDefinition(questId)
+    : tsGetQuestDefinition(questId)
+
+export const startQuest = (
+  questLog: QuestLogState,
+  questId: string
+): QuestLogState =>
+  questLogLua
+    ? questLogLua.startQuest(questLog, questId)
+    : tsStartQuest(questLog, questId)
+
+export const recordQuestObjectiveProgress = (
+  questLog: QuestLogState,
+  questId: string,
+  objectiveId: string,
+  amount?: number
+): QuestLogState =>
+  questLogLua
+    ? questLogLua.recordQuestObjectiveProgress(questLog, questId, objectiveId, amount)
+    : tsRecordQuestObjectiveProgress(questLog, questId, objectiveId, amount)
+
+export const recordMonsterDefeatQuestProgress = (
+  questLog: QuestLogState,
+  target: { sceneId: string; appearanceType: string }
+): QuestLogState =>
+  questLogLua
+    ? questLogLua.recordMonsterDefeatQuestProgress(questLog, target)
+    : tsRecordMonsterDefeatQuestProgress(questLog, target)
+
+export const recordItemUseQuestProgress = (
+  questLog: QuestLogState,
+  itemId: string
+): QuestLogState =>
+  questLogLua
+    ? questLogLua.recordItemUseQuestProgress(questLog, itemId)
+    : tsRecordItemUseQuestProgress(questLog, itemId)
+
+export const recordShopOpenQuestProgress = (
+  questLog: QuestLogState,
+  shopId: string
+): QuestLogState =>
+  questLogLua
+    ? questLogLua.recordShopOpenQuestProgress(questLog, shopId)
+    : tsRecordShopOpenQuestProgress(questLog, shopId)
+
+export const recordSceneEnterQuestProgress = (
+  questLog: QuestLogState,
+  sceneId: string
+): QuestLogState =>
+  questLogLua
+    ? questLogLua.recordSceneEnterQuestProgress(questLog, sceneId)
+    : tsRecordSceneEnterQuestProgress(questLog, sceneId)
+
+export const recordTalkQuestProgress = (
+  questLog: QuestLogState,
+  npcId: string
+): QuestLogState =>
+  questLogLua
+    ? questLogLua.recordTalkQuestProgress(questLog, npcId)
+    : tsRecordTalkQuestProgress(questLog, npcId)
+
+export const setQuestTrackerVisible = (
+  questLog: QuestLogState,
+  questId: string,
+  trackerVisible: boolean
+): QuestLogState =>
+  questLogLua
+    ? questLogLua.setQuestTrackerVisible(questLog, questId, trackerVisible)
+    : tsSetQuestTrackerVisible(questLog, questId, trackerVisible)
+
+export const hideVisibleQuestTrackers = (
+  questLog: QuestLogState
+): QuestLogState =>
+  questLogLua
+    ? questLogLua.hideVisibleQuestTrackers(questLog)
+    : tsHideVisibleQuestTrackers(questLog)
+
+export const abandonQuest = (
+  questLog: QuestLogState,
+  questId: string
+): QuestLogState =>
+  questLogLua
+    ? questLogLua.abandonQuest(questLog, questId)
+    : tsAbandonQuest(questLog, questId)
+
+export const completeQuest = (
+  questLog: QuestLogState,
+  questId: string
+): CompleteQuestResult =>
+  questLogLua
+    ? questLogLua.completeQuest(questLog, questId)
+    : tsCompleteQuest(questLog, questId)
+
+export const getVisibleQuestTrackers = (
+  questLog: QuestLogState
+): QuestTrackerItem[] =>
+  questLogLua
+    ? questLogLua.getVisibleQuestTrackers(questLog)
+    : tsGetVisibleQuestTrackers(questLog)
+
+export const getQuestNpcBadgeKind = (
+  questLog: QuestLogState,
+  questId: string
+): QuestNpcBadgeKind | undefined =>
+  questLogLua
+    ? questLogLua.getQuestNpcBadgeKind(questLog, questId)
+    : tsGetQuestNpcBadgeKind(questLog, questId)
+
+export const getQuestNpcBadgeKindForNpc = (
+  questLog: QuestLogState,
+  npcId: string
+): QuestNpcBadgeKind | undefined =>
+  questLogLua
+    ? questLogLua.getQuestNpcBadgeKindForNpc(questLog, npcId)
+    : tsGetQuestNpcBadgeKindForNpc(questLog, npcId)
+
+export const getNextQuestInteractionForNpc = (
+  questLog: QuestLogState,
+  npcId: string
+): NpcQuestInteraction | undefined =>
+  questLogLua
+    ? questLogLua.getNextQuestInteractionForNpc(questLog, npcId)
+    : tsGetNextQuestInteractionForNpc(questLog, npcId)
+
+export const formatQuestText = (
+  text: string,
+  context: QuestTextFormatContext
+): string =>
+  questLogLua
+    ? questLogLua.formatQuestText(text, context)
+    : tsFormatQuestText(text, context)
+
+export const formatQuestTextLines = (
+  lines: string[],
+  context: QuestTextFormatContext
+): string[] =>
+  questLogLua
+    ? questLogLua.formatQuestTextLines(lines, context)
+    : tsFormatQuestTextLines(lines, context)

@@ -10,11 +10,13 @@ import {
 import type { PlayerInventory } from '../playerInventory'
 import type { PlayerProfile } from '../playerProfile'
 import {
-  findPlayerQuickslotIndexByInventorySlotIndex,
   type PlayerQuickslots
 } from '../playerQuickslots'
-import { equipPlayerInventorySlot } from '../playerLoadout'
-import { usePlayerInventoryConsumable } from '../playerConsumables'
+import {
+  findPlayerQuickslotIndexByInventorySlotIndex,
+  equipPlayerInventorySlot,
+  usePlayerInventoryConsumable
+} from '../lua/luaGameLogic'
 import { getResponsiveUiScale } from './getResponsiveUiScale'
 
 type CreatePlayerInventoryOverlayInput = {

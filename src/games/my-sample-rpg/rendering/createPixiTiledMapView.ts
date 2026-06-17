@@ -48,7 +48,6 @@ import {
 } from '../events/createGameEventQueue'
 import type { EventReward, HolidayDialogueEventSpec } from '../eventGeneration'
 import { processInteractionEvents } from '../interaction/processInteractionEvents'
-import { usePlayerQuickslotConsumable } from '../playerConsumables'
 import {
   type PlayerEquipment,
   type PlayerEquipmentSlotId
@@ -58,22 +57,9 @@ import {
   type PlayerInventoryItem
 } from '../playerInventory'
 import type { PlayerProfile } from '../playerProfile'
-import {
-  clearPlayerQuickslotAssignment,
-  type PlayerQuickslots
-} from '../playerQuickslots'
-import {
-  getPlayerSkillSlotIndexFromCode,
-  type PlayerSkillSlots
-} from '../playerSkillSlots'
-import {
-  PLAYER_PROTECT_SKILL_ID,
-  getPlayerSkillDamageById,
-  getPlayerSkillManaCostById,
-  getPlayerSkillLevelById,
-  getPlayerProtectSkillDurationByLevel,
-  isPlayerSkillUnlockedInProfile
-} from '../playerSkills'
+import { type PlayerQuickslots } from '../playerQuickslots'
+import { type PlayerSkillSlots } from '../playerSkillSlots'
+import { PLAYER_PROTECT_SKILL_ID } from '../playerSkills'
 import {
   PLAYER_SMASH_SKILL_COOLDOWN_MILLISECONDS,
   PLAYER_SMASH_SKILL_EFFECT_ANIMATION_SPEED,
@@ -105,16 +91,6 @@ import {
   type PlayerControlBindings
 } from '../playerControls'
 import {
-  QUEST_GIVER_NPC_IDS,
-  completeQuest,
-  formatQuestTextLines,
-  getNextQuestInteractionForNpc,
-  getQuestNpcBadgeKindForNpc,
-  recordItemUseQuestProgress,
-  recordMonsterDefeatQuestProgress,
-  recordShopOpenQuestProgress,
-  recordTalkQuestProgress,
-  startQuest,
   type CompleteQuestResult,
   type QuestItemReward,
   type QuestLogState
@@ -142,7 +118,25 @@ import {
   getPlayerPhysicalAttackPower,
   shouldPlayerEvadeDamage,
   grantPlayerSkillPoints,
-  getPlayerEquipmentItemDefinitionById
+  getPlayerEquipmentItemDefinitionById,
+  usePlayerQuickslotConsumable,
+  clearPlayerQuickslotAssignment,
+  getPlayerSkillSlotIndexFromCode,
+  getPlayerSkillDamageById,
+  getPlayerSkillManaCostById,
+  getPlayerSkillLevelById,
+  getPlayerProtectSkillDurationByLevel,
+  isPlayerSkillUnlockedInProfile,
+  QUEST_GIVER_NPC_IDS,
+  completeQuest,
+  formatQuestTextLines,
+  getNextQuestInteractionForNpc,
+  getQuestNpcBadgeKindForNpc,
+  recordItemUseQuestProgress,
+  recordMonsterDefeatQuestProgress,
+  recordShopOpenQuestProgress,
+  recordTalkQuestProgress,
+  startQuest
 } from '../lua/luaGameLogic'
 import { resolveCharacterInteractionTarget } from '../interaction/resolveCharacterInteractionTarget'
 import {

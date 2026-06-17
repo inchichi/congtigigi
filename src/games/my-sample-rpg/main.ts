@@ -20,19 +20,21 @@ import {
   type CharacterState
 } from './characterState'
 import { createCharacterControllerRuntime } from './createCharacterControllerRuntime'
-import { createInitialBlacksmithInventory } from './blacksmithShop'
 import { createLuaCharacterControllerRuntime } from './lua/createLuaCharacterControllerRuntime'
 import {
   initLuaGameLogic,
   createInitialPlayerEquipment,
-  createInitialPotionInventory
+  createInitialPotionInventory,
+  createInitialBlacksmithInventory,
+  createInitialPlayerQuickslots,
+  createInitialPlayerSkillSlots,
+  createInitialQuestLog,
+  recordSceneEnterQuestProgress
 } from './lua/luaGameLogic'
 import { createNpcCharactersFromEventLayers } from './tiled/createNpcCharactersFromEventLayers'
 import { parseTiledMap, parseTiledTileset } from './tiled/parseTiledMap'
 import { createInitialPlayerInventory } from './playerInventory'
 import { createInitialPlayerProfile } from './playerProfile'
-import { createInitialPlayerQuickslots } from './playerQuickslots'
-import { createInitialPlayerSkillSlots } from './playerSkillSlots'
 import {
   PLAYER_SAVE_STATE_STORAGE_KEY,
   parseStoredPlayerSaveState,
@@ -57,10 +59,6 @@ import {
   PLAYER_CONTROL_BINDINGS_STORAGE_KEY,
   type PlayerControlBindings
 } from './playerControls'
-import {
-  createInitialQuestLog,
-  recordSceneEnterQuestProgress
-} from './questLog'
 import { getSceneIntroMessage } from './sceneIntro'
 import { createPixiTiledMapView } from './rendering/createPixiTiledMapView'
 import {

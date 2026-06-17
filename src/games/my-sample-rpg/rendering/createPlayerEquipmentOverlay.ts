@@ -15,7 +15,7 @@ import {
 import {
   equipPlayerInventorySlot,
   unequipPlayerEquipmentSlot
-} from '../playerLoadout'
+} from '../lua/luaGameLogic'
 import { getResponsiveUiScale } from './getResponsiveUiScale'
 
 type CreatePlayerEquipmentOverlayInput = {

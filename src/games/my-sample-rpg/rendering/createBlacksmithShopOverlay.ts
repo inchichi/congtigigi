@@ -7,7 +7,7 @@ import {
   getBlacksmithShopBuyPriceById,
   getBlacksmithShopSellPriceById,
   sellBlacksmithShopItem
-} from '../blacksmithShop'
+} from '../lua/luaGameLogic'
 import {
   findFirstEmptyPlayerInventorySlotIndex,
   getPlayerInventoryFilledSlotCount,

@@ -9,18 +9,20 @@ import {
 } from '../lua/luaGameLogic'
 import type { PlayerInventory } from '../playerInventory'
 import {
-  clearPlayerQuickslotAssignment,
-  setPlayerQuickslotAssignment,
   type PlayerQuickslots
 } from '../playerQuickslots'
 import {
   PLAYER_SKILL_DRAG_MIME_TYPE,
-  clearPlayerSkillSlotAssignment,
   PLAYER_SKILL_SLOT_COUNT,
   PLAYER_SKILL_SLOT_HOTKEY_LABELS,
-  setPlayerSkillSlotAssignment,
   type PlayerSkillSlots
 } from '../playerSkillSlots'
+import {
+  clearPlayerQuickslotAssignment,
+  setPlayerQuickslotAssignment,
+  clearPlayerSkillSlotAssignment,
+  setPlayerSkillSlotAssignment
+} from '../lua/luaGameLogic'
 import { getPlayerSkillDisplayInfoById } from '../playerSkills'
 import { getResponsiveUiScale } from './getResponsiveUiScale'
 
