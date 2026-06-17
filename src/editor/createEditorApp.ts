@@ -1125,16 +1125,26 @@ export const createEditorApp = ({
     if (stageWidth <= 0 || stageHeight <= 0) {
       return
     }
-    const width = Math.min(stageWidth, (stageHeight * 16) / 9)
-    iframe.style.width = `${Math.floor(width)}px`
-    iframe.style.height = `${Math.floor((width * 9) / 16)}px`
+    // 패널을 빈틈없이 채운다(cover). 게임은 16:9 고정이라 패널 비율이 다르면 어느 쪽이든
+    // 레터박스(검은 띠)가 생기는데, 가로/세로 배율 중 '더 큰 쪽'을 택해 양 방향 모두 패널 이상으로
+    // 키운 뒤 가운데 정렬하면 넘치는 부분만 previewStage의 overflow-hidden으로 잘려 위·아래·좌우
+    // 어디에도 띠가 남지 않는다. 게임은 플레이어를 화면 중앙에 두고 카메라를 따라가므로 가장자리만
+    // 살짝 잘릴 뿐 핵심(캐릭터·중앙 UI)은 항상 보인다.
+    const scale = Math.max(stageWidth / 16, stageHeight / 9)
+    iframe.style.width = `${Math.ceil(scale * 16)}px`
+    iframe.style.height = `${Math.ceil(scale * 9)}px`
   }
   new ResizeObserver(fitGameFrame).observe(previewStage)
+  // ResizeObserver의 초기 콜백 타이밍이 환경(특히 자동화 브라우저)에 따라 누락될 수 있어,
+  // 마운트 직후 한 프레임 뒤에 한 번 더 강제로 맞춘다.
+  requestAnimationFrame(fitGameFrame)
   iframe.addEventListener('load', () => {
     connection.className = 'h-7 flex items-center gap-1.5 text-[11px] rounded-full px-2.5 bg-[#72d36b]/10 border border-[#72d36b]/50 text-[#9fe296]'
     connectionDot.className = 'w-2 h-2 rounded-full bg-[#72d36b] shadow-[0_0_6px_rgba(114,211,107,0.8)]'
     connectionLabel.textContent = 'AI 연결됨'
     previewLoading.style.display = 'none'
+    // 게임 페이지 로드가 끝난 시점에도 한 번 더 맞춰, 패널 크기와 어긋난 채 남지 않게 한다.
+    fitGameFrame()
   })
 
   // 게임이 바뀌면(폴더 열기/복귀) 프리뷰 iframe을 그 게임 URL로 다시 가리킨다. URL이 같으면
@@ -1386,6 +1396,9 @@ export const createEditorApp = ({
     }
     composerHeight = clampComposerHeight(composerHeight, centerHeight)
     composer.style.height = `${composerHeight}px`
+    // 컴포저 높이가 바뀌면 미리보기 패널 높이도 함께 바뀐다 — 게임 프레임을 즉시 다시 맞춰
+    // 패널 크기와 어긋난 채(검은 띠가 남는) 상태로 남지 않게 한다.
+    fitGameFrame()
   }
   let resizeStartY = 0
   let resizeStartHeight = 0
