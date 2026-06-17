@@ -140,3 +140,9 @@ window.postMessage({ type: 'editor:goto-map', mapId: 'test', mapName: 'test' }, 
 
 패널 안에서 플레이하고 싶으면 **love.js**, 네이티브 창으로 돌리고 에디터로 내용만 쏘고 싶으면
 **브리지**를 쓰면 된다. 에디터는 둘 다 지원한다(웹 빌드 URL이 있으면 love.js, 없으면 브리지/미리보기).
+
+## Quest Export
+
+- The editor can generate Legend of Lua quests from the opened game's entity catalog.
+- The generated quest is validated against the opened maps/entities and rendered as a Lua module preview.
+- Live apply is still not wired in the game runtime, so the current output path is preview/copy/export first.
