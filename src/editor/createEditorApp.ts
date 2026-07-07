@@ -378,7 +378,7 @@ export const createEditorApp = ({
   const brandText = el('div', 'flex flex-col gap-0.5 min-w-0')
   const brandTitleRow = el('div', 'flex items-center gap-2 min-w-0')
   brandTitleRow.append(
-    el('span', 'text-[16px] font-semibold leading-none tracking-tight whitespace-nowrap text-[#e6e6e6]', '마을 이야기 공방')
+    el('span', 'text-[16px] font-semibold leading-none tracking-tight whitespace-nowrap text-[#e6e6e6]', '게임 컨텐츠 에디터')
   )
   // 프로젝트명은 작은 나무 팻말 배지로(좁은 화면에선 숨김 — 헤더가 넘치면 설정 버튼이 밀려난다).
   const gameLabel = el('span', 'hidden sm:inline-block text-[11px] rounded-md px-2 py-0.5 bg-[#d9a85c]/[0.18] border border-[#d9a85c]/35 text-[#f3d88b] truncate', game.adapter.name)
@@ -1317,8 +1317,7 @@ export const createEditorApp = ({
   const composerTitle = el('div', 'flex flex-wrap items-baseline gap-x-2.5 gap-y-0.5 min-w-0')
   const composerTitleRow = el('div', 'flex items-center gap-2')
   composerTitleRow.append(
-    editorIcon('scroll', 20),
-    el('span', 'text-[18px] font-semibold leading-none text-[#f3d7a2]', '마을 의뢰서')
+    editorIcon('scroll', 20)
   )
   composerTitle.append(
     composerTitleRow,
@@ -2011,6 +2010,72 @@ export const createEditorApp = ({
     treeHoverPreview.bind(target, () => buildEntityPreviewContent(map, entity))
   }
 
+  // ── TMX 타일셋이 없는 게임(예: legend-of-lua)용 PNG 스프라이트 폴백 ──
+  // 타일/오브젝트 추출(타일셋 역패치) 경로를 못 쓰는 게임에서는, 개별 PNG 스프라이트를
+  // 좌측 '현재 맵 에셋' 패널에 '오브젝트'로 띄워 통짜 스타일을 적용할 수 있게 한다.
+  // 내부 게임은 /assets(→openForAsset), 외부 게임(LOL 등)은 /ext/assets(→외부 스타일러)로 소스를 가른다.
+  let spriteFallbackAssets: { path: string; label: string }[] = []
+  let spriteFallbackLoadedKey: string | undefined
+  let spriteFallbackLoading = false
+  const spriteFallbackIsExternal = (): boolean => isLegendOfLuaGame(game)
+  const ensureSpriteFallbackLoaded = (): void => {
+    // TMX 타일셋이 있으면 타일/오브젝트 추출 경로를 쓰므로 폴백이 필요 없다.
+    if (resolveCurrentTileset() !== undefined) {
+      if (spriteFallbackAssets.length > 0 || spriteFallbackLoadedKey !== undefined) {
+        spriteFallbackAssets = []
+        spriteFallbackLoadedKey = undefined
+      }
+      return
+    }
+    const key = game.adapter.id
+    if (spriteFallbackLoadedKey === key || spriteFallbackLoading) {
+      return
+    }
+    spriteFallbackLoading = true
+    spriteFallbackLoadedKey = key
+    const toAssets = (
+      raw: { assets?: { path: string }[] }
+    ): { path: string; label: string }[] =>
+      (raw.assets ?? []).map((asset) => ({
+        path: asset.path,
+        label: asset.path.split('/').pop() ?? asset.path
+      }))
+    const done = (list: { path: string; label: string }[]): void => {
+      spriteFallbackAssets = list
+      spriteFallbackLoading = false
+      renderTree()
+    }
+    const fail = (): void => {
+      spriteFallbackLoading = false
+    }
+    if (spriteFallbackIsExternal()) {
+      void fetch('/api/style/ext/projects')
+        .then((response) =>
+          response.ok ? response.json() : Promise.reject(new Error('ext/projects'))
+        )
+        .then((data: { projects?: { id: string }[] }) => {
+          const project = data.projects?.[0]
+          if (!project) {
+            done([])
+            return undefined
+          }
+          return fetch(`/api/style/ext/assets?project=${encodeURIComponent(project.id)}`)
+            .then((response) =>
+              response.ok ? response.json() : Promise.reject(new Error('ext/assets'))
+            )
+            .then((raw: { assets?: { path: string }[] }) => done(toAssets(raw)))
+        })
+        .catch(fail)
+    } else {
+      void fetch('/api/style/assets')
+        .then((response) =>
+          response.ok ? response.json() : Promise.reject(new Error('assets'))
+        )
+        .then((raw: { assets?: { path: string }[] }) => done(toAssets(raw)))
+        .catch(fail)
+    }
+  }
+
   const renderTree = (): void => {
     entityButtons = []
     const groups: HTMLElement[] = []
@@ -2235,6 +2300,61 @@ export const createEditorApp = ({
       }
 
       groups.push(group)
+    }
+
+    // TMX 타일셋이 없는 게임: 개별 스프라이트 PNG를 '오브젝트'로 노출해 통짜 스타일을 적용한다.
+    if (resolveCurrentTileset() === undefined) {
+      ensureSpriteFallbackLoaded()
+      const externalSprites = spriteFallbackIsExternal()
+      const visibleSprites = query
+        ? spriteFallbackAssets.filter((sprite) => sprite.label.toLowerCase().includes(query))
+        : spriteFallbackAssets
+      if (visibleSprites.length > 0) {
+        const group = el('div', 'flex flex-col gap-1')
+        group.append(
+          el(
+            'div',
+            'text-xs text-zinc-300 font-medium px-1',
+            `🖼 스프라이트 (PNG) · ${visibleSprites.length}`
+          ),
+          el(
+            'div',
+            'px-1 text-[11px] text-zinc-500',
+            externalSprites
+              ? 'TMX가 없어 개별 PNG를 직접 변환합니다 (외부 게임).'
+              : 'TMX가 없어 개별 PNG를 통째로 변환합니다.'
+          )
+        )
+        const body = el('div', 'flex flex-col gap-0.5 pl-1')
+        for (const sprite of visibleSprites) {
+          const node = el(
+            'button',
+            'flex items-center gap-1 text-left rounded-lg px-2.5 py-2 text-sm text-zinc-400 transition hover:bg-white/[0.06] hover:text-zinc-200'
+          ) as HTMLButtonElement
+          node.type = 'button'
+          node.title = externalSprites
+            ? '클릭하면 외부 게임 스프라이트 스타일 창이 열립니다.'
+            : '클릭하면 이 PNG를 통째로 스타일 변환합니다.'
+          node.append(
+            el('span', 'truncate', sprite.label),
+            el('span', 'ml-auto shrink-0 text-[10px]', '🎨')
+          )
+          node.addEventListener('click', () => {
+            if (externalSprites) {
+              externalStyler.button.click()
+            } else {
+              styleTransfer.openForAsset({ path: sprite.path, label: sprite.label })
+            }
+          })
+          body.append(node)
+        }
+        group.append(body)
+        groups.push(group)
+      } else if (spriteFallbackLoading) {
+        groups.push(
+          el('div', 'px-1 text-[11px] text-zinc-500', '🖼 스프라이트(PNG) 불러오는 중…')
+        )
+      }
     }
 
     if (groups.length === 0) {

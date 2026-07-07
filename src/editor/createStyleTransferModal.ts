@@ -360,6 +360,10 @@ export const createStyleTransferModal = (
   const saveButton = el('button', GHOST_BUTTON, 'PNG 저장')
   saveButton.type = 'button'
   saveButton.disabled = true
+  // 변환 전 원본(자동 조립된 타일/오브젝트·추출·에셋)을 PNG로 저장.
+  const saveOrigButton = el('button', GHOST_BUTTON, '원본 PNG 저장')
+  saveOrigButton.type = 'button'
+  saveOrigButton.disabled = true
   // 일괄 변환·적용 — 그리드에서 2개 이상 선택했을 때만 보인다. 미리보기 없이 서버에서
   // 한 번에 변환·적용한다(클라이언트 루프는 첫 적용의 Vite 리로드로 끊기므로 서버 일괄 처리).
   const batchButton = el('button', PRIMARY_BUTTON, '🎨 일괄 변환·적용')
@@ -367,14 +371,55 @@ export const createStyleTransferModal = (
   batchButton.disabled = true
   batchButton.style.display = 'none'
   const status = el('span', 'text-xs text-zinc-500 min-h-4', '')
-  actions.append(runButton, batchButton, applyButton, revertButton, saveButton, status)
+  actions.append(runButton, batchButton, applyButton, revertButton, saveOrigButton, saveButton, status)
+
+  // 변환/적용 진행 표시 (0~100%). AdaIN 변환은 단일 백엔드 호출이라 실제 진행률 스트림이 없어,
+  // 추정 진행도로 보여준다 — 시작하면 90%까지 감속하며 차오르고, 응답이 오면 100%로 마감한다.
+  const progressWrap = el('div', 'flex items-center gap-2')
+  const progressTrack = el('div', 'h-2 flex-1 overflow-hidden rounded-full bg-white/10')
+  const progressBar = el('div', 'h-full w-0 rounded-full bg-amber-400')
+  progressBar.style.transition = 'width 0.15s ease-out'
+  progressTrack.append(progressBar)
+  const progressLabel = el('span', 'w-9 shrink-0 text-right text-xs tabular-nums text-amber-300', '0%')
+  progressWrap.append(progressTrack, progressLabel)
+  progressWrap.style.display = 'none'
+  let progressTimer: number | undefined
+  let progressPct = 0
+  let progressWasBusy = false
+  const setProgressPct = (pct: number): void => {
+    progressPct = pct
+    progressBar.style.width = `${pct}%`
+    progressLabel.textContent = `${Math.round(pct)}%`
+  }
+  const startProgress = (): void => {
+    if (progressTimer !== undefined) {
+      window.clearInterval(progressTimer)
+    }
+    setProgressPct(0)
+    progressWrap.style.display = 'flex'
+    // 90%까지 감속하며 접근 — 실제 완료 전엔 100%에 닿지 않게 한다.
+    progressTimer = window.setInterval(() => {
+      setProgressPct(progressPct + (90 - progressPct) * 0.08)
+    }, 120)
+  }
+  const finishProgress = (): void => {
+    if (progressTimer !== undefined) {
+      window.clearInterval(progressTimer)
+      progressTimer = undefined
+    }
+    setProgressPct(100)
+    window.setTimeout(() => {
+      progressWrap.style.display = 'none'
+      setProgressPct(0)
+    }, 350)
+  }
 
   const resultWrap = el('div', CARD)
   const resultImage = el('img', 'max-h-72 w-full rounded-lg object-contain bg-black/40')
   resultWrap.append(el('div', LABEL, '결과 미리보기'), resultImage)
   resultImage.style.display = 'none'
 
-  panel.append(top, pickers, alphaWrap, actions, resultWrap)
+  panel.append(top, pickers, alphaWrap, actions, progressWrap, resultWrap)
   backdrop.append(panel)
 
   const setStatus = (message: string): void => {
@@ -394,8 +439,24 @@ export const createStyleTransferModal = (
   // 이미 클리어된 결과·적용 대상을 되살리지 못하게 한다.
   let runSeq = 0
 
+  // 변환 전 원본을 PNG로 저장할 수 있는 상태인지 — 타일/오브젝트(mapObject), 추출 단일 선택,
+  // 에셋 단일 선택, 또는 업로드 파일이 있을 때.
+  const hasOriginal = (): boolean =>
+    mapObject !== undefined ||
+    (contentMode === 'asset' && selectedAssetPaths.length === 1) ||
+    (contentMode === 'extracted' && selectedExtractedKeys.length === 1) ||
+    contentPicker.getFile() !== undefined
+
   const syncButtons = (): void => {
     const busy = isRunning || isApplying || isReverting || isBatchRunning
+    // 변환·일괄·적용·복원 시작/완료 엣지에서 0~100% 진행 바를 시작/마감한다
+    // (모든 run 함수가 플래그 토글 직후 syncButtons를 호출하므로 엣지가 정확히 잡힌다).
+    if (busy && !progressWasBusy) {
+      startProgress()
+    } else if (!busy && progressWasBusy) {
+      finishProgress()
+    }
+    progressWasBusy = busy
     // 오브젝트·타일 모드는 mapObject(타일 셀)가 콘텐츠, 그 외는 업로드/선택한 파일이 콘텐츠.
     const hasContent =
       mapObject !== undefined || contentPicker.getFile() !== undefined
@@ -408,6 +469,7 @@ export const createStyleTransferModal = (
     batchButton.disabled = busy || !batchVisible || !hasStyle
     runButton.disabled = busy || !hasContent || !hasStyle
     saveButton.disabled = isRunning || !resultBlob
+    saveOrigButton.disabled = busy || !hasOriginal()
     applyButton.disabled = busy || !applyTarget
     revertButton.disabled = busy || !revertPath
   }
@@ -1012,6 +1074,96 @@ export const createStyleTransferModal = (
     link.click()
     URL.revokeObjectURL(url)
     setStatus(`저장됨: ${resultName}`)
+  })
+
+  // ── 변환 전 원본 PNG 저장 ──
+  const triggerDownload = (blob: Blob, name: string): void => {
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = name
+    link.click()
+    URL.revokeObjectURL(url)
+  }
+  const safeName = (s: string): string => s.replace(/[^\w가-힣]+/gu, '_')
+  const loadImage = (src: string): Promise<HTMLImageElement> =>
+    new Promise((resolve, reject) => {
+      const img = new Image()
+      img.onload = () => resolve(img)
+      img.onerror = () => reject(new Error('타일셋 이미지를 불러오지 못했습니다.'))
+      img.src = src
+    })
+  // 타일/오브젝트(mapObject)를 타일셋에서 셀 좌표로 조립해 원본 누끼 PNG를 만든다(백엔드 compose_object_canvas와 동일 로직).
+  const composeOriginalObject = async (obj: StyleTransferMapObject): Promise<Blob> => {
+    const img = await loadImage(`/${obj.tilesetImagePath}`)
+    const cols = obj.cells.map((c) => c.col)
+    const rows = obj.cells.map((c) => c.row)
+    const minCol = Math.min(...cols)
+    const minRow = Math.min(...rows)
+    const w = (Math.max(...cols) - minCol + 1) * obj.tileWidth
+    const h = (Math.max(...rows) - minRow + 1) * obj.tileHeight
+    const canvas = document.createElement('canvas')
+    canvas.width = w
+    canvas.height = h
+    const ctx = canvas.getContext('2d')
+    if (!ctx) {
+      throw new Error('canvas 컨텍스트를 만들지 못했습니다.')
+    }
+    ctx.imageSmoothingEnabled = false
+    for (const cell of obj.cells) {
+      const sx = (cell.tileId % obj.columns) * obj.tileWidth
+      const sy = Math.floor(cell.tileId / obj.columns) * obj.tileHeight
+      const dx = (cell.col - minCol) * obj.tileWidth
+      const dy = (cell.row - minRow) * obj.tileHeight
+      ctx.drawImage(img, sx, sy, obj.tileWidth, obj.tileHeight, dx, dy, obj.tileWidth, obj.tileHeight)
+    }
+    return await new Promise<Blob>((resolve, reject) =>
+      canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('PNG 생성 실패'))), 'image/png')
+    )
+  }
+  const runSaveOriginal = async (): Promise<void> => {
+    try {
+      if (mapObject) {
+        const blob = await composeOriginalObject(mapObject)
+        const name = `${safeName(mapObject.label)}_original.png`
+        triggerDownload(blob, name)
+        setStatus(`원본 저장됨: ${name}`)
+        return
+      }
+      if (contentMode === 'extracted' && selectedExtractedKeys.length === 1) {
+        const key = selectedExtractedKeys[0]
+        const res = await fetch(`/api/style/extracted-objects/${encodeURIComponent(key)}.png`)
+        if (!res.ok) {
+          throw new Error(`HTTP ${res.status}`)
+        }
+        triggerDownload(await res.blob(), `${safeName(key)}_original.png`)
+        setStatus('원본 저장됨')
+        return
+      }
+      if (contentMode === 'asset' && selectedAssetPaths.length === 1) {
+        const path = selectedAssetPaths[0]
+        const res = await fetch(`/${path}`)
+        if (!res.ok) {
+          throw new Error(`HTTP ${res.status}`)
+        }
+        const base = (path.split('/').pop() ?? 'asset.png').replace(/\.png$/i, '')
+        triggerDownload(await res.blob(), `${base}_original.png`)
+        setStatus('원본 저장됨')
+        return
+      }
+      const file = contentPicker.getFile()
+      if (file) {
+        triggerDownload(file, file.name)
+        setStatus(`원본 저장됨: ${file.name}`)
+        return
+      }
+      setStatus('저장할 원본이 없습니다 — 타일/오브젝트나 에셋을 먼저 선택하세요.')
+    } catch (error) {
+      setStatus(`원본 저장 실패: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
+  saveOrigButton.addEventListener('click', () => {
+    void runSaveOriginal()
   })
 
   // 모달을 열 때마다 서비스 생존 확인 — 미기동이면 실행 안내를 먼저 보여준다.

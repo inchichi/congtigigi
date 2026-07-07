@@ -143,7 +143,46 @@ export const createExternalSpriteStyler = (): ExternalSpriteStyler => {
 
   const status = el('span', 'text-xs text-zinc-400 min-h-4 leading-relaxed', '')
 
-  panel.append(top, projectLine, note, spriteCard, styleCard, optCard, applyButton, revertCard, status)
+  // 변환/적용 진행 표시 (0~100%). 단일 백엔드 호출이라 실제 진행률 스트림이 없어, 추정 진행도로 보여준다
+  // (시작하면 90%까지 감속하며 차오르고, 응답이 오면 100%로 마감).
+  const progressWrap = el('div', 'flex items-center gap-2')
+  const progressTrack = el('div', 'h-2 flex-1 overflow-hidden rounded-full bg-white/10')
+  const progressBar = el('div', 'h-full w-0 rounded-full bg-amber-400')
+  progressBar.style.transition = 'width 0.15s ease-out'
+  progressTrack.append(progressBar)
+  const progressLabel = el('span', 'w-9 shrink-0 text-right text-xs tabular-nums text-amber-300', '0%')
+  progressWrap.append(progressTrack, progressLabel)
+  progressWrap.style.display = 'none'
+  let progressTimer: number | undefined
+  let progressPct = 0
+  const setProgressPct = (pct: number): void => {
+    progressPct = pct
+    progressBar.style.width = `${pct}%`
+    progressLabel.textContent = `${Math.round(pct)}%`
+  }
+  const startProgress = (): void => {
+    if (progressTimer !== undefined) {
+      window.clearInterval(progressTimer)
+    }
+    setProgressPct(0)
+    progressWrap.style.display = 'flex'
+    progressTimer = window.setInterval(() => {
+      setProgressPct(progressPct + (90 - progressPct) * 0.08)
+    }, 120)
+  }
+  const finishProgress = (): void => {
+    if (progressTimer !== undefined) {
+      window.clearInterval(progressTimer)
+      progressTimer = undefined
+    }
+    setProgressPct(100)
+    window.setTimeout(() => {
+      progressWrap.style.display = 'none'
+      setProgressPct(0)
+    }, 350)
+  }
+
+  panel.append(top, projectLine, note, spriteCard, styleCard, optCard, applyButton, progressWrap, revertCard, status)
   backdrop.append(panel)
 
   // ── 상태 ──
@@ -152,6 +191,16 @@ export const createExternalSpriteStyler = (): ExternalSpriteStyler => {
   let styled: ExtAsset[] = []
   let styleFile: File | null = null
   let isBusy = false
+  let progressWasBusy = false
+  // isBusy 시작/완료 엣지에서 0~100% 진행 바를 시작/마감한다(아래 sync 함수들이 매 변경 직후 호출).
+  const updateBusyProgress = (): void => {
+    if (isBusy && !progressWasBusy) {
+      startProgress()
+    } else if (!isBusy && progressWasBusy) {
+      finishProgress()
+    }
+    progressWasBusy = isBusy
+  }
   let cacheBust = 0
   let allRevertConfirmArmed = false
 
@@ -165,6 +214,7 @@ export const createExternalSpriteStyler = (): ExternalSpriteStyler => {
     `${STYLE_SERVICE_BASE}/ext/asset?project=${encodeURIComponent(project!.id)}&path=${encodeURIComponent(path)}&t=${cacheBust}`
 
   const syncApplyButton = (): void => {
+    updateBusyProgress()
     const count = spritePicker.getSelected().length
     applyButton.disabled = isBusy || count === 0 || styleFile === null
     applyButton.textContent = count > 1 ? `스타일 적용 (${count}개)` : '스타일 적용'
@@ -172,6 +222,7 @@ export const createExternalSpriteStyler = (): ExternalSpriteStyler => {
   }
 
   const syncRevertButtons = (): void => {
+    updateBusyProgress()
     const count = revertPicker.getSelected().length
     revertSelectedButton.disabled = isBusy || count === 0
     revertSelectedButton.textContent = count > 0 ? `선택 되돌리기 (${count})` : '선택 되돌리기'
