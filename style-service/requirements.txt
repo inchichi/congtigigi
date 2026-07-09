@@ -1,6 +1,13 @@
-# 스타일 트랜스퍼 서비스 전용 의존성.
-# torch / torchvision / Pillow / numpy는 ADAIN/requirements.txt 쪽 요구사항이며,
-# 이미 설치된 버전(torch>=2.5)이면 그대로 동작한다 — 별도 다운그레이드 불필요.
+# FLUX.1 Kontext local inference
+# Install a CUDA build of torch separately if needed:
+#   pip install --upgrade torch torchvision --index-url https://download.pytorch.org/whl/cu128
 fastapi>=0.110,<1
 uvicorn>=0.30,<1
 python-multipart>=0.0.9
+Pillow>=10.2,<13
+diffusers>=0.35.0
+transformers>=4.48
+accelerate>=1.0
+safetensors>=0.5
+huggingface_hub>=0.32
+protobuf>=4.25
