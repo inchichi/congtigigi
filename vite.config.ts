@@ -245,7 +245,14 @@ export default defineConfig({
         secure: true,
         rewrite: (path) => path.replace(/^\/api\/anthropic/, '')
       },
-      // AdaIN 스타일 트랜스퍼 로컬 Python 서비스 — style-service/server.py (포트는 그쪽 config.json).
+      // 로컬 Qwen OpenAI 호환 서버. 기본값은 vLLM/llama.cpp의 8000 포트이며 QWEN_BASE_URL로 바꿀 수 있다.
+      '/api/qwen': {
+        target: process.env.QWEN_BASE_URL ?? 'http://127.0.0.1:8000',
+        changeOrigin: true,
+        secure: false,
+        rewrite: (path) => path.replace(/^\/api\/qwen/, '')
+      },
+      // FLUX 스타일 트랜스퍼 로컬 Python 서비스 — style-service/server.py (포트는 그쪽 config.json).
       '/api/style': {
         target: 'http://127.0.0.1:8765',
         changeOrigin: true,

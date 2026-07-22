@@ -205,6 +205,11 @@ def stylize_monster(
 ):
     if monster_key not in ("pig", "slime"):
         return JSONResponse(status_code=422, content={"error": f"지원하지 않는 몬스터 종류: {monster_key}"})
+    if asset_store.is_runtime_animation_asset(sheet_path):
+        return JSONResponse(
+            status_code=422,
+            content={"error": "Runtime animation sheets and map tilesets cannot be overwritten by FLUX. Use a static portrait or extracted object target instead."},
+        )
 
     try:
         sheet_bytes = asset_store.read_original_or_current(sheet_path)
@@ -238,6 +243,9 @@ def batch_apply(
             kind = target.get("kind")
             if kind == "asset":
                 path = target["path"]
+                if asset_store.is_runtime_animation_asset(path):
+                    failed.append({"target": str(target), "error": "Runtime animation sheets and map tilesets cannot be overwritten by FLUX."})
+                    continue
                 source = Image.open(asset_store.resolve_asset_path(path))
                 source.load()
                 result = _apply_prompt_to_content(source, prompt, alpha)
@@ -257,10 +265,20 @@ def batch_apply(
                     tile_width=meta["tileWidth"],
                     tile_height=meta["tileHeight"],
                 )
-                asset_store.backup_and_write(meta["tilesetPath"], _image_to_png_bytes(patched))
+                # Object targets are extracted static regions. Patch their
+                # recorded cells back into the protected tileset, while direct
+                # full-tileset and runtime-sheet overwrites remain blocked.
+                asset_store.backup_and_write(
+                    meta["tilesetPath"],
+                    _image_to_png_bytes(patched),
+                    allow_protected_tileset_patch=True,
+                )
                 applied.append(key)
             elif kind == "monster":
                 path = target["sheet_path"]
+                if asset_store.is_runtime_animation_asset(path):
+                    failed.append({"target": str(target), "error": "Runtime animation sheets and map tilesets cannot be overwritten by FLUX."})
+                    continue
                 source = Image.open(io.BytesIO(asset_store.read_original_or_current(path)))
                 source.load()
                 result = _apply_prompt_to_content(source, prompt, alpha)
@@ -279,6 +297,72 @@ def asset_status(path: str):
         return asset_store.asset_status(path)
     except ValueError as error:
         return JSONResponse(status_code=422, content={"error": str(error)})
+
+
+def _object_canvas_from_tileset(meta: dict, tileset_bytes: bytes) -> Image.Image:
+    tileset_image = Image.open(io.BytesIO(tileset_bytes)).convert("RGBA")
+    tileset_image.load()
+    return _compose_object_canvas(
+        tileset_image,
+        meta["cells"],
+        columns=meta["columns"],
+        tile_width=meta["tileWidth"],
+        tile_height=meta["tileHeight"],
+    )
+
+
+def _object_variant_bytes(key: str, variant: str) -> bytes:
+    meta = object_extract.read_meta(key)
+    tileset_path = meta["tilesetPath"]
+    status = asset_store.asset_status(tileset_path)
+    if variant == "before":
+        if not status["hasOriginal"]:
+            raise FileNotFoundError(f"원본이 없는 오브젝트입니다: {key}")
+        tileset_bytes = asset_store.read_original_or_current(tileset_path)
+    else:
+        tileset_bytes = asset_store.resolve_asset_path(tileset_path).read_bytes()
+    return _image_to_png_bytes(_object_canvas_from_tileset(meta, tileset_bytes))
+
+
+@app.get("/styled-objects")
+def styled_objects() -> dict:
+    objects: list[dict] = []
+    for meta in object_extract.list_objects():
+        try:
+            key = str(meta["key"])
+            tileset_path = str(meta["tilesetPath"])
+            status = asset_store.asset_status(tileset_path)
+            if not status["hasOriginal"] or not status["styled"]:
+                continue
+            before = _object_canvas_from_tileset(meta, asset_store.read_original_or_current(tileset_path))
+            after = _object_canvas_from_tileset(
+                meta,
+                asset_store.resolve_asset_path(tileset_path).read_bytes(),
+            )
+            if before.convert("RGBA").tobytes() == after.convert("RGBA").tobytes():
+                continue
+            objects.append({
+                "key": key,
+                "label": str(meta.get("label", key)),
+                "tilesetPath": tileset_path,
+                "beforeUrl": f"/api/style/styled-objects/{key}/before.png",
+                "afterUrl": f"/api/style/styled-objects/{key}/after.png",
+            })
+        except (KeyError, TypeError, ValueError, FileNotFoundError, OSError):
+            continue
+    return {"objects": objects}
+
+
+@app.get("/styled-objects/{key}/{variant}.png")
+def styled_object_png(key: str, variant: str):
+    if variant not in {"before", "after"}:
+        return JSONResponse(status_code=422, content={"error": "variant는 before 또는 after여야 합니다."})
+    try:
+        return Response(content=_object_variant_bytes(key, variant), media_type="image/png")
+    except ValueError as error:
+        return JSONResponse(status_code=422, content={"error": str(error)})
+    except (FileNotFoundError, OSError) as error:
+        return JSONResponse(status_code=404, content={"error": str(error)})
 
 
 def _validate_cells(cell_list) -> bool:

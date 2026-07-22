@@ -102,7 +102,18 @@ def _ensure_pipeline(config: KontextConfig) -> FluxKontextPipeline:
 
         dtype = _resolve_dtype(config.dtype)
         try:
-            pipeline = FluxKontextPipeline.from_pretrained(config.model_id, torch_dtype=dtype)
+            # FLUX.1-Kontext-dev의 체크포인트는 크기가 커서, 로딩 중 state dict를
+            # 메모리에 두 벌 유지하면 Qwen과 함께 실행하는 3090 서버에서 피크가 난다.
+            # accelerate의 저메모리 로딩과 GPU/CPU 분산으로 피크 사용량을 낮춘다.
+            load_kwargs: dict[str, object] = {
+                "torch_dtype": dtype,
+                "low_cpu_mem_usage": True,
+                "offload_state_dict": False,
+            }
+            if config.use_cpu_offload:
+                load_kwargs["device_map"] = "balanced"
+                load_kwargs["max_memory"] = {0: "20GiB", "cpu": "48GiB"}
+            pipeline = FluxKontextPipeline.from_pretrained(config.model_id, **load_kwargs)
         except (GatedRepoError, HfHubHTTPError) as exc:
             raise RuntimeError(
                 "FLUX.1-Kontext-dev is gated on Hugging Face. "
@@ -116,7 +127,10 @@ def _ensure_pipeline(config: KontextConfig) -> FluxKontextPipeline:
             ) from exc
         pipeline.set_progress_bar_config(disable=True)
         if config.use_cpu_offload:
-            pipeline.enable_model_cpu_offload()
+            # device_map이 적용된 경우 accelerate dispatch hook이 이미 배치와 이동을
+            # 담당하므로 enable_model_cpu_offload()를 중복 호출하지 않는다.
+            if not getattr(pipeline, "hf_device_map", None):
+                pipeline.enable_model_cpu_offload()
         else:
             pipeline = pipeline.to(config.device)
         _PIPELINE = pipeline

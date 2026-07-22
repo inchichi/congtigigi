@@ -24,6 +24,17 @@ _ORIGINALS_DIR = Path(__file__).resolve().parent / "originals"
 _write_lock = threading.Lock()
 
 ALLOWED_SUFFIXES = {".png"}
+_RUNTIME_ANIMATION_ASSET_NAMES = {
+    "monster-pig-sheet.png",
+    "pig-motion.png",
+    "몬스터-말캉이.png",
+    "town-32.png",
+    "tiny-dungeon-16.png",
+}
+
+
+def is_runtime_animation_asset(relative: str) -> bool:
+    return Path(relative).name.lower() in _RUNTIME_ANIMATION_ASSET_NAMES
 
 
 def _original_path(relative: str) -> Path:
@@ -60,8 +71,24 @@ def list_assets() -> list[dict]:
     return out
 
 
-def _backup_and_write_locked(target: Path, relative: str, data: bytes) -> str:
+def _backup_and_write_locked(
+    target: Path,
+    relative: str,
+    data: bytes,
+    *,
+    allow_protected_tileset_patch: bool = False,
+) -> str:
     """_write_lock 안에서만 호출 — 원본 시드 + 백업 + 덮어쓰기."""
+    is_protected_tileset_patch = (
+        allow_protected_tileset_patch
+        and Path(relative).name.lower() in {"town-32.png", "tiny-dungeon-16.png"}
+    )
+    if is_runtime_animation_asset(relative) and not is_protected_tileset_patch:
+        raise ValueError(
+            "Runtime animation sheets and map tilesets cannot be overwritten by FLUX. "
+            "Use a static portrait or extracted object target instead."
+        )
+
     # 첫 적용이면 최초 원본을 시드한다(이미 있으면 보존) — 되돌리기의 복원 지점.
     original_path = _original_path(relative)
     if not original_path.exists():
@@ -84,16 +111,31 @@ def _backup_and_write_locked(target: Path, relative: str, data: bytes) -> str:
     return str(backup_path)
 
 
-def backup_and_write(relative: str, data: bytes) -> str:
+def backup_and_write(
+    relative: str,
+    data: bytes,
+    *,
+    allow_protected_tileset_patch: bool = False,
+) -> str:
     """기존 에셋을 backups/에 복사한 뒤 덮어쓴다. 새 파일 생성은 허용하지 않는다(오타 경로 방지)."""
     target = resolve_asset_path(relative)
     if not target.is_file():
         raise FileNotFoundError(f"덮어쓸 에셋이 없습니다: {relative}")
     with _write_lock:
-        return _backup_and_write_locked(target, relative, data)
+        return _backup_and_write_locked(
+            target,
+            relative,
+            data,
+            allow_protected_tileset_patch=allow_protected_tileset_patch,
+        )
 
 
-def backup_and_transform(relative: str, transform: Callable[[bytes], bytes]) -> str:
+def backup_and_transform(
+    relative: str,
+    transform: Callable[[bytes], bytes],
+    *,
+    allow_protected_tileset_patch: bool = False,
+) -> str:
     """현재 에셋 바이트를 읽어 변환한 결과로 덮어쓴다 — read-modify-write 전체를 락 안에서.
 
     apply가 락 밖에서 파일을 읽으면 병렬 적용 시 lost update(나중 쓰기가 먼저 적용된
@@ -105,7 +147,12 @@ def backup_and_transform(relative: str, transform: Callable[[bytes], bytes]) -> 
         raise FileNotFoundError(f"덮어쓸 에셋이 없습니다: {relative}")
     with _write_lock:
         data = transform(target.read_bytes())
-        return _backup_and_write_locked(target, relative, data)
+        return _backup_and_write_locked(
+            target,
+            relative,
+            data,
+            allow_protected_tileset_patch=allow_protected_tileset_patch,
+        )
 
 
 def read_original_or_current(relative: str) -> bytes:

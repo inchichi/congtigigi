@@ -55,7 +55,7 @@ const getQuestGiverNpcIds = (
 ): string[] =>
   entity?.kind === 'npc' ? uniqueStrings([entity.id]) : getProfileNpcIds(profile)
 
-const createQuestJsonSchema = (
+export const createQuestJsonSchema = (
   profile: GameStructureProfile,
   entity?: GameEntity
 ): JsonSchema => {
@@ -191,7 +191,7 @@ const createQuestJsonSchema = (
   }
 }
 
-const createQuestSystemPrompt = (
+export const createQuestSystemPrompt = (
   profile: GameStructureProfile,
   entity?: GameEntity
 ): string => {

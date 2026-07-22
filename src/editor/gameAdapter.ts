@@ -77,9 +77,11 @@ export type GenerationResult = {
   // 생성과 분리된 결정적 검증(Validator) 결과. 빈 배열이면 통과(이사님 #1: 생성/검증 분리).
   issues: string[]
   // 같은 origin 웹게임(local-storage 적용)용. null이면 이 경로로는 적용하지 않는다.
-  apply: (() => void) | null
+  apply: (() => void | Promise<void>) | null
   // 저장/export할 때 사용할 확장자. JSON이면 기본값, Lua 결과는 .lua를 쓴다.
   exportFileExtension?: 'json' | 'lua'
+  // Some generated results require a successful dry-run before live apply.
+  requiresDryRun?: boolean
   // 브리지(별도 프로세스 게임) 적용용 구조화 페이로드. applyMode가 'bridge'인 게임에서 채운다.
   bridgePayload: BridgeApplyMessage | null
   // 이벤트 JSON 게임(my-sample-rpg)에서 채운다. 에디터가 드라이런 검증(dryRunEventApply)에 쓴다.

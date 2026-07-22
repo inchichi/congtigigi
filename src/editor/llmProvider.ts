@@ -1,12 +1,14 @@
 import { ANTHROPIC_MODEL, generateJsonWithClaude } from './anthropicGenerate'
 import { OPENAI_MODEL, generateJsonWithOpenAi } from './openaiGenerate'
+import { generateJsonWithQwen, QWEN_MODEL } from './qwenGenerate'
 
 // 키 하나만 붙이면 Claude/GPT를 자동 판별해 라우팅한다. (사용자: "gpt도 claude도 될 수 있어야")
-export type LlmProvider = 'anthropic' | 'openai'
+export type LlmProvider = 'anthropic' | 'openai' | 'qwen'
 
 export const PROVIDER_LABEL: Record<LlmProvider, string> = {
   anthropic: 'Claude',
-  openai: 'GPT'
+  openai: 'GPT',
+  qwen: 'Qwen (local)'
 }
 
 // provider별 선택 가능한 모델 목록(드롭다운용). OpenAI는 2026-06 기준 현행 모델
@@ -20,12 +22,14 @@ export const PROVIDER_MODELS: Record<LlmProvider, string[]> = {
     'gpt-5.4-pro',
     'gpt-5.4-mini',
     'gpt-5.4-nano'
-  ]
+  ],
+  qwen: [QWEN_MODEL]
 }
 
 const DEFAULT_MODEL: Record<LlmProvider, string> = {
   anthropic: ANTHROPIC_MODEL,
-  openai: OPENAI_MODEL
+  openai: OPENAI_MODEL,
+  qwen: QWEN_MODEL
 }
 
 // 사용자가 설정에서 모델을 바꾸면 여기에 저장된다(provider별). generateJson이 이 값을 읽어 호출하므로
@@ -47,6 +51,10 @@ export const getProviderModel = (provider: LlmProvider): string =>
 // 키 접두로 provider를 판별한다. Anthropic은 sk-ant-, OpenAI는 sk-(sk-proj- 포함).
 export const detectProvider = (apiKey: string): LlmProvider | undefined => {
   const key = apiKey.trim()
+
+  if (/^(qwen|local-qwen)(-|:|$)/iu.test(key) || key === 'local') {
+    return 'qwen'
+  }
 
   if (key.startsWith('sk-ant-')) {
     return 'anthropic'
@@ -75,6 +83,10 @@ export const generateJson = async <T>(args: GenerateJsonInput): Promise<T> => {
     return generateJsonWithOpenAi<T>({ ...args, model: getProviderModel('openai') })
   }
 
+  if (provider === 'qwen') {
+    return generateJsonWithQwen<T>({ ...args, model: getProviderModel('qwen') })
+  }
+
   // 기본값 anthropic (기존 동작 유지). 알 수 없는 형식이면 Claude 경로가 인증 에러로 알려준다.
   return generateJsonWithClaude<T>({ ...args, model: getProviderModel('anthropic') })
 }
@@ -100,7 +112,7 @@ export const validateApiKey = async (apiKey: string): Promise<ApiKeyCheck> => {
   if (!provider) {
     return {
       status: 'unknown',
-      message: '알 수 없는 키 형식입니다 (Claude=sk-ant-…, GPT=sk-…).'
+      message: '알 수 없는 키 형식입니다 (Claude=sk-ant-…, GPT=sk-…, Qwen=qwen-local).'
     }
   }
 
@@ -113,9 +125,13 @@ export const validateApiKey = async (apiKey: string): Promise<ApiKeyCheck> => {
               'anthropic-version': '2023-06-01'
             }
           })
-        : await fetch('/api/openai/v1/models', {
-            headers: { authorization: `Bearer ${key}` }
-          })
+        : provider === 'openai'
+          ? await fetch('/api/openai/v1/models', {
+              headers: { authorization: `Bearer ${key}` }
+            })
+          : await fetch('/api/qwen/v1/models', {
+              headers: key === 'qwen-local' ? {} : { authorization: `Bearer ${key}` }
+            })
 
     if (response.ok) {
       return {

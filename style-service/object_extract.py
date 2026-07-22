@@ -181,7 +181,11 @@ def apply_styled_object(key: str, styled_png: bytes) -> dict:
         patched.save(buffer, format="PNG")
         return buffer.getvalue()
 
-    backup = asset_store.backup_and_transform(meta["tilesetPath"], _patch)
+    backup = asset_store.backup_and_transform(
+        meta["tilesetPath"],
+        _patch,
+        allow_protected_tileset_patch=True,
+    )
     return {
         "ok": True,
         "backup": backup,

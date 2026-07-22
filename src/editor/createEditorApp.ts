@@ -38,6 +38,7 @@ import { buildSessionMetrics, type SessionGenerationTally } from './sessionMetri
 import { editorIcon, type EditorIconName } from './editorIcons'
 import type { GameEntity, GenerationFeedback, GenerationResult } from './gameAdapter'
 import { generateQuestCandidates, type QuestCandidate } from './questCandidates'
+import { QWEN_LOCAL_TOKEN } from './qwenGenerate'
 // ── develop-chich: 퀘스트/NPC 생성 파이프라인 ──
 import { generateQuestJson } from './questJsonGenerator'
 import { dryRunQuestApply } from './dryRunQuestApply'
@@ -69,6 +70,7 @@ import {
 } from './createStyleTransferModal'
 import { createStyleRevertControl } from './createStyleRevertControl'
 import { createExternalSpriteStyler } from './createExternalSpriteStyler'
+import { createBeforeAfterView } from './createBeforeAfterView'
 import {
   createPlacementPalette,
   type NpcPaletteContext
@@ -572,19 +574,14 @@ export const createEditorApp = ({
   headerRight.append(styleTransfer.openButton, styleRevert.button, externalStyler.button, placementPalette.button, settingsButton, connection)
   header.append(brand, headerRight)
 
-  // LLM 챗 스타일 배치: 가운데가 라이브 게임(위 가득) + 프롬프트(아래), 오른쪽이 생성 결과.
-  // 3열은 md(≥768px)부터 바로 적용한다 — 이전엔 lg부터여서, 브라우저 줌을 쓰는 일반 노트북
-  // 창이 "결과가 하단 전폭" 배치로 떨어지며 게임 세로 공간을 잃었다(게임이 납작한 띠가 됨).
-  //  - md(≥768px): [엔티티 트리 | 게임+프롬프트 | 생성 결과] 3열 (lg부터는 사이드가 약간 넓어짐)
-  //  - 그 미만: 트리 → 게임+프롬프트 → 생성 결과 세로 스택
+  // 메인 에디터는 에셋 트리와 라이브 게임 프리뷰에 집중한다.
+  // 자연어 프롬프트와 생성 결과 보드는 테마 변경 시작 버튼으로 들어가는 작업실에 둔다.
   const body = el(
     'div',
-    // 패널 사이 여백은 최소로 — 게임 화면에 최대한 면적을 준다(헤더 쪽 위 여백은 절반).
+    // 테마 작업실을 열기 전에는 오른쪽 결과 보드와 하단 컴포저를 만들지 않고 게임 화면을 넓게 쓴다.
     'flex-1 min-h-0 grid gap-2 px-2 pb-2 pt-1 ' +
-      'grid-cols-1 grid-rows-[auto_minmax(0,1.4fr)_minmax(0,1fr)] [grid-template-areas:"tree""main""side"] ' +
-      // 게임 화면이 화면 대부분을 차지하도록 좌우 사이드를 좁게 못 박는다.
-      // 왼쪽은 아이콘 카드 2열(카드 약 90px+)이 들어가야 해서 최소 폭을 조금 더 준다.
-      'md:grid-cols-[minmax(210px,16%)_minmax(0,1fr)_minmax(195px,16%)] md:grid-rows-[minmax(0,1fr)] md:[grid-template-areas:"tree_main_side"]'
+      'grid-cols-1 grid-rows-[auto_minmax(0,1fr)] [grid-template-areas:"tree""main"] ' +
+      'md:grid-cols-[minmax(210px,16%)_minmax(0,1fr)] md:grid-rows-[minmax(0,1fr)] md:[grid-template-areas:"tree_main"]'
   )
 
   // ---------- left: project tree ----------
@@ -672,10 +669,10 @@ export const createEditorApp = ({
   const supportNote = el('div', 'rounded-lg border border-[#d9a85c]/22 bg-[#3a3122] px-3 py-2 text-xs text-[#d8b270]')
 
   const apiKeyField = el('label', 'flex flex-col gap-2')
-  apiKeyField.append(el('span', SETTINGS_LABEL, 'API 키 — Claude 또는 GPT (자동 감지)'))
+  apiKeyField.append(el('span', SETTINGS_LABEL, 'API 키 또는 로컬 토큰 — Claude · GPT · Qwen'))
   const apiKeyInput = el('input', SETTINGS_INPUT) as HTMLInputElement
   apiKeyInput.type = 'password'
-  apiKeyInput.placeholder = 'sk-ant-… (Claude)  또는  sk-… (GPT)'
+  apiKeyInput.placeholder = 'sk-ant-… · sk-… · qwen-local (로컬 Qwen)'
   apiKeyInput.autocomplete = 'off'
   apiKeyInput.value = apiKey
   apiKeyField.append(apiKeyInput)
@@ -683,17 +680,20 @@ export const createEditorApp = ({
   const apiKeyStatus = el('span', 'text-sm font-medium text-[#9d9d9d]', '')
   apiKeyField.append(apiKeyStatus)
 
-  // 모델 선택 — 키는 모델을 정하지 않으므로, 감지된 provider의 모델 중에서 고른다(저장됨).
-  // 드롭다운 대신 게임식 선택 버튼. 실제 상태는 숨겨진 select가 그대로 들고 있어
-  // 기존 change 리스너·저장 로직이 전혀 바뀌지 않는다(칩 클릭 → select 값 변경 + change 디스패치).
+  // 모델 선택 — provider 칩을 누르면 provider를 선택하고, 아래 칩에서 모델을 고른다.
+  // 실제 모델 상태는 숨겨진 select가 그대로 들고 있어 기존 저장 로직을 유지한다.
   const modelField = el('div', 'flex flex-col gap-2.5')
   modelField.append(el('span', SETTINGS_LABEL, '모델 선택'))
-  const providerChips: Record<LlmProvider, HTMLElement> = {
-    anthropic: el('span', PROVIDER_CHIP, 'Claude'),
-    openai: el('span', PROVIDER_CHIP, 'GPT')
+  const providerChips: Record<LlmProvider, HTMLButtonElement> = {
+    anthropic: el('button', PROVIDER_CHIP, 'Claude') as HTMLButtonElement,
+    openai: el('button', PROVIDER_CHIP, 'GPT') as HTMLButtonElement,
+    qwen: el('button', PROVIDER_CHIP, 'Qwen') as HTMLButtonElement
   }
+  Object.values(providerChips).forEach((chip) => {
+    chip.type = 'button'
+  })
   const providerRow = el('div', 'flex items-center gap-2')
-  providerRow.append(providerChips.anthropic, providerChips.openai)
+  providerRow.append(providerChips.anthropic, providerChips.openai, providerChips.qwen)
   const modelChips = el('div', 'flex flex-wrap gap-2')
   const modelSelect = el('select', 'hidden') as HTMLSelectElement
   modelField.append(providerRow, modelChips, modelSelect)
@@ -830,6 +830,10 @@ export const createEditorApp = ({
   const generateLabel = el('span', 'text-[18px] font-bold leading-none', '✨ 이야기 생성')
   generateButton.append(generateLabel)
   generateButton.type = 'button'
+  const themeButton = el('button', GHOST_BUTTON, '🌌 테마 변경 시작') as HTMLButtonElement
+  themeButton.type = 'button'
+  // 메인 화면에서 테마 작업실로 진입하는 유일한 시작점. 기존 editor.html의 workspace 모드로 전환한다.
+  headerRight.append(themeButton)
   const applyButton = el('button', APPLY_BUTTON, '적용') as HTMLButtonElement
   applyButton.type = 'button'
   const copyButton = el('button', GHOST_BUTTON, '복사') as HTMLButtonElement
@@ -843,7 +847,7 @@ export const createEditorApp = ({
   const primaryGroup = el('div', 'flex flex-col gap-1')
   primaryGroup.append(
     primaryRow,
-    el('span', 'text-[11px] leading-[1.3] text-[#777777] opacity-70', '선택한 대상에 새로운 이야기를 생성합니다.')
+    el('span', 'text-[11px] leading-[1.3] text-[#777777] opacity-70', '이야기 생성 또는 Qwen+FLUX 테마 통합 생성을 선택하세요.')
   )
   const utilityGroup = el('div', 'flex flex-wrap items-center gap-1.5')
   utilityGroup.append(
@@ -859,7 +863,7 @@ export const createEditorApp = ({
   validationLine.hidden = true
 
   // ---------- 결과 보드: 위 목록(4줄) + 아래 단일 상세 창 (퀘스트 로그식 마스터-디테일) ----------
-  type BoardTab = 'lua' | 'files' | 'verify' | 'apply' | 'candidates'
+  type BoardTab = 'lua' | 'files' | 'verify' | 'apply' | 'candidates' | 'beforeAfter'
   // 표시 전용 상태 — 어떤 항목의 상세를 보여줄지. 처음엔 미선택("항목을 선택하세요").
   let activeBoardTab: BoardTab | undefined
   // 상태 카드형 목록(52px): 제목 + 짧은 상태 텍스트 + 우측 화살표. hover에서 화살표도 같이 강조.
@@ -893,6 +897,7 @@ export const createEditorApp = ({
   const applyView = makeDetailView('적용 상태')
   const applyStatus = el('div', 'text-[12px] text-[#9d9d9d]', '대기 중')
   applyView.body.append(applyStatus)
+  const beforeAfterView = createBeforeAfterView()
 
   // 위쪽 목록 — 클릭하면 아래 상세 창의 내용만 바뀐다.
   const boardList = el('div', 'flex flex-col gap-1.5')
@@ -900,7 +905,8 @@ export const createEditorApp = ({
     { id: 'lua', label: '생성된 Lua 코드' },
     { id: 'files', label: '변경 예정 파일' },
     { id: 'verify', label: '검증 결과' },
-    { id: 'apply', label: '적용 상태' }
+    { id: 'apply', label: '적용 상태' },
+    { id: 'beforeAfter', label: '비포 / 애프터' }
   ]
   // 아래 상세 창 — 깊은 차콜 + 중립 테두리의 둥근 카드 하나.
   const boardDetail = el('div', 'flex-1 min-h-[240px] rounded-2xl border border-[#d9a85c]/28 bg-[#1a1a1a] p-3.5 flex flex-col overflow-auto')
@@ -936,7 +942,15 @@ export const createEditorApp = ({
     el('div', 'whitespace-pre-line text-[11px] leading-[1.5] text-[#777777] opacity-70', '왼쪽 패널에서 에셋을 선택하고\n이야기를 생성하면 여기에 표시됩니다.'),
     el('div', 'text-[11px] leading-[1.5] text-[#9d9d9d] opacity-80', '생성 → 검증 → 적용 결과를 이 영역에서 확인할 수 있습니다.')
   )
-  boardDetail.append(detailPlaceholder, candidatesView.view, luaView.view, filesView.view, verifyView.view, applyView.view)
+  boardDetail.append(
+    detailPlaceholder,
+    candidatesView.view,
+    luaView.view,
+    filesView.view,
+    verifyView.view,
+    applyView.view,
+    beforeAfterView.view
+  )
   const boardRows = BOARD_TABS.map((tab) => {
     const row = el('button', BOARD_ROW) as HTMLButtonElement
     // 제목(좌) + 상태 캡슐 배지(우, render()가 채움) + ▸ 화살표(클릭하면 아래 상세가 열린다는 신호).
@@ -965,10 +979,14 @@ export const createEditorApp = ({
     filesView.view.hidden = activeBoardTab !== 'files'
     verifyView.view.hidden = activeBoardTab !== 'verify'
     applyView.view.hidden = activeBoardTab !== 'apply'
+    beforeAfterView.view.hidden = activeBoardTab !== 'beforeAfter'
   }
   for (const { id, row } of boardRows) {
     row.addEventListener('click', () => {
       activeBoardTab = id
+      if (id === 'beforeAfter') {
+        beforeAfterView.refresh()
+      }
       updateBoard()
     })
   }
@@ -1430,7 +1448,8 @@ export const createEditorApp = ({
   resizeHandle.addEventListener('pointercancel', endComposerResize)
   // 창 크기가 바뀌면 현재 높이를 새 영역에 맞게 다시 클램프한다(미리보기가 사라지지 않게).
   new ResizeObserver(applyComposerHeight).observe(center)
-  center.append(preview, resizeHandle, composer)
+  // composer는 테마 작업실로 이동했다. 메인 에디터에는 라이브 게임만 남긴다.
+  center.append(preview)
 
   // ---------- right: 생성 결과 사이드바 ----------
   // 결과 사이드는 보조 정보 — 패널 자체를 본문보다 살짝 더 어둡게 가라앉힌다.
@@ -1458,7 +1477,8 @@ export const createEditorApp = ({
     historyWrap
   )
 
-  body.append(tree, center, side)
+  // side 역시 테마 작업실로 이동했다. 메인 에디터에서는 트리 + 프리뷰만 표시한다.
+  body.append(tree, center)
   // ---------- settings modal (헤더 ⚙) ----------
   // API 키·폴더 열기·분석·복귀는 상시 노출 대신 여기로 모은다. 메인은 편집에 집중.
   const settingsBackdrop = el('div', 'fixed inset-0 z-50 bg-black/60 backdrop-blur flex items-center justify-center p-4')
@@ -2574,13 +2594,17 @@ export const createEditorApp = ({
     generateLabel.textContent = isGenerating ? '✨ 생성 중...' : '✨ 이야기 생성'
     generateButton.disabled =
       isGenerating || apiKey.trim().length === 0 || promptInput.value.trim().length === 0
+    // 테마 작업실은 메인 에디터의 프롬프트 입력과 분리되어 있으므로
+    // 메인 화면에서는 생성 중일 때만 이동 버튼을 잠근다.
+    themeButton.disabled = isGenerating
     // 단일 흐름: 검증(issues)이 적용을 막지 않는다(기존 동작 유지). 퀘스트 모드에서는 무결성
     // 검증(드라이런)이 통과해야만 적용을 허용한다 — 사용자가 정한 "검증 통과 시 라이브 적용".
     // 적용 가능 = localStorage apply()가 있거나(rpg) 브리지 페이로드가 있을 때(legend-of-lua).
     applyButton.disabled =
       isGenerating ||
       (!currentResult?.apply && !currentResult?.bridgePayload) ||
-      (candidateMode && currentDryRun?.ok !== true)
+      (candidateMode && currentDryRun?.ok !== true) ||
+      (currentResult?.requiresDryRun === true && currentDryRun?.ok !== true)
     copyButton.disabled = !currentResult || isGenerating
     exportButton.disabled = !currentResult || isGenerating
     // 결과 보드 채우기(표시 전용): 목록 4줄은 항상 보이고, 상세 창 내용만 갱신된다.
@@ -3105,6 +3129,7 @@ export const createEditorApp = ({
       return
     }
 
+
     // 퀘스트 모드: '이야기 생성'은 1단계(후보 N개)를 만든다. 실제 이벤트는 후보를 골라 2단계에서.
     if (candidateMode) {
       await runGenerateCandidates()
@@ -3171,7 +3196,7 @@ export const createEditorApp = ({
     onStatusChange: () => {}
   })
 
-  const runApply = (): void => {
+  const runApply = async (): Promise<void> => {
     // legend-of-lua NPC 스폰: 패널 iframe(love.js)에 postMessage로 보내고(host page editor-bridge.js가
     // 받아 게임에 전달), 네이티브 게임이 떠 있으면 HTTP 브리지로도 보낸다. 패널은 NPC 코드+브리지가
     // 담긴 재빌드된 love.js 빌드여야 즉시 반영된다(미반영이면 native 또는 editorNPCs.lua 경로 사용).
@@ -3219,15 +3244,27 @@ export const createEditorApp = ({
     }
 
     // apply()는 localStorage 저장을 동반해 실패할 수 있다. 조용히 죽지 않고 상태로 알린다.
+    const resultToApply = currentResult
+    const applyResult = resultToApply.apply
+    if (!applyResult) {
+      return
+    }
+    isGenerating = true
+    render()
     try {
-      currentResult.apply()
+      setStatus('생성 결과를 게임과 에셋에 적용 중...')
+      await applyResult()
       // 결과 보드 "적용 상태"·'오늘 작업' 갱신용 표시 전용 기록.
-      appliedResults.add(currentResult)
+      appliedResults.add(resultToApply)
       appliedCount += 1
       render()
       setStatus('게임에 적용됨 — 오른쪽 라이브 프리뷰에 즉시 반영됩니다.')
     } catch (error) {
       setStatus(`적용 실패: ${error instanceof Error ? error.message : String(error)}`)
+    } finally {
+      isGenerating = false
+      beforeAfterView.refresh()
+      render()
     }
   }
 
@@ -3389,6 +3426,7 @@ export const createEditorApp = ({
     // 제공사 칩(Claude/GPT)은 감지된 쪽만 금색으로 — 키가 정하므로 표시 전용.
     providerChips.anthropic.className = provider === 'anthropic' ? PROVIDER_CHIP_ACTIVE : PROVIDER_CHIP
     providerChips.openai.className = provider === 'openai' ? PROVIDER_CHIP_ACTIVE : PROVIDER_CHIP
+    providerChips.qwen.className = provider === 'qwen' ? PROVIDER_CHIP_ACTIVE : PROVIDER_CHIP
     // 모델 칩: 클릭하면 숨은 select에 값을 넣고 change를 쏴서 기존 저장 로직을 그대로 태운다.
     modelChips.replaceChildren(
       ...options.map((modelId) => {
@@ -3439,6 +3477,31 @@ export const createEditorApp = ({
     apiKeyStatus.textContent = `${icon} ${check.message}`
   }
 
+  const selectProvider = (provider: LlmProvider): void => {
+    if (provider === 'qwen') {
+      // 로컬 Qwen은 외부 API 키가 필요 없으므로 칩 클릭만으로 바로 연결한다.
+      apiKey = QWEN_LOCAL_TOKEN
+      apiKeyInput.value = QWEN_LOCAL_TOKEN
+      writeLocalStorage(API_KEY_STORAGE_KEY, QWEN_LOCAL_TOKEN)
+    } else if (detectProvider(apiKey) !== provider) {
+      // 외부 provider는 보안상 키를 추측하지 않고 고급 설정 입력창으로 안내한다.
+      apiKey = ''
+      apiKeyInput.value = ''
+      writeLocalStorage(API_KEY_STORAGE_KEY, '')
+    }
+    populateModelSelect(provider)
+    modelBadge.textContent = `${PROVIDER_LABEL[provider]} · ${getProviderModel(provider)}`
+    render()
+    void refreshApiKeyStatus()
+    if (provider !== 'qwen') {
+      apiKeyInput.focus()
+    }
+  }
+
+  for (const provider of ['anthropic', 'openai', 'qwen'] as const) {
+    providerChips[provider].addEventListener('click', () => selectProvider(provider))
+  }
+
   let apiKeyDebounce: ReturnType<typeof setTimeout> | undefined
   apiKeyInput.addEventListener('input', () => {
     apiKey = apiKeyInput.value
@@ -3467,7 +3530,7 @@ export const createEditorApp = ({
   })
 
   // 저장된 모델(provider별)을 복원한 뒤, 저장돼 있던 키가 있으면 검증해 배지·모델·상태를 채운다.
-  for (const provider of ['anthropic', 'openai'] as const) {
+  for (const provider of ['anthropic', 'openai', 'qwen'] as const) {
     const storedModel = readLocalStorage(`${MODEL_STORAGE_PREFIX}${provider}`)
     if (storedModel) {
       setProviderModel(provider, storedModel)
@@ -3480,10 +3543,14 @@ export const createEditorApp = ({
   generateButton.addEventListener('click', () => {
     void runGenerate()
   })
+  themeButton.addEventListener('click', () => {
+    window.location.href = '/editor.html?workspace=theme'
+  })
   // 프롬프트가 비면 생성 버튼도 비활성(눌러보고 실패하는 대신). 전체 re-render 없이 버튼만 갱신.
   promptInput.addEventListener('input', () => {
     generateButton.disabled =
       isGenerating || apiKey.trim().length === 0 || promptInput.value.trim().length === 0
+    themeButton.disabled = isGenerating
     // 진행 상태(요청 작성 중 ↔ 생성 대기)도 입력에 따라 갱신(표시 전용).
     updateComposerSteps()
     updateStepBar()
