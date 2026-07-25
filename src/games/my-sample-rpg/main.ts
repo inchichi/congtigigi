@@ -416,24 +416,23 @@ const createSceneCharacters = ({
 
 const collectLuaControllerScripts = (
   characters: CharacterState[]
-): Record<string, { source: string }> =>
-  Object.fromEntries(
-    characters.flatMap((character) => {
-      if (character.controller.kind !== 'lua') {
-        return []
-      }
+): Record<string, { source: string }> => {
+  characters.forEach((character) => {
+    if (
+      character.controller.kind === 'lua' &&
+      !availableLuaControllerScriptsById[character.controller.scriptId]
+    ) {
+      throw new Error(
+        `Missing Lua controller source for scriptId "${character.controller.scriptId}"`
+      )
+    }
+  })
 
-      const script = availableLuaControllerScriptsById[character.controller.scriptId]
-
-      if (!script) {
-        throw new Error(
-          `Missing Lua controller source for scriptId "${character.controller.scriptId}"`
-        )
-      }
-
-      return [[character.controller.scriptId, script]]
-    })
-  )
+  // 맵이 지금 쓰는 스크립트만 등록하면, 에디터가 나중에 주입하는 대화 컨트롤러
+  // (reply-with-message 등)가 미등록 상태로 남아 씬 진입 후 적용이 실패한다.
+  // 그래서 검증은 캐릭터 기준으로 하되 등록은 사용 가능한 스크립트 전부로 한다.
+  return { ...availableLuaControllerScriptsById }
+}
 
 const destroyActiveScene = () => {
   activeControllerRuntime = undefined

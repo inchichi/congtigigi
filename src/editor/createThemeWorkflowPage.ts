@@ -20,6 +20,12 @@ import { dryRunQuestApply } from './dryRunQuestApply'
 import { convertGeneratedQuestToDefinition } from './questCodeGenerator'
 import { replacePendingQuests } from './pendingQuests'
 import { createBeforeAfterView } from './createBeforeAfterView'
+import {
+  appendThemeWorkLog,
+  clearThemeWorkLog,
+  loadThemeWorkLog,
+  type ThemeWorkLogEntry
+} from './themeWorkLog'
 
 type ThemeStage = 0 | 1 | 2 | 3
 
@@ -93,6 +99,9 @@ export const createThemeWorkflowPage = ({
   let direction: UnifiedThemeDirection | undefined
   let quest: GeneratedQuestJson | undefined
   let styleDraft: UnifiedThemeStyleTargetDraft | undefined
+  let directionNote = ''
+  let questNote = ''
+  let styleNote = ''
   let catalog: StyleCatalog | undefined
   let isGenerating = false
   let isApplying = false
@@ -116,7 +125,13 @@ export const createThemeWorkflowPage = ({
   )
   brand.append(back, brandText)
   const badges = el('div', 'flex flex-wrap items-center gap-2')
-  badges.append(makeTag('My Sample RPG', true), makeTag('Qwen 연결됨', true), makeTag('단계별 승인'))
+  const workLogButton = el(
+    'button',
+    'rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-[12px] text-[#c9c9c9] transition hover:border-[#d9a85c]/60 hover:text-[#f1dfb5]',
+    '📜 작업 로그'
+  ) as HTMLButtonElement
+  workLogButton.type = 'button'
+  badges.append(makeTag('My Sample RPG', true), makeTag('Qwen 연결됨', true), makeTag('단계별 승인'), workLogButton)
   header.append(brand, badges)
 
   const steps = [
@@ -190,6 +205,22 @@ export const createThemeWorkflowPage = ({
   shell.append(header, stepBar, layout)
   mountElement.append(shell)
 
+  const logOverlay = el('div', 'fixed inset-0 z-50 items-center justify-center bg-black/60 p-6')
+  logOverlay.style.display = 'none'
+  const logCard = el('div', 'flex max-h-[80vh] w-full max-w-[760px] flex-col gap-3 rounded-2xl border border-[#d9a85c]/30 bg-[#1b1b1d] p-5')
+  const logHeader = el('div', 'flex items-center justify-between gap-2')
+  const logHeaderButtons = el('div', 'flex items-center gap-2')
+  const logClearButton = el('button', 'rounded-lg border border-[#e06c6c]/35 bg-[#2b1d1f] px-3 py-2 text-[11px] text-[#f2a7a7] transition hover:border-[#e06c6c]', '전체 삭제') as HTMLButtonElement
+  logClearButton.type = 'button'
+  const logCloseButton = el('button', SECONDARY_BUTTON, '닫기') as HTMLButtonElement
+  logCloseButton.type = 'button'
+  logHeaderButtons.append(logClearButton, logCloseButton)
+  logHeader.append(el('div', 'text-[16px] font-bold text-[#f1dfb5]', '테마 작업 로그'), logHeaderButtons)
+  const logList = el('div', 'flex flex-col gap-3 overflow-y-auto pr-1')
+  logCard.append(logHeader, logList)
+  logOverlay.append(logCard)
+  shell.append(logOverlay)
+
   const selectedEntity = (): GameEntity | undefined => {
     if (!giverSelect.value) return undefined
     const npc = profile.npcs.find((candidate) => candidate.id === giverSelect.value)
@@ -223,9 +254,16 @@ export const createThemeWorkflowPage = ({
     statusText = 'Qwen이 테마 방향을 설계하는 중…'
     render()
     try {
-      direction = await generateUnifiedThemeDirection({ apiKey: QWEN_LOCAL_TOKEN, userPrompt: promptInput.value })
+      const { explanation, ...directionResult } = await generateUnifiedThemeDirection({
+        apiKey: QWEN_LOCAL_TOKEN,
+        userPrompt: promptInput.value
+      })
+      direction = directionResult
+      directionNote = explanation?.trim() ?? ''
       quest = undefined
       styleDraft = undefined
+      questNote = ''
+      styleNote = ''
       stage = 0
       statusText = '테마 방향을 확인하세요. 사용하면 퀘스트 단계로 넘어갑니다.'
     } catch (caught) {
@@ -244,14 +282,17 @@ export const createThemeWorkflowPage = ({
     statusText = 'Qwen이 승인된 방향에 맞는 퀘스트를 설계하는 중…'
     render()
     try {
-      quest = await generateUnifiedThemeQuest({
+      const { explanation, ...questResult } = await generateUnifiedThemeQuest({
         apiKey: QWEN_LOCAL_TOKEN,
         userPrompt: promptInput.value,
         profile,
         direction,
         entity: selectedEntity()
       })
+      quest = questResult
+      questNote = explanation?.trim() ?? ''
       styleDraft = undefined
+      styleNote = ''
       stage = 1
       statusText = '퀘스트를 확인하세요. 사용하면 FLUX 대상 단계로 넘어갑니다.'
     } catch (caught) {
@@ -270,13 +311,15 @@ export const createThemeWorkflowPage = ({
     statusText = 'Qwen이 퀘스트와 테마에 맞는 FLUX 대상을 고르는 중…'
     render()
     try {
-      styleDraft = await generateUnifiedThemeStyleTargets({
+      const { explanation, ...styleResult } = await generateUnifiedThemeStyleTargets({
         apiKey: QWEN_LOCAL_TOKEN,
         userPrompt: promptInput.value,
         direction,
         quest,
         catalog
       })
+      styleDraft = styleResult
+      styleNote = explanation?.trim() ?? ''
       stage = 2
       statusText = 'FLUX 대상과 프롬프트를 확인하세요. 사용하면 최종 검토로 넘어갑니다.'
     } catch (caught) {
@@ -310,6 +353,9 @@ export const createThemeWorkflowPage = ({
     direction = undefined
     quest = undefined
     styleDraft = undefined
+    directionNote = ''
+    questNote = ''
+    styleNote = ''
     applied = false
     beforeAfter.view.className = 'hidden flex-col gap-3'
     statusText = '테마 설명을 입력하면 1단계부터 시작합니다.'
@@ -317,16 +363,52 @@ export const createThemeWorkflowPage = ({
     render()
   }
 
-  const exportPlan = (): void => {
-    const plan = buildPlan()
-    if (!plan) return
-    const blob = new Blob([JSON.stringify(plan, null, 2)], { type: 'application/json' })
+  const downloadJson = (fileName: string, payload: unknown): void => {
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })
     const url = URL.createObjectURL(blob)
     const link = document.createElement('a')
     link.href = url
-    link.download = `${plan.theme || 'my-sample-rpg-theme'}.json`
+    link.download = fileName
     link.click()
     URL.revokeObjectURL(url)
+  }
+
+  const exportPlan = (): void => {
+    const plan = buildPlan()
+    if (!plan) return
+    downloadJson(`${plan.theme || 'my-sample-rpg-theme'}.json`, plan)
+  }
+
+  const timestampToken = (): string =>
+    new Date().toISOString().slice(0, 19).replace(/:/g, '').replace('T', '-')
+
+  // 단계 결과를 프롬프트·기버와 함께 저장해 실행 간 결과 비교에 쓸 수 있게 한다.
+  const downloadStageResult = (): void => {
+    let token: string | undefined
+    let result: unknown
+    let explanation = ''
+    if (stage === 0 && direction) {
+      token = '1-direction'
+      result = direction
+      explanation = directionNote
+    } else if (stage === 1 && quest) {
+      token = '2-quest'
+      result = quest
+      explanation = questNote
+    } else if (stage === 2 && styleDraft) {
+      token = '3-style-targets'
+      result = styleDraft
+      explanation = styleNote
+    }
+    if (!token) return
+    downloadJson(`theme-${token}-${timestampToken()}.json`, {
+      stage: steps[stage].label,
+      created_at: new Date().toISOString(),
+      user_prompt: promptInput.value.trim(),
+      giver_npc_id: selectedEntity()?.id ?? null,
+      explanation,
+      result
+    })
   }
 
   const applyPlan = async (): Promise<void> => {
@@ -353,10 +435,38 @@ export const createThemeWorkflowPage = ({
         throw new Error(result.failed.map((failure) => `${failure.targetRef}: ${failure.error}`).join('\n'))
       }
       replacePendingQuests([convertGeneratedQuestToDefinition(quest, profile)])
+      const logEntry: ThemeWorkLogEntry = {
+        id: `${Date.now()}-${Math.floor(Math.random() * 1_000_000)}`,
+        created_at: new Date().toISOString(),
+        user_prompt: promptInput.value.trim(),
+        giver_npc_id: selectedEntity()?.id ?? null,
+        theme: plan.theme,
+        art_direction: plan.art_direction,
+        quest_summary: {
+          quest_id: quest.quest_id,
+          title: quest.title,
+          giver_npc_id: quest.giver_npc_id,
+          objective_label: quest.objectives[0]?.label ?? ''
+        },
+        style_targets: plan.style_targets,
+        applied_targets: result.applied,
+        explanations: { direction: directionNote, quest: questNote, styles: styleNote }
+      }
+      appendThemeWorkLog(logEntry)
+      statusText = '적용 완료 — 변경된 에셋을 로컬 게임으로 동기화하는 중…'
+      render()
+      try {
+        await fetch('/__sync-styled-assets', { method: 'POST' })
+      } catch {
+        // 동기화가 실패해도 서버 쪽 적용은 완료된 상태다. 에디터 재진입 시 다시 시도한다.
+      }
       applied = true
-      statusText = `적용 완료 — 퀘스트 저장 및 FLUX ${result.applied.length}개 대상 반영`
+      statusText = `적용 완료 — 퀘스트 저장 및 FLUX ${result.applied.length}개 대상 반영. 잠시 후 에디터 화면으로 이동합니다…`
       beforeAfter.view.className = 'flex flex-col gap-3'
       beforeAfter.refresh()
+      window.setTimeout(() => {
+        window.location.href = '/editor.html'
+      }, 2000)
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught))
       statusText = '적용에 실패했습니다.'
@@ -364,6 +474,18 @@ export const createThemeWorkflowPage = ({
       isApplying = false
       render()
     }
+  }
+
+  const noteBlock = (text: string, className = ''): HTMLElement => {
+    const box = el(
+      'div',
+      `rounded-xl border border-[#d9a85c]/25 bg-[#211d14] p-3 text-[12px] leading-relaxed text-[#e6d3a1] ${className}`
+    )
+    box.append(
+      el('div', 'mb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-[#b59458]', 'Qwen 설명'),
+      el('div', 'whitespace-pre-wrap', text)
+    )
+    return box
   }
 
   const renderResult = (): void => {
@@ -385,7 +507,9 @@ export const createThemeWorkflowPage = ({
 
     if (stage === 0 && direction) {
       const card = el('div', 'flex flex-col gap-3')
-      card.append(el('div', 'text-[13px] font-semibold text-[#e8d5a5]', direction.theme), jsonBlock(direction.art_direction))
+      card.append(el('div', 'text-[13px] font-semibold text-[#e8d5a5]', direction.theme))
+      if (directionNote) card.append(noteBlock(directionNote))
+      card.append(jsonBlock(direction.art_direction))
       resultContent.append(card)
     } else if (stage === 1 && quest) {
       const card = el('div', 'flex flex-col gap-3')
@@ -394,10 +518,13 @@ export const createThemeWorkflowPage = ({
         el('div', 'rounded-xl bg-white/[0.035] p-3 text-[12px] text-[#d8c18a]', `퀘스트 · ${quest.title}`),
         el('div', 'rounded-xl bg-white/[0.035] p-3 text-[12px] text-[#9d9d9d]', `기버 · ${quest.giver_npc_id}`)
       )
-      card.append(summary, el('div', 'rounded-xl border border-[#d9a85c]/15 bg-[#121214] p-3 text-[12px] leading-relaxed text-[#c9c9c9]', `${quest.request_text}\n\n목표: ${quest.objectives[0]?.label ?? '없음'}\n안내: ${quest.guide_text}`), jsonBlock(quest))
+      card.append(summary)
+      if (questNote) card.append(noteBlock(questNote))
+      card.append(el('div', 'rounded-xl border border-[#d9a85c]/15 bg-[#121214] p-3 text-[12px] leading-relaxed text-[#c9c9c9]', `${quest.request_text}\n\n목표: ${quest.objectives[0]?.label ?? '없음'}\n안내: ${quest.guide_text}`), jsonBlock(quest))
       resultContent.append(card)
     } else if (stage === 2 && styleDraft) {
       const card = el('div', 'grid gap-3 md:grid-cols-2')
+      if (styleNote) card.append(noteBlock(styleNote, 'md:col-span-2'))
       styleDraft.style_targets.forEach((target) => {
         const item = el('article', 'rounded-xl border border-[#d9a85c]/20 bg-[#121214] p-3')
         item.append(el('div', 'mb-2 text-[12px] font-semibold text-[#e8d5a5]', target.target_ref), el('div', 'mb-2 text-[11px] leading-relaxed text-[#c9c9c9]', target.prompt), makeTag(`강도 ${target.alpha}`))
@@ -411,7 +538,18 @@ export const createThemeWorkflowPage = ({
         const dryRun = quest ? dryRunQuestApply(quest, profile, { selectedEntityId: selectedEntity()?.id }) : undefined
         const validation = el('div', `rounded-xl border p-3 text-[12px] leading-relaxed ${issues.length === 0 && dryRun?.ok ? 'border-emerald-400/30 bg-emerald-400/[0.06] text-emerald-200' : 'border-red-400/35 bg-red-400/[0.06] text-red-200'}`)
         validation.textContent = issues.length === 0 && dryRun?.ok ? '✓ 테마 JSON과 퀘스트 드라이런 검증을 통과했습니다.' : `검증 문제 ${issues.length + (dryRun?.jsonIssues.length ?? 0)}건`
-        resultContent.append(validation, jsonBlock(plan))
+        resultContent.append(validation)
+        const stageNotes = [
+          ['테마 방향', directionNote],
+          ['퀘스트', questNote],
+          ['스타일 대상', styleNote]
+        ].filter(([, note]) => note.length > 0)
+        if (stageNotes.length > 0) {
+          resultContent.append(
+            noteBlock(stageNotes.map(([label, note]) => `· ${label} — ${note}`).join('\n'))
+          )
+        }
+        resultContent.append(jsonBlock(plan))
       }
     } else {
       resultContent.append(el('div', 'flex min-h-[320px] items-center justify-center rounded-xl border border-dashed border-white/10 text-center text-[12px] leading-relaxed text-[#77777b]', '왼쪽 프롬프트에 테마를 입력하고\n테마 방향 생성을 시작하세요.'))
@@ -426,7 +564,11 @@ export const createThemeWorkflowPage = ({
       regenerate.type = 'button'
       regenerate.disabled = isGenerating || isApplying
       regenerate.addEventListener('click', regenerateStage)
-      actionRow.append(accept, regenerate)
+      const save = el('button', SECONDARY_BUTTON, '결과 JSON 저장') as HTMLButtonElement
+      save.type = 'button'
+      save.disabled = isGenerating || isApplying
+      save.addEventListener('click', downloadStageResult)
+      actionRow.append(accept, regenerate, save)
     } else if (stage === 3 && buildPlan()) {
       const apply = el('button', PRIMARY_BUTTON, applied ? '✓ 적용 완료' : '게임에 최종 적용') as HTMLButtonElement
       apply.type = 'button'
@@ -447,6 +589,64 @@ export const createThemeWorkflowPage = ({
   const render = (): void => {
     renderResult()
   }
+
+  const renderWorkLog = (): void => {
+    const entries = loadThemeWorkLog()
+    logList.replaceChildren()
+    if (entries.length === 0) {
+      logList.append(
+        el(
+          'div',
+          'whitespace-pre-wrap rounded-xl border border-dashed border-white/10 p-6 text-center text-[12px] leading-relaxed text-[#77777b]',
+          '아직 적용 기록이 없습니다.\n게임에 최종 적용하면 기록이 남습니다.'
+        )
+      )
+      return
+    }
+    entries.forEach((entry) => {
+      const card = el('article', 'rounded-xl border border-[#d9a85c]/20 bg-[#121214] p-3')
+      const top = el('div', 'mb-1 flex flex-wrap items-center justify-between gap-2')
+      top.append(
+        el('div', 'text-[13px] font-semibold text-[#e8d5a5]', entry.theme || '(제목 없음)'),
+        el('div', 'text-[10px] text-[#8f8f92]', new Date(entry.created_at).toLocaleString('ko-KR'))
+      )
+      const meta = el(
+        'div',
+        'mb-2 whitespace-pre-wrap text-[11px] leading-relaxed text-[#9d9d9d]',
+        `프롬프트: ${entry.user_prompt}\n퀘스트: ${entry.quest_summary.title} (기버 ${entry.quest_summary.giver_npc_id})\nFLUX 적용 ${entry.applied_targets.length}개: ${entry.applied_targets.join(', ')}`
+      )
+      const detail = el('details', 'text-[11px] text-[#9d9d9d]')
+      detail.append(el('summary', 'cursor-pointer text-[#cbb27b]', '상세 JSON 보기'), jsonBlock(entry, 'mt-2'))
+      const actions = el('div', 'mt-2 flex gap-1.5')
+      const saveButton = el(
+        'button',
+        'rounded-lg border border-[#d9a85c]/30 bg-[#1c1c1e] px-2.5 py-1.5 text-[10px] text-[#cbb27b] transition hover:border-[#d9a85c]',
+        'JSON 저장'
+      ) as HTMLButtonElement
+      saveButton.type = 'button'
+      saveButton.addEventListener('click', () => downloadJson(`theme-log-${entry.id}.json`, entry))
+      actions.append(saveButton)
+      card.append(top, meta, detail, actions)
+      logList.append(card)
+    })
+  }
+
+  workLogButton.addEventListener('click', () => {
+    renderWorkLog()
+    logOverlay.style.display = 'flex'
+  })
+  logCloseButton.addEventListener('click', () => {
+    logOverlay.style.display = 'none'
+  })
+  logClearButton.addEventListener('click', () => {
+    clearThemeWorkLog()
+    renderWorkLog()
+  })
+  logOverlay.addEventListener('click', (event) => {
+    if (event.target === logOverlay) {
+      logOverlay.style.display = 'none'
+    }
+  })
 
   startButton.addEventListener('click', () => {
     if (stage === 0 && !direction) void runDirection()

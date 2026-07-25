@@ -12,8 +12,11 @@
 - FLUX.1-Kontext 기반 정적 오브젝트·NPC 초상화 스타일 변경
 - 한국어/혼합 프롬프트를 FLUX 적용 직전에 자연스러운 영어로 변환
 - 테마 작업실의 단계별 검토 및 재생성
+- 단계별 생성 결과에 대한 Qwen 한국어 설명 표시
+- 단계별 결과 JSON 다운로드(프롬프트·기버 메타데이터 포함)
 - 최종 적용 전 JSON 검증과 dry-run
-- 변경 오브젝트 비포/애프터 확인 및 테마 JSON 내보내기
+- 변경 오브젝트 비포/애프터 확인, 원본·결과·비교 PNG 저장, 테마 JSON 내보내기
+- 최종 적용 성공 시 작업 로그 자동 기록(최근 50건)과 에디터 화면 자동 이동
 - 기존 원본 자산 백업 및 적용 결과 복원
 
 ## 실행
@@ -63,6 +66,14 @@ pip install -r requirements.txt
 python server.py
 ```
 
+### 원격 GPU 구성과 에셋 동기화
+
+Qwen·FLUX가 원격 GPU 서버에서 실행되면 스타일 적용 결과가 서버 쪽 저장소의 PNG에만 써진다.
+이 경우 Vite 개발 서버의 dev 전용 엔드포인트 `POST /__sync-styled-assets`가 스타일 서비스의
+변경 목록을 조회해 해당 파일을 scp로 로컬 저장소에 미러링한다. 에디터 진입, 테마 최종 적용,
+스타일 되돌리기 시 자동 호출되며, 파일 내용이 같으면 다시 쓰지 않는다. 접속 정보는
+`STYLE_SYNC_REMOTE`, `STYLE_SYNC_PORT`, `STYLE_SYNC_REMOTE_ROOT`, `STYLE_SYNC_KEY` 환경 변수로 바꿀 수 있다.
+
 ## 안전한 적용 범위
 
 - 현재 JSON 스키마는 `schema_version: 1`, `game_id: "my-sample-rpg"`로 고정되어 있습니다.
@@ -92,7 +103,17 @@ public/                    게임 및 외부 런타임 자산
 
 자세한 Qwen·FLUX 설계는 [`docs/qwen-flux-pipeline.md`](docs/qwen-flux-pipeline.md)를 참고하세요.
 
+## 최근 업데이트 (2026-07-25)
+
+- 테마 작업실 단계별 결과에 Qwen 한국어 설명(`explanation`)을 함께 생성해 결과 보드에 표시
+- 단계별 결과 JSON 저장 버튼(프롬프트·기버·설명 메타데이터 포함, 실행 간 결과 비교용)
+- 비포/애프터 카드에 원본·결과·비교(BEFORE|AFTER 합성) PNG 저장 버튼 추가
+- 최종 적용 성공 시 테마 작업 로그를 localStorage에 기록하고, 헤더 `작업 로그` 버튼으로 조회·JSON 내보내기
+- 최종 적용 성공 시 로컬 에셋 동기화 후 기본 에디터 화면으로 자동 이동
+- 원격 GPU 구성용 `POST /__sync-styled-assets` 에셋 미러링 엔드포인트 추가
+- 씬 부팅 시 Lua 컨트롤러 스크립트 3종을 항상 등록해, 에디터가 주입한 대화 컨트롤러(`reply-with-message`)가 미등록 에러 없이 동작하도록 수정
+
 ## 저장소
 
 - GitHub: <https://github.com/inchichi/congtigigi>
-- 작업 브랜치: `7.22`
+- 작업 브랜치: `feature/qwen-flux-theme-workshop`

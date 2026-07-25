@@ -101,6 +101,10 @@ export type UnifiedThemeStyleTargetDraft = Pick<
   'style_targets'
 >
 
+// 각 단계 결과에는 사용자 검토용 짧은 한국어 설명이 함께 실린다.
+// 설명은 UI 표시용이며 최종 UnifiedThemePlan에는 포함하지 않는다.
+export type WithStageExplanation<T> = T & { explanation?: string }
+
 export type UnifiedThemeValidationIssue = GeneratedQuestValidationIssue | {
   path: string
   message: string
@@ -220,23 +224,41 @@ const createStyleTargetsSchema = (catalog: StyleCatalog): object => {
   }
 }
 
+const stageExplanationSchema = { type: 'string', minLength: 1 }
+
+// 기존 스키마에 explanation 필드를 덧붙인다. 퀘스트처럼 다른 곳과 공유하는
+// 스키마를 직접 수정하지 않기 위해 단계 생성 직전에만 사용한다.
+const withExplanationField = (schema: object): object => {
+  const base = schema as { properties?: Record<string, unknown>; required?: unknown[] }
+  return {
+    ...base,
+    properties: {
+      ...(base.properties ?? {}),
+      explanation: stageExplanationSchema
+    },
+    required: [...(Array.isArray(base.required) ? base.required : []), 'explanation']
+  }
+}
+
 export const createUnifiedThemeDirectionSchema = (): object => ({
   type: 'object',
   additionalProperties: false,
   properties: {
     theme: { type: 'string', minLength: 1 },
-    art_direction: artDirectionSchema
+    art_direction: artDirectionSchema,
+    explanation: stageExplanationSchema
   },
-  required: ['theme', 'art_direction']
+  required: ['theme', 'art_direction', 'explanation']
 })
 
 export const createUnifiedThemeStyleTargetSchema = (catalog: StyleCatalog): object => ({
   type: 'object',
   additionalProperties: false,
   properties: {
-    style_targets: createStyleTargetsSchema(catalog)
+    style_targets: createStyleTargetsSchema(catalog),
+    explanation: stageExplanationSchema
   },
-  required: ['style_targets']
+  required: ['style_targets', 'explanation']
 })
 
 export const createUnifiedThemePlanSchema = (
@@ -320,14 +342,15 @@ export const generateUnifiedThemeDirection = ({
 }: {
   apiKey: string
   userPrompt: string
-}): Promise<UnifiedThemeDirection> =>
-  generateJson<UnifiedThemeDirection>({
+}): Promise<WithStageExplanation<UnifiedThemeDirection>> =>
+  generateJson<WithStageExplanation<UnifiedThemeDirection>>({
     apiKey,
     instructions: [
       `This is a My Sample RPG theme direction for ${MY_SAMPLE_RPG_GAME_ID}.`,
       'Create only the visual direction for the requested theme; do not create a quest or asset list yet.',
       'Keep the direction concise and suitable for a 2D pixel-art RPG.',
       'Use English for style, mood, and palette so the result can be passed to FLUX.',
+      'Fill "explanation" with 2-3 short Korean sentences that explain to the user what direction you chose and why it fits the request. Only "explanation" is Korean.',
       'Return only the requested JSON object.'
     ].join('\n'),
     input: userPrompt.trim(),
@@ -347,20 +370,21 @@ export const generateUnifiedThemeQuest = ({
   profile: GameStructureProfile
   direction: UnifiedThemeDirection
   entity?: GameEntity
-}): Promise<GeneratedQuestJson> =>
-  generateJson<GeneratedQuestJson>({
+}): Promise<WithStageExplanation<GeneratedQuestJson>> =>
+  generateJson<WithStageExplanation<GeneratedQuestJson>>({
     apiKey,
     instructions: [
       createQuestSystemPrompt(profile, entity),
       'Implement the accepted My Sample RPG theme direction as exactly one playable quest.',
       'Use exactly one objective so the user can review one clear gameplay loop before applying it.',
       'Use short English dialogue lines because the runtime font is ASCII-oriented.',
+      'Fill "explanation" with 2-3 short Korean sentences that explain the quest flow and why it fits the theme. Only "explanation" is Korean; every other quest text stays English.',
       'Do not invent IDs and return only the quest JSON object.',
       `Accepted theme direction:\n${JSON.stringify(direction, null, 2)}`
     ].join('\n'),
     input: userPrompt.trim(),
     schemaName: 'my_sample_rpg_theme_quest',
-    schema: createQuestJsonSchema(profile, entity)
+    schema: withExplanationField(createQuestJsonSchema(profile, entity))
   })
 
 export const generateUnifiedThemeStyleTargets = ({
@@ -375,8 +399,8 @@ export const generateUnifiedThemeStyleTargets = ({
   direction: UnifiedThemeDirection
   quest: GeneratedQuestJson
   catalog: StyleCatalog
-}): Promise<UnifiedThemeStyleTargetDraft> =>
-  generateJson<UnifiedThemeStyleTargetDraft>({
+}): Promise<WithStageExplanation<UnifiedThemeStyleTargetDraft>> =>
+  generateJson<WithStageExplanation<UnifiedThemeStyleTargetDraft>>({
     apiKey,
     instructions: [
       `Create the FLUX style target list for ${MY_SAMPLE_RPG_GAME_ID}.`,
@@ -385,6 +409,7 @@ export const generateUnifiedThemeStyleTargets = ({
       'Prefer extracted map objects for scenery. Use only static PNG files for characters, weapons, or armor.',
       'Never choose a map tileset, animation sheet, or motion file.',
       'Write every prompt in English and preserve pixel-art identity, transparency, dimensions, and object silhouette.',
+      'Fill "explanation" with 2-3 short Korean sentences that explain which targets you picked and why. Only "explanation" is Korean.',
       `Accepted art direction:\n${JSON.stringify(direction.art_direction, null, 2)}`,
       `Accepted quest:\n${JSON.stringify({ title: quest.title, guide_text: quest.guide_text }, null, 2)}`,
       styleCatalogPrompt(catalog)

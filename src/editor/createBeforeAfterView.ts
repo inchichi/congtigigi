@@ -31,6 +31,62 @@ const assetLabel = (path: string): string => {
   return relative.replace(/\.[^.]+$/, '')
 }
 
+const sanitizeFileToken = (value: string): string =>
+  value.replace(/[^a-zA-Z0-9가-힣_-]+/g, '-').replace(/^-+|-+$/g, '') || 'object'
+
+const downloadBlob = (blob: Blob, fileName: string): void => {
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = fileName
+  link.click()
+  URL.revokeObjectURL(url)
+}
+
+const downloadImageFile = async (url: string, fileName: string): Promise<void> => {
+  const response = await fetch(url, { cache: 'no-store' })
+  if (!response.ok) {
+    throw new Error(`이미지를 내려받지 못했습니다 (HTTP ${response.status})`)
+  }
+  downloadBlob(await response.blob(), fileName)
+}
+
+const loadImage = (url: string): Promise<HTMLImageElement> =>
+  new Promise((resolve, reject) => {
+    const image = new Image()
+    image.onload = () => resolve(image)
+    image.onerror = () => reject(new Error('비교 이미지를 불러오지 못했습니다.'))
+    image.src = url
+  })
+
+// 픽셀 에셋은 원본 크기가 작아 그대로 합성하면 라벨조차 안 보이므로,
+// 한 변이 최소 96px이 되도록 정수 배율로 확대해 비교 이미지를 만든다.
+const downloadComparisonImage = async (object: StyledObject, fileName: string): Promise<void> => {
+  const [before, after] = await Promise.all([loadImage(object.beforeUrl), loadImage(object.afterUrl)])
+  const scale = Math.max(1, Math.ceil(96 / Math.max(before.naturalWidth, after.naturalWidth, 1)))
+  const gap = 12
+  const labelHeight = 16
+  const canvas = document.createElement('canvas')
+  canvas.width = (before.naturalWidth + after.naturalWidth) * scale + gap
+  canvas.height = Math.max(before.naturalHeight, after.naturalHeight) * scale + labelHeight
+  const context = canvas.getContext('2d')
+  if (!context) {
+    throw new Error('캔버스를 사용할 수 없습니다.')
+  }
+  context.imageSmoothingEnabled = false
+  context.font = '600 11px sans-serif'
+  context.fillStyle = '#d9a85c'
+  context.fillText('BEFORE', 0, 11)
+  context.fillText('AFTER', before.naturalWidth * scale + gap, 11)
+  context.drawImage(before, 0, labelHeight, before.naturalWidth * scale, before.naturalHeight * scale)
+  context.drawImage(after, before.naturalWidth * scale + gap, labelHeight, after.naturalWidth * scale, after.naturalHeight * scale)
+  const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'))
+  if (!blob) {
+    throw new Error('비교 이미지 생성에 실패했습니다.')
+  }
+  downloadBlob(blob, fileName)
+}
+
 const createPreview = (label: string, url: string): HTMLElement => {
   const frame = el(
     'div',
@@ -88,8 +144,34 @@ export const createBeforeAfterView = (): BeforeAfterView => {
         createPreview('BEFORE · 원본', object.beforeUrl),
         createPreview('AFTER · 적용 결과', object.afterUrl)
       )
+      const downloads = el('div', 'mt-2 flex flex-wrap gap-1.5')
+      const downloadButton = (label: string, action: () => Promise<void>): HTMLButtonElement => {
+        const button = el(
+          'button',
+          'rounded-lg border border-[#d9a85c]/30 bg-[#1c1c1e] px-2.5 py-1.5 text-[10px] text-[#cbb27b] transition hover:border-[#d9a85c] hover:bg-[#2b2b2f] disabled:cursor-not-allowed disabled:opacity-45',
+          label
+        ) as HTMLButtonElement
+        button.type = 'button'
+        button.addEventListener('click', () => {
+          button.disabled = true
+          void action()
+            .catch((caught) => {
+              status.textContent = caught instanceof Error ? caught.message : String(caught)
+            })
+            .finally(() => {
+              button.disabled = false
+            })
+        })
+        return button
+      }
+      const fileToken = sanitizeFileToken(object.key)
+      downloads.append(
+        downloadButton('원본 저장', () => downloadImageFile(object.beforeUrl, `${fileToken}-before.png`)),
+        downloadButton('결과 저장', () => downloadImageFile(object.afterUrl, `${fileToken}-after.png`)),
+        downloadButton('비교 저장', () => downloadComparisonImage(object, `${fileToken}-compare.png`))
+      )
       const path = el('div', 'mt-2 truncate text-[10px] text-[#777777]', assetLabel(object.tilesetPath))
-      card.append(title, comparison, path)
+      card.append(title, comparison, downloads, path)
       grid.append(card)
     }
   }

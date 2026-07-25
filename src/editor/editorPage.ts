@@ -15,6 +15,10 @@ if (!root) {
   throw new Error('editor-root element not found')
 }
 
+// FLUX 스타일 서비스가 원격 GPU 서버의 에셋을 덮어쓰는 구성일 때, 서버 쪽 변경분을
+// 로컬 게임 파일로 미러링한다(dev 전용 엔드포인트). 실패해도 에디터 동작에는 지장 없다.
+void fetch('/__sync-styled-assets', { method: 'POST' }).catch(() => {})
+
 const params = new URLSearchParams(window.location.search)
 const workspace = params.get('workspace')
 
