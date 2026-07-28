@@ -314,6 +314,38 @@ const syncStyledAssets = (): Plugin => {
     name: 'sync-styled-assets',
     apply: 'serve',
     configureServer(server) {
+      // 에디터가 생성한 신규 아이템 아이콘 PNG를 로컬 저장소에 쓴다(dev 전용).
+      // 경로는 게임 에셋 하위로만 제한한다.
+      server.middlewares.use('/__save-generated-asset', (req, res) => {
+        if (req.method !== 'POST') {
+          res.statusCode = 405
+          res.end()
+          return
+        }
+        let body = ''
+        req.on('data', (chunk) => { body += chunk })
+        req.on('end', () => {
+          void (async () => {
+            const parsed = JSON.parse(body) as { path?: unknown; dataBase64?: unknown }
+            const relPath = typeof parsed.path === 'string' ? parsed.path : ''
+            const dataBase64 = typeof parsed.dataBase64 === 'string' ? parsed.dataBase64 : ''
+            if (!isSafeAssetPath(relPath) || dataBase64.length === 0) {
+              res.statusCode = 422
+              res.end(JSON.stringify({ error: 'invalid path or data' }))
+              return
+            }
+            const localPath = join(PROJECT_ROOT, relPath)
+            await mkdir(dirname(localPath), { recursive: true })
+            await writeFile(localPath, Buffer.from(dataBase64, 'base64'))
+            res.setHeader('Content-Type', 'application/json')
+            res.end(JSON.stringify({ ok: true, path: relPath }))
+          })().catch((error) => {
+            res.statusCode = 500
+            res.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }))
+          })
+        })
+      })
+
       server.middlewares.use('/__sync-styled-assets', (req, res) => {
         if (req.method !== 'POST' && req.method !== 'GET') {
           res.statusCode = 405

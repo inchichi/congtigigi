@@ -21,6 +21,8 @@ export type ThemeWorkLogEntry = {
   style_targets: Array<{ target_ref: string; prompt: string; alpha: number }>
   applied_targets: string[]
   explanations: { direction: string; quest: string; styles: string }
+  // 신규 보상 아이템이 함께 생성된 적용에만 존재한다.
+  reward_item?: { item_id: string; label: string; icon_path: string }
 }
 
 export const loadThemeWorkLog = (): ThemeWorkLogEntry[] => {

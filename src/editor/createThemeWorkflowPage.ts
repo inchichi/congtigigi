@@ -4,6 +4,9 @@ import {
   generateUnifiedThemeDirection,
   generateUnifiedThemeQuest,
   generateUnifiedThemeStyleTargets,
+  generateUnifiedThemeRewardItem,
+  applyUnifiedThemeRewardItem,
+  type UnifiedThemeRewardItem,
   loadStyleCatalog,
   MY_SAMPLE_RPG_GAME_ID,
   MY_SAMPLE_RPG_THEME_SCHEMA_VERSION,
@@ -102,6 +105,9 @@ export const createThemeWorkflowPage = ({
   let directionNote = ''
   let questNote = ''
   let styleNote = ''
+  let rewardItem: UnifiedThemeRewardItem | undefined
+  let rewardItemNote = ''
+  let questCandidates: Array<{ quest: GeneratedQuestJson; note: string }> = []
   let catalog: StyleCatalog | undefined
   let isGenerating = false
   let isApplying = false
@@ -165,6 +171,14 @@ export const createThemeWorkflowPage = ({
   profile.npcs.forEach((npc) => giverSelect.append(new Option(`${npc.name} (${npc.id})`, npc.id)))
   giverLabel.append(el('div', 'text-[11px] font-semibold text-[#b59458]', '퀘스트 기버'), giverSelect)
 
+  const rewardItemLabel = el('label', 'flex cursor-pointer items-center gap-2 rounded-xl border border-white/8 bg-white/[0.025] px-3 py-2.5')
+  const rewardItemCheckbox = el('input', 'h-4 w-4 accent-[#d9a85c]') as HTMLInputElement
+  rewardItemCheckbox.type = 'checkbox'
+  rewardItemLabel.append(
+    rewardItemCheckbox,
+    el('span', 'text-[12px] text-[#cbb27b]', '🗡 신규 보상 아이템도 생성 (Qwen 데이터 + FLUX 아이콘)')
+  )
+
   const quickPrompts = el('div', 'flex flex-wrap gap-2')
   const quickPromptValues = [
     '보랏빛 달빛이 비치는 다크 판타지 마을과 달빛석을 되찾는 퀘스트',
@@ -186,7 +200,7 @@ export const createThemeWorkflowPage = ({
   const catalogStatus = el('div', 'rounded-xl border border-white/8 bg-white/[0.025] p-3 text-[11px] leading-relaxed text-[#8f8f92]', 'FLUX 카탈로그를 확인하는 중…')
   const startButton = el('button', PRIMARY_BUTTON, '✨ 테마 방향 생성') as HTMLButtonElement
   startButton.type = 'button'
-  promptPanel.append(promptLabel, giverLabel, quickPrompts, catalogStatus, startButton)
+  promptPanel.append(promptLabel, giverLabel, rewardItemLabel, quickPrompts, catalogStatus, startButton)
 
   const status = el('div', 'rounded-xl border border-[#d9a85c]/20 bg-[#252527] px-3 py-2 text-[11px] leading-relaxed text-[#cdb783]', statusText)
   const error = el('div', 'hidden rounded-xl border border-[#e06c6c]/35 bg-[#3a2022] px-3 py-2 text-[11px] leading-relaxed text-[#f2a7a7]', '')
@@ -260,6 +274,7 @@ export const createThemeWorkflowPage = ({
       })
       direction = directionResult
       directionNote = explanation?.trim() ?? ''
+      questCandidates = []
       quest = undefined
       styleDraft = undefined
       questNote = ''
@@ -282,19 +297,36 @@ export const createThemeWorkflowPage = ({
     statusText = 'Qwen이 승인된 방향에 맞는 퀘스트를 설계하는 중…'
     render()
     try {
-      const { explanation, ...questResult } = await generateUnifiedThemeQuest({
+      const base = {
         apiKey: QWEN_LOCAL_TOKEN,
         userPrompt: promptInput.value,
         profile,
         direction,
         entity: selectedEntity()
-      })
-      quest = questResult
-      questNote = explanation?.trim() ?? ''
+      }
+      const [first, second] = await Promise.all([
+        generateUnifiedThemeQuest({
+          ...base,
+          angle: 'Candidate A: propose the most direct, thematic quest for the request.'
+        }),
+        generateUnifiedThemeQuest({
+          ...base,
+          angle:
+            'Candidate B: propose a clearly different alternative from candidate thinking — prefer a different objective type, location, or story angle.'
+        })
+      ])
+      questCandidates = [first, second].map(({ explanation, ...candidate }) => ({
+        quest: candidate,
+        note: explanation?.trim() ?? ''
+      }))
+      quest = undefined
+      questNote = ''
       styleDraft = undefined
       styleNote = ''
+      rewardItem = undefined
+      rewardItemNote = ''
       stage = 1
-      statusText = '퀘스트를 확인하세요. 사용하면 FLUX 대상 단계로 넘어갑니다.'
+      statusText = '두 퀘스트 후보 중 하나를 선택하세요.'
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught))
       statusText = '퀘스트 생성에 실패했습니다.'
@@ -331,6 +363,58 @@ export const createThemeWorkflowPage = ({
     }
   }
 
+  const questReadableText = (candidate: GeneratedQuestJson): string => {
+    const giverName =
+      profile.npcs.find((npc) => npc.id === candidate.giver_npc_id)?.name ?? candidate.giver_npc_id
+    const objective = candidate.objectives[0]
+    const rewardParts = [
+      candidate.rewards.gold > 0 ? `골드 ${candidate.rewards.gold}` : '',
+      candidate.rewards.experience > 0 ? `경험치 ${candidate.rewards.experience}` : '',
+      ...candidate.rewards.items.map((item) => `${item.item_id} ×${item.quantity}`)
+    ].filter(Boolean)
+    return [
+      `Q. ${candidate.title}`,
+      `${giverName} NPC : "${candidate.start_dialogue_lines[0] ?? ''}"`,
+      `내용 : ${candidate.request_text}`,
+      `목표 : ${objective ? `${objective.label} ×${objective.required}` : '없음'}`,
+      `안내 : ${candidate.guide_text}`,
+      `보상 : ${rewardParts.join(' · ') || '없음'}`
+    ].join('\n')
+  }
+
+  const selectQuestCandidate = async (index: number): Promise<void> => {
+    const candidate = questCandidates[index]
+    if (!candidate || isGenerating || isApplying || !direction) return
+    quest = candidate.quest
+    questNote = candidate.note
+    styleDraft = undefined
+    styleNote = ''
+    rewardItem = undefined
+    rewardItemNote = ''
+    if (rewardItemCheckbox.checked && catalog) {
+      isGenerating = true
+      statusText = 'Qwen이 선택한 퀘스트의 보상 아이템을 설계하는 중…'
+      render()
+      try {
+        const { explanation, ...itemResult } = await generateUnifiedThemeRewardItem({
+          apiKey: QWEN_LOCAL_TOKEN,
+          userPrompt: promptInput.value,
+          direction,
+          quest: candidate.quest,
+          catalog
+        })
+        rewardItem = itemResult
+        rewardItemNote = explanation?.trim() ?? ''
+      } catch (caught) {
+        setError(caught instanceof Error ? caught.message : String(caught))
+      } finally {
+        isGenerating = false
+      }
+    }
+    statusText = '퀘스트를 확인하세요. 사용하면 FLUX 대상 단계로 넘어갑니다.'
+    render()
+  }
+
   const acceptStage = (): void => {
     if (isGenerating) return
     if (stage === 0 && direction) void runQuest()
@@ -351,11 +435,14 @@ export const createThemeWorkflowPage = ({
   const resetWorkflow = (): void => {
     stage = 0
     direction = undefined
+    questCandidates = []
     quest = undefined
     styleDraft = undefined
     directionNote = ''
     questNote = ''
     styleNote = ''
+    rewardItem = undefined
+    rewardItemNote = ''
     applied = false
     beforeAfter.view.className = 'hidden flex-col gap-3'
     statusText = '테마 설명을 입력하면 1단계부터 시작합니다.'
@@ -434,7 +521,21 @@ export const createThemeWorkflowPage = ({
       if (result.failed.length > 0) {
         throw new Error(result.failed.map((failure) => `${failure.targetRef}: ${failure.error}`).join('\n'))
       }
-      replacePendingQuests([convertGeneratedQuestToDefinition(quest, profile)])
+      let rewardIconPath: string | undefined
+      if (rewardItem) {
+        statusText = 'FLUX가 신규 아이템 아이콘을 생성하는 중… (첫 실행은 모델 로딩으로 수 분 걸릴 수 있음)'
+        render()
+        const iconResult = await applyUnifiedThemeRewardItem(rewardItem, plan)
+        rewardIconPath = iconResult.iconPath
+      }
+      const definition = convertGeneratedQuestToDefinition(quest, profile)
+      if (rewardItem) {
+        definition.rewards.items = [
+          ...definition.rewards.items,
+          { id: rewardItem.item_id, label: rewardItem.label, quantity: 1 }
+        ]
+      }
+      replacePendingQuests([definition])
       const logEntry: ThemeWorkLogEntry = {
         id: `${Date.now()}-${Math.floor(Math.random() * 1_000_000)}`,
         created_at: new Date().toISOString(),
@@ -450,7 +551,10 @@ export const createThemeWorkflowPage = ({
         },
         style_targets: plan.style_targets,
         applied_targets: result.applied,
-        explanations: { direction: directionNote, quest: questNote, styles: styleNote }
+        explanations: { direction: directionNote, quest: questNote, styles: styleNote },
+        ...(rewardItem && rewardIconPath
+          ? { reward_item: { item_id: rewardItem.item_id, label: rewardItem.label, icon_path: rewardIconPath } }
+          : {})
       }
       appendThemeWorkLog(logEntry)
       statusText = '적용 완료 — 변경된 에셋을 로컬 게임으로 동기화하는 중…'
@@ -511,16 +615,42 @@ export const createThemeWorkflowPage = ({
       if (directionNote) card.append(noteBlock(directionNote))
       card.append(jsonBlock(direction.art_direction))
       resultContent.append(card)
+    } else if (stage === 1 && !quest && questCandidates.length > 0) {
+      const grid = el('div', 'grid gap-3 md:grid-cols-2')
+      questCandidates.forEach((candidate, index) => {
+        const box = el('article', 'flex flex-col gap-2 rounded-xl border border-[#d9a85c]/20 bg-[#121214] p-3')
+        box.append(
+          el('div', 'text-[11px] font-semibold uppercase tracking-[0.14em] text-[#b59458]', `후보 ${index + 1}`),
+          el('div', 'whitespace-pre-wrap rounded-lg bg-white/[0.03] p-2.5 text-[12px] leading-relaxed text-[#e3d5ae]', questReadableText(candidate.quest))
+        )
+        if (candidate.note) box.append(noteBlock(candidate.note))
+        const detail = el('details', 'text-[11px]')
+        detail.append(el('summary', 'cursor-pointer text-[#cbb27b]', 'JSON 보기'), jsonBlock(candidate.quest, 'mt-2'))
+        box.append(detail)
+        const pick = el('button', PRIMARY_BUTTON, '이 퀘스트 선택') as HTMLButtonElement
+        pick.type = 'button'
+        pick.disabled = isGenerating || isApplying
+        pick.addEventListener('click', () => void selectQuestCandidate(index))
+        box.append(pick)
+        grid.append(box)
+      })
+      resultContent.append(grid)
     } else if (stage === 1 && quest) {
       const card = el('div', 'flex flex-col gap-3')
-      const summary = el('div', 'grid gap-2 md:grid-cols-2')
-      summary.append(
-        el('div', 'rounded-xl bg-white/[0.035] p-3 text-[12px] text-[#d8c18a]', `퀘스트 · ${quest.title}`),
-        el('div', 'rounded-xl bg-white/[0.035] p-3 text-[12px] text-[#9d9d9d]', `기버 · ${quest.giver_npc_id}`)
+      card.append(
+        el('div', 'whitespace-pre-wrap rounded-xl border border-[#d9a85c]/25 bg-white/[0.03] p-3 text-[13px] leading-relaxed text-[#e3d5ae]', questReadableText(quest))
       )
-      card.append(summary)
       if (questNote) card.append(noteBlock(questNote))
-      card.append(el('div', 'rounded-xl border border-[#d9a85c]/15 bg-[#121214] p-3 text-[12px] leading-relaxed text-[#c9c9c9]', `${quest.request_text}\n\n목표: ${quest.objectives[0]?.label ?? '없음'}\n안내: ${quest.guide_text}`), jsonBlock(quest))
+      if (rewardItem) {
+        const itemBox = el('div', 'rounded-xl border border-[#d9a85c]/20 bg-[#121214] p-3')
+        itemBox.append(
+          el('div', 'mb-1 text-[12px] font-semibold text-[#e8d5a5]', `🗡 신규 보상 아이템 · ${rewardItem.label} (${rewardItem.item_id})`),
+          el('div', 'whitespace-pre-wrap text-[11px] leading-relaxed text-[#9d9d9d]', `기준 아이콘: ${rewardItem.base_icon_ref}\n아이콘 프롬프트: ${rewardItem.icon_prompt}`)
+        )
+        if (rewardItemNote) itemBox.append(noteBlock(rewardItemNote, 'mt-2'))
+        card.append(itemBox)
+      }
+      card.append(jsonBlock(quest))
       resultContent.append(card)
     } else if (stage === 2 && styleDraft) {
       const card = el('div', 'grid gap-3 md:grid-cols-2')
@@ -555,7 +685,13 @@ export const createThemeWorkflowPage = ({
       resultContent.append(el('div', 'flex min-h-[320px] items-center justify-center rounded-xl border border-dashed border-white/10 text-center text-[12px] leading-relaxed text-[#77777b]', '왼쪽 프롬프트에 테마를 입력하고\n테마 방향 생성을 시작하세요.'))
     }
 
-    if (stage < 3 && ((stage === 0 && direction) || (stage === 1 && quest) || (stage === 2 && styleDraft))) {
+    if (stage === 1 && !quest && questCandidates.length > 0) {
+      const regenerate = el('button', SECONDARY_BUTTON, '후보 새로 만들기') as HTMLButtonElement
+      regenerate.type = 'button'
+      regenerate.disabled = isGenerating || isApplying
+      regenerate.addEventListener('click', regenerateStage)
+      actionRow.append(regenerate)
+    } else if (stage < 3 && ((stage === 0 && direction) || (stage === 1 && quest) || (stage === 2 && styleDraft))) {
       const accept = el('button', PRIMARY_BUTTON, stage === 0 ? '이 결과 사용 → 퀘스트 생성' : stage === 1 ? '이 결과 사용 → 스타일 대상 생성' : '이 결과 사용 → 최종 검토') as HTMLButtonElement
       accept.type = 'button'
       accept.disabled = isGenerating || isApplying
@@ -569,6 +705,22 @@ export const createThemeWorkflowPage = ({
       save.disabled = isGenerating || isApplying
       save.addEventListener('click', downloadStageResult)
       actionRow.append(accept, regenerate, save)
+      if (stage === 1 && questCandidates.length > 1) {
+        const back = el('button', SECONDARY_BUTTON, '다른 후보 선택') as HTMLButtonElement
+        back.type = 'button'
+        back.disabled = isGenerating || isApplying
+        back.addEventListener('click', () => {
+          quest = undefined
+          questNote = ''
+          rewardItem = undefined
+          rewardItemNote = ''
+          styleDraft = undefined
+          styleNote = ''
+          statusText = '두 퀘스트 후보 중 하나를 선택하세요.'
+          render()
+        })
+        actionRow.append(back)
+      }
     } else if (stage === 3 && buildPlan()) {
       const apply = el('button', PRIMARY_BUTTON, applied ? '✓ 적용 완료' : '게임에 최종 적용') as HTMLButtonElement
       apply.type = 'button'

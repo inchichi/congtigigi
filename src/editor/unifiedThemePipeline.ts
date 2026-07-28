@@ -363,17 +363,21 @@ export const generateUnifiedThemeQuest = ({
   userPrompt,
   profile,
   direction,
-  entity
+  entity,
+  angle
 }: {
   apiKey: string
   userPrompt: string
   profile: GameStructureProfile
   direction: UnifiedThemeDirection
   entity?: GameEntity
+  // 후보 2개를 만들 때 서로 다른 관점을 유도하는 지시문. 없으면 기존과 동일.
+  angle?: string
 }): Promise<WithStageExplanation<GeneratedQuestJson>> =>
   generateJson<WithStageExplanation<GeneratedQuestJson>>({
     apiKey,
     instructions: [
+      ...(angle ? [angle] : []),
       createQuestSystemPrompt(profile, entity),
       'Implement the accepted My Sample RPG theme direction as exactly one playable quest.',
       'Use exactly one objective so the user can review one clear gameplay loop before applying it.',
@@ -418,6 +422,136 @@ export const generateUnifiedThemeStyleTargets = ({
     schemaName: 'my_sample_rpg_theme_style_targets',
     schema: createUnifiedThemeStyleTargetSchema(catalog)
   })
+
+// ── 신규 보상 아이템 생성 ─────────────────────────────
+// 기존 무기/방어구 아이콘을 레퍼런스로 FLUX가 변형해 새 아이템 아이콘을 만들고,
+// 데이터(id·라벨)는 Qwen이 스키마 안에서 생성한다. 드롭 테이블(코드)은 건드리지
+// 않고 퀘스트 보상으로만 지급하므로 기존 시스템과 충돌하지 않는다.
+export type UnifiedThemeRewardItem = {
+  item_id: string
+  label: string
+  base_icon_ref: string
+  icon_prompt: string
+}
+
+export const GENERATED_ITEM_ICON_DIR = 'src/games/my-sample-rpg/assets/weapons/generated'
+
+const getBaseIconRefs = (catalog: StyleCatalog): string[] =>
+  catalog.assets
+    .filter((asset) => ['/weapons/', '/armor/'].some((part) => asset.id.toLowerCase().includes(part)))
+    .map((asset) => assetRef(asset.id))
+
+export const createUnifiedThemeRewardItemSchema = (catalog: StyleCatalog): object => ({
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    item_id: { type: 'string', pattern: '^[a-z][a-z0-9-]{2,24}$' },
+    label: { type: 'string', minLength: 2, maxLength: 24 },
+    base_icon_ref: { type: 'string', enum: getBaseIconRefs(catalog) },
+    icon_prompt: { type: 'string', minLength: 1 },
+    explanation: stageExplanationSchema
+  },
+  required: ['item_id', 'label', 'base_icon_ref', 'icon_prompt', 'explanation']
+})
+
+export const generateUnifiedThemeRewardItem = ({
+  apiKey,
+  userPrompt,
+  direction,
+  quest,
+  catalog
+}: {
+  apiKey: string
+  userPrompt: string
+  direction: UnifiedThemeDirection
+  quest: GeneratedQuestJson
+  catalog: StyleCatalog
+}): Promise<WithStageExplanation<UnifiedThemeRewardItem>> =>
+  generateJson<WithStageExplanation<UnifiedThemeRewardItem>>({
+    apiKey,
+    instructions: [
+      `Design one new quest reward item for ${MY_SAMPLE_RPG_GAME_ID}.`,
+      'The item is granted when the player completes the quest, so it must fit the quest story and the theme.',
+      'item_id: new snake/kebab id that does not look like an existing game id.',
+      'label: short English item name because the runtime font is ASCII-oriented.',
+      'base_icon_ref: pick the existing weapon or armor icon that is closest to the new item, from the catalog below. The icon will be edited by FLUX using icon_prompt.',
+      'icon_prompt: English editing instruction for FLUX. Preserve pixel-art identity, transparency, canvas size, and item silhouette; change colors/material/details to match the theme.',
+      'Fill "explanation" with 2-3 short Korean sentences that explain the item and icon choice. Only "explanation" is Korean.',
+      `Accepted art direction:\n${JSON.stringify(direction.art_direction, null, 2)}`,
+      `Accepted quest:\n${JSON.stringify({ title: quest.title, guide_text: quest.guide_text }, null, 2)}`,
+      'Base icon catalog:',
+      ...getBaseIconRefs(catalog).map((ref) => `- ${ref}`)
+    ].join('\n'),
+    input: userPrompt.trim(),
+    schemaName: 'my_sample_rpg_reward_item',
+    schema: createUnifiedThemeRewardItemSchema(catalog)
+  })
+
+const blobToBase64 = (blob: Blob): Promise<string> =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => {
+      const text = String(reader.result)
+      resolve(text.slice(text.indexOf(',') + 1))
+    }
+    reader.onerror = () => reject(new Error('아이콘 데이터를 인코딩하지 못했습니다.'))
+    reader.readAsDataURL(blob)
+  })
+
+export type UnifiedThemeRewardItemApplyResult = {
+  iconPath: string
+  savedToServer: boolean
+}
+
+export const applyUnifiedThemeRewardItem = async (
+  item: UnifiedThemeRewardItem,
+  plan: UnifiedThemePlan
+): Promise<UnifiedThemeRewardItemApplyResult> => {
+  const basePath = item.base_icon_ref.startsWith('asset:')
+    ? item.base_icon_ref.slice('asset:'.length)
+    : item.base_icon_ref
+  const iconPath = `${GENERATED_ITEM_ICON_DIR}/${item.item_id}.png`
+
+  const baseResponse = await fetch(`/${basePath}`)
+  if (!baseResponse.ok) {
+    throw new Error(`기준 아이콘을 불러오지 못했습니다: ${basePath}`)
+  }
+  const baseBlob = await baseResponse.blob()
+
+  const fluxPrompt = await translatePromptForFlux(buildFluxPrompt(plan, item.icon_prompt, 'asset'))
+  const form = new FormData()
+  form.append('content', baseBlob, `${item.item_id}-base.png`)
+  form.append('prompt', fluxPrompt)
+  form.append('alpha', '0.85')
+  const transfer = await fetch(`${STYLE_SERVICE_BASE}/style-transfer`, { method: 'POST', body: form })
+  if (!transfer.ok) {
+    throw new Error(`아이콘 생성 실패 (HTTP ${transfer.status}): ${(await transfer.text()).slice(0, 200)}`)
+  }
+  const iconBlob = await transfer.blob()
+
+  // 서버 저장은 새 경로라 실패할 수 있다(백업 대상 원본 없음). 게임 표시는 로컬 파일이
+  // 담당하므로 서버 저장 실패는 경고로만 취급한다.
+  let savedToServer = false
+  try {
+    const saveForm = new FormData()
+    saveForm.append('file', iconBlob, `${item.item_id}.png`)
+    saveForm.append('path', iconPath)
+    const saved = await fetch(`${STYLE_SERVICE_BASE}/apply-asset`, { method: 'POST', body: saveForm })
+    savedToServer = saved.ok
+  } catch {
+    savedToServer = false
+  }
+
+  const local = await fetch('/__save-generated-asset', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ path: iconPath, dataBase64: await blobToBase64(iconBlob) })
+  })
+  if (!local.ok) {
+    throw new Error(`아이콘 로컬 저장 실패 (HTTP ${local.status})`)
+  }
+  return { iconPath, savedToServer }
+}
 
 export const createUnifiedThemeValidationIssues = (
   plan: UnifiedThemePlan,
