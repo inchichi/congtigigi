@@ -188,7 +188,18 @@ def edit_image(
     config = config or get_kontext_config()
     pipeline = _ensure_pipeline(config)
 
-    source = content.convert("RGB")
+    # 투명 배경을 convert("RGB")로 뭉개면 투명 픽셀이 전부 검정이 되어, 투명이 대부분인
+    # 희소 컷아웃(나무·가로등 등)에서 FLUX가 검은 캔버스를 그대로 돌려준다. 그 결과가
+    # 타일셋에 합성되면 맵이 검게 오염되므로, 밝은 중립 배경 위에 평탄화해 전달한다.
+    if content.mode in ("RGBA", "LA", "PA") or (
+        content.mode == "P" and "transparency" in content.info
+    ):
+        flattened_rgba = content.convert("RGBA")
+        neutral_background = Image.new("RGB", flattened_rgba.size, (203, 203, 203))
+        neutral_background.paste(flattened_rgba, mask=flattened_rgba.getchannel("A"))
+        source = neutral_background
+    else:
+        source = content.convert("RGB")
     source, original_size = _resize_to_max_side(source, config.max_side)
     built_prompt = _build_prompt(prompt, strength)
 

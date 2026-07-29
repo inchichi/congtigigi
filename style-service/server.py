@@ -13,7 +13,7 @@ from pathlib import Path
 
 from fastapi import Body, FastAPI, File, Form, UploadFile
 from fastapi.responses import JSONResponse, Response
-from PIL import Image
+from PIL import Image, ImageStat
 
 import asset_store
 import external_assets
@@ -83,6 +83,18 @@ def _patch_tileset(
         tile_width=tile_width,
         tile_height=tile_height,
     )
+
+
+def _object_result_looks_corrupted(original, edited) -> bool:
+    # 희소한(투명 위주) 컷아웃에서 FLUX가 개체 픽셀까지 검게 뭉갠 결과를 걸러낸다.
+    # 원본 개체 픽셀이 충분히 밝은데 결과가 거의 검으면 손상으로 판정해 타일셋 오염을 막는다.
+    original_rgba = original.convert("RGBA")
+    if edited.size != original_rgba.size:
+        return True
+    alpha = original_rgba.getchannel("A")
+    original_mean = ImageStat.Stat(original_rgba.convert("L"), mask=alpha).mean[0]
+    edited_mean = ImageStat.Stat(edited.convert("RGBA").convert("L"), mask=alpha).mean[0]
+    return original_mean > 60 and edited_mean < 20
 
 
 def _is_local_origin(origin: str) -> bool:
@@ -257,6 +269,9 @@ def batch_apply(
                 cutout = Image.open(io.BytesIO(object_extract.read_png(key)))
                 cutout.load()
                 result = _apply_prompt_to_content(cutout, prompt, alpha)
+                if _object_result_looks_corrupted(cutout, result):
+                    failed.append({"target": str(target), "error": "전이 결과가 검게 손상되어 타일셋 반영을 건너뛰었습니다. 다시 시도하거나 대상을 줄이세요."})
+                    continue
                 patched = _patch_tileset(
                     Image.open(asset_store.resolve_asset_path(meta["tilesetPath"])),
                     result,
