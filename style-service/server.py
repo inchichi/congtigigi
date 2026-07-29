@@ -258,9 +258,14 @@ def batch_apply(
                 if asset_store.is_runtime_animation_asset(path):
                     failed.append({"target": str(target), "error": "Runtime animation sheets and map tilesets cannot be overwritten by FLUX."})
                     continue
-                source = Image.open(asset_store.resolve_asset_path(path))
+                # 테마 전이는 항상 최초 원본에서 시작한다. 현재 파일을 입력으로 쓰면
+                # 이전 전이 결과(특히 손상본) 위에 덧칠되어 화질이 누적 열화된다.
+                source = Image.open(io.BytesIO(asset_store.read_original_or_current(path)))
                 source.load()
                 result = _apply_prompt_to_content(source, prompt, alpha)
+                if _object_result_looks_corrupted(source, result):
+                    failed.append({"target": str(target), "error": "전이 결과가 검게 손상되어 저장을 건너뛰었습니다."})
+                    continue
                 asset_store.backup_and_write(path, _image_to_png_bytes(result))
                 applied.append(path)
             elif kind == "object":
@@ -304,6 +309,47 @@ def batch_apply(
         except (KeyError, TypeError, ValueError, FileNotFoundError, OSError, RuntimeError, TimeoutError) as error:
             failed.append({"target": str(target), "error": str(error)})
     return {"applied": applied, "failed": failed, "written": applied}
+
+
+@app.post("/stylize-sheet")
+def stylize_sheet(
+    path: str = Form(...),
+    prompt: str = Form(...),
+    alpha: float = Form(1.0),
+    frame_width: int = Form(0),
+    frame_height: int = Form(0),
+):
+    """NPC·몬스터 전용 시트/정적 이미지 전이. 항상 최초 원본에서 시작하고,
+    프레임 단위로 잘라 전이 후 재조립한다. 프레임 하나라도 검게 손상되면
+    애니메이션 일관성을 위해 전체를 중단한다(파일은 건드리지 않음)."""
+    try:
+        source = Image.open(io.BytesIO(asset_store.read_original_or_current(path))).convert("RGBA")
+    except (ValueError, FileNotFoundError) as error:
+        return JSONResponse(status_code=422, content={"error": str(error)})
+    width, height = source.size
+    fw = frame_width or width
+    fh = frame_height or height
+    if width % fw or height % fh:
+        return JSONResponse(status_code=422, content={"error": f"프레임 크기 불일치: 시트 {width}x{height}, 프레임 {fw}x{fh}"})
+    result = source.copy()
+    styled = 0
+    for top in range(0, height, fh):
+        for left in range(0, width, fw):
+            frame = source.crop((left, top, left + fw, top + fh))
+            if frame.getbbox() is None:
+                continue
+            try:
+                edited = _apply_prompt_to_content(frame, prompt, alpha)
+            except (FileNotFoundError, TimeoutError) as error:
+                return JSONResponse(status_code=503, content={"error": str(error)})
+            except (ValueError, RuntimeError, OSError) as error:
+                return JSONResponse(status_code=502, content={"error": str(error)})
+            if _object_result_looks_corrupted(frame, edited):
+                return JSONResponse(status_code=502, content={"error": f"프레임({left},{top}) 결과가 검게 손상되어 전체를 중단했습니다."})
+            result.paste(edited.convert("RGBA"), (left, top))
+            styled += 1
+    backup = asset_store.backup_and_write(path, _image_to_png_bytes(result))
+    return {"ok": True, "path": path, "frames": styled, "backup": backup}
 
 
 @app.get("/asset-status")
