@@ -13,6 +13,7 @@ import {
   type StyleCatalog,
   type UnifiedThemeDirection,
   type UnifiedThemePlan,
+  type UnifiedThemeStyleTarget,
   type UnifiedThemeStyleTargetDraft
 } from './unifiedThemePipeline'
 import { QWEN_LOCAL_TOKEN } from './qwenGenerate'
@@ -108,6 +109,12 @@ export const createThemeWorkflowPage = ({
   let rewardItem: UnifiedThemeRewardItem | undefined
   let rewardItemNote = ''
   let questCandidates: Array<{ quest: GeneratedQuestJson; note: string }> = []
+  // 스타일 대상 수동 편집: Qwen 추천 중 제외한 것 / 카탈로그에서 직접 추가한 것.
+  const removedQwenRefs = new Set<string>()
+  const manualRefs = new Set<string>()
+  // 보존 지침·아트 디렉션은 buildFluxPrompt가 뒤에 붙이므로 여기는 핵심 지시만 짧게 둔다(CLIP 77토큰 한도).
+  let manualPrompt = 'Apply the theme style to this target.'
+  let manualAlpha = 0.7
   let catalog: StyleCatalog | undefined
   let isGenerating = false
   let isApplying = false
@@ -137,7 +144,9 @@ export const createThemeWorkflowPage = ({
     '📜 작업 로그'
   ) as HTMLButtonElement
   workLogButton.type = 'button'
-  badges.append(makeTag('My Sample RPG', true), makeTag('Qwen 연결됨', true), makeTag('단계별 승인'), workLogButton)
+  const summaryLink = el('a', 'rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-[12px] text-[#c9c9c9] transition hover:border-[#d9a85c]/60 hover:text-[#f1dfb5]', '📊 결과 요약') as HTMLAnchorElement
+  summaryLink.href = '/editor.html?workspace=summary'
+  badges.append(makeTag('My Sample RPG', true), makeTag('Qwen 연결됨', true), makeTag('단계별 승인'), workLogButton, summaryLink)
   header.append(brand, badges)
 
   const steps = [
@@ -243,6 +252,22 @@ export const createThemeWorkflowPage = ({
       : undefined
   }
 
+  // 최종 적용 대상 = (Qwen 추천 − 제외) + 수동 추가. 수동 추가분은 공통 프롬프트·강도를 쓴다.
+  const effectiveStyleTargets = (): UnifiedThemeStyleTarget[] => {
+    const base = (styleDraft?.style_targets ?? []).filter(
+      (target) => !removedQwenRefs.has(target.target_ref)
+    )
+    const baseRefs = new Set(base.map((target) => target.target_ref))
+    const extras = [...manualRefs]
+      .filter((ref) => !baseRefs.has(ref))
+      .map((ref) => ({
+        target_ref: ref,
+        prompt: manualPrompt.trim() || 'Apply the accepted theme art direction to this target.',
+        alpha: manualAlpha
+      }))
+    return [...base, ...extras]
+  }
+
   const buildPlan = (): UnifiedThemePlan | undefined =>
     direction && quest && styleDraft
       ? {
@@ -251,7 +276,7 @@ export const createThemeWorkflowPage = ({
           theme: direction.theme,
           art_direction: direction.art_direction,
           quest,
-          style_targets: styleDraft.style_targets
+          style_targets: effectiveStyleTargets()
         }
       : undefined
 
@@ -352,6 +377,8 @@ export const createThemeWorkflowPage = ({
       })
       styleDraft = styleResult
       styleNote = explanation?.trim() ?? ''
+      removedQwenRefs.clear()
+      manualRefs.clear()
       stage = 2
       statusText = 'FLUX 대상과 프롬프트를 확인하세요. 사용하면 최종 검토로 넘어갑니다.'
     } catch (caught) {
@@ -443,6 +470,8 @@ export const createThemeWorkflowPage = ({
     styleNote = ''
     rewardItem = undefined
     rewardItemNote = ''
+    removedQwenRefs.clear()
+    manualRefs.clear()
     applied = false
     beforeAfter.view.className = 'hidden flex-col gap-3'
     statusText = '테마 설명을 입력하면 1단계부터 시작합니다.'
@@ -518,8 +547,18 @@ export const createThemeWorkflowPage = ({
     render()
     try {
       const result = await applyUnifiedThemeStyles(plan, catalog)
+      // 일부 대상 실패는 전체를 막지 않는다. 전부 실패했을 때만 중단하고,
+      // 부분 실패는 경고로 알린 뒤 성공분+퀘스트를 그대로 반영한다.
+      if (plan.style_targets.length > 0 && result.applied.length === 0) {
+        throw new Error(
+          `모든 스타일 대상이 실패했습니다:\n${result.failed.map((failure) => `${failure.targetRef}: ${failure.error}`).join('\n')}`
+        )
+      }
       if (result.failed.length > 0) {
-        throw new Error(result.failed.map((failure) => `${failure.targetRef}: ${failure.error}`).join('\n'))
+        setError(
+          `일부 대상 실패 ${result.failed.length}개 (나머지 ${result.applied.length}개는 적용됨):\n` +
+            result.failed.map((failure) => `· ${failure.targetRef}: ${failure.error}`).join('\n')
+        )
       }
       let rewardIconPath: string | undefined
       if (rewardItem) {
@@ -554,13 +593,16 @@ export const createThemeWorkflowPage = ({
         explanations: { direction: directionNote, quest: questNote, styles: styleNote },
         ...(rewardItem && rewardIconPath
           ? { reward_item: { item_id: rewardItem.item_id, label: rewardItem.label, icon_path: rewardIconPath } }
+          : {}),
+        ...(result.failed.length > 0
+          ? { failed_targets: result.failed.map((failure) => failure.targetRef) }
           : {})
       }
       appendThemeWorkLog(logEntry)
       statusText = '적용 완료 — 변경된 에셋을 로컬 게임으로 동기화하는 중…'
       render()
       try {
-        await fetch('/__sync-styled-assets', { method: 'POST' })
+        await fetch('/__sync-styled-assets?force=1', { method: 'POST' })
       } catch {
         // 동기화가 실패해도 서버 쪽 적용은 완료된 상태다. 에디터 재진입 시 다시 시도한다.
       }
@@ -653,14 +695,91 @@ export const createThemeWorkflowPage = ({
       card.append(jsonBlock(quest))
       resultContent.append(card)
     } else if (stage === 2 && styleDraft) {
+      const countLine = el('div', 'rounded-lg bg-[#d9a85c]/10 px-3 py-2 text-[11px] font-semibold text-[#e0bd72]')
+      const updateStyleCount = (): void => {
+        const count = effectiveStyleTargets().length
+        countLine.textContent = `적용 대상 ${count}개 — FLUX 실행도 ${count}회 (대상당 수 초~수십 초)`
+      }
+      resultContent.append(countLine)
+
       const card = el('div', 'grid gap-3 md:grid-cols-2')
       if (styleNote) card.append(noteBlock(styleNote, 'md:col-span-2'))
       styleDraft.style_targets.forEach((target) => {
         const item = el('article', 'rounded-xl border border-[#d9a85c]/20 bg-[#121214] p-3')
-        item.append(el('div', 'mb-2 text-[12px] font-semibold text-[#e8d5a5]', target.target_ref), el('div', 'mb-2 text-[11px] leading-relaxed text-[#c9c9c9]', target.prompt), makeTag(`강도 ${target.alpha}`))
+        item.append(el('div', 'mb-2 text-[12px] font-semibold text-[#e8d5a5]', `추천 · ${target.target_ref}`), el('div', 'mb-2 text-[11px] leading-relaxed text-[#c9c9c9]', target.prompt), makeTag(`강도 ${target.alpha}`))
+        const toggleLabel = el('label', 'mt-2 flex cursor-pointer items-center gap-2 text-[11px] text-[#cbb27b]')
+        const toggle = el('input', 'h-3.5 w-3.5 accent-[#d9a85c]') as HTMLInputElement
+        toggle.type = 'checkbox'
+        toggle.checked = !removedQwenRefs.has(target.target_ref)
+        toggle.addEventListener('change', () => {
+          if (toggle.checked) removedQwenRefs.delete(target.target_ref)
+          else removedQwenRefs.add(target.target_ref)
+          updateStyleCount()
+        })
+        toggleLabel.append(toggle, el('span', '', '이 대상 적용'))
+        item.append(toggleLabel)
         card.append(item)
       })
       resultContent.append(card)
+
+      if (catalog) {
+        const allRefs = [
+          ...catalog.objects.map((object) => ({ ref: `object:${object.id}`, label: `오브젝트 · ${object.label}` })),
+          ...catalog.assets.map((asset) => ({ ref: `asset:${asset.id}`, label: `에셋 · ${asset.label}` }))
+        ]
+        const manualBox = el('details', 'mt-3 rounded-xl border border-white/10 bg-[#141416] p-3')
+        manualBox.append(el('summary', 'cursor-pointer text-[12px] font-semibold text-[#cbb27b]', `➕ 대상 직접 추가/제거 (카탈로그 ${allRefs.length}개)`))
+        const controls = el('div', 'mt-2 flex flex-wrap items-center gap-2')
+        const manualChecks: HTMLInputElement[] = []
+        const selectAll = el('button', 'rounded-lg border border-[#d9a85c]/30 bg-[#1c1c1e] px-2.5 py-1.5 text-[10px] text-[#cbb27b] hover:border-[#d9a85c]', '전체 선택') as HTMLButtonElement
+        const selectNone = el('button', 'rounded-lg border border-[#d9a85c]/30 bg-[#1c1c1e] px-2.5 py-1.5 text-[10px] text-[#cbb27b] hover:border-[#d9a85c]', '전체 해제') as HTMLButtonElement
+        selectAll.type = 'button'
+        selectNone.type = 'button'
+        selectAll.addEventListener('click', () => {
+          allRefs.forEach((entry) => manualRefs.add(entry.ref))
+          manualChecks.forEach((check) => { check.checked = true })
+          updateStyleCount()
+        })
+        selectNone.addEventListener('click', () => {
+          manualRefs.clear()
+          manualChecks.forEach((check) => { check.checked = false })
+          updateStyleCount()
+        })
+        controls.append(selectAll, selectNone)
+        const promptInput = el('textarea', 'mt-2 min-h-[56px] w-full rounded-lg border border-white/10 bg-[#111113] px-2.5 py-2 text-[11px] text-[#d4d4d4]') as HTMLTextAreaElement
+        promptInput.value = manualPrompt
+        promptInput.addEventListener('input', () => { manualPrompt = promptInput.value })
+        const alphaRow = el('label', 'mt-2 flex items-center gap-2 text-[11px] text-[#9d9d9d]')
+        const alphaInput = el('input', 'w-20 rounded-lg border border-white/10 bg-[#111113] px-2 py-1 text-[11px] text-[#d4d4d4]') as HTMLInputElement
+        alphaInput.type = 'number'
+        alphaInput.min = '0.2'
+        alphaInput.max = '1'
+        alphaInput.step = '0.05'
+        alphaInput.value = String(manualAlpha)
+        alphaInput.addEventListener('input', () => {
+          const value = Number(alphaInput.value)
+          if (Number.isFinite(value)) manualAlpha = Math.min(1, Math.max(0.2, value))
+        })
+        alphaRow.append(el('span', '', '추가 대상 공통 강도(alpha)'), alphaInput)
+        const list = el('div', 'mt-2 grid max-h-[260px] grid-cols-1 gap-1 overflow-y-auto pr-1 md:grid-cols-2')
+        allRefs.forEach((entry) => {
+          const row = el('label', 'flex cursor-pointer items-center gap-2 rounded-md px-1.5 py-1 text-[11px] text-[#bdbdbf] hover:bg-white/[0.04]')
+          const check = el('input', 'h-3.5 w-3.5 shrink-0 accent-[#d9a85c]') as HTMLInputElement
+          check.type = 'checkbox'
+          check.checked = manualRefs.has(entry.ref)
+          check.addEventListener('change', () => {
+            if (check.checked) manualRefs.add(entry.ref)
+            else manualRefs.delete(entry.ref)
+            updateStyleCount()
+          })
+          manualChecks.push(check)
+          row.append(check, el('span', 'truncate', entry.label))
+          list.append(row)
+        })
+        manualBox.append(controls, el('div', 'mt-2 text-[10px] text-[#77777b]', '추가 대상에 적용할 공통 프롬프트(영어)'), promptInput, alphaRow, list)
+        resultContent.append(manualBox)
+      }
+      updateStyleCount()
     } else if (stage === 3) {
       const plan = buildPlan()
       if (plan) {

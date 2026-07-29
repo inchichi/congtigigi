@@ -22,7 +22,9 @@ void fetch('/__sync-styled-assets', { method: 'POST' }).catch(() => {})
 const params = new URLSearchParams(window.location.search)
 const workspace = params.get('workspace')
 
-if (workspace === 'theme') {
+if (workspace === 'summary') {
+  void import('./createSummaryPage').then(({ createSummaryPage }) => createSummaryPage({ mountElement: root }))
+} else if (workspace === 'theme') {
   createThemeWorkflowPage({
     mountElement: root,
     initialFiles: SAMPLE_GAME_FILES,

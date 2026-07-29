@@ -44,7 +44,7 @@ import { generateQuestJson } from './questJsonGenerator'
 import { dryRunQuestApply } from './dryRunQuestApply'
 import { convertGeneratedQuestToDefinition } from './questCodeGenerator'
 import { createGeneratedQuestValidationIssues } from './questJsonSchema'
-import { replacePendingQuests } from './pendingQuests'
+import { clearPendingQuests, loadPendingQuests, replacePendingQuests } from './pendingQuests'
 import { buildLuaQuestCatalog } from './luaQuestCatalog'
 import { generateLuaQuestCandidates } from './luaQuestCandidates'
 import { generateLuaQuestJson } from './luaQuestJsonGenerator'
@@ -571,7 +571,21 @@ export const createEditorApp = ({
   const headerRight = el('div', 'flex items-center gap-3')
   // 에디터 미리보기(게임 iframe)는 항상 음소거된다(게임이 임베드를 감지해 강제 음소거) —
   // 음소거 토글은 의미가 없어 헤더에서 제외한다(버튼/핸들러 정의는 호환을 위해 그대로 둔다).
-  headerRight.append(styleTransfer.openButton, styleRevert.button, externalStyler.button, placementPalette.button, settingsButton, connection)
+  // 생성 퀘스트 되돌리기 — pending 저장소를 비우면 게임(iframe)이 storage 이벤트를 받아
+  // 즉시 재부팅하고, 원래 퀘스트 체인만 남는다. 누르기 전까지 생성 퀘스트는 새로고침에도 유지된다.
+  const questRevertButton = document.createElement('button')
+  questRevertButton.type = 'button'
+  questRevertButton.className = styleRevert.button.className
+  questRevertButton.textContent = '↩ 퀘스트 되돌리기'
+  questRevertButton.addEventListener('click', () => {
+    const pendingCount = loadPendingQuests().length
+    clearPendingQuests()
+    questRevertButton.textContent = pendingCount > 0 ? `✓ 퀘스트 ${pendingCount}개 되돌림` : '✓ 생성 퀘스트 없음'
+    window.setTimeout(() => {
+      questRevertButton.textContent = '↩ 퀘스트 되돌리기'
+    }, 2200)
+  })
+  headerRight.append(styleTransfer.openButton, styleRevert.button, questRevertButton, externalStyler.button, placementPalette.button, settingsButton, connection)
   header.append(brand, headerRight)
 
   // 메인 에디터는 에셋 트리와 라이브 게임 프리뷰에 집중한다.

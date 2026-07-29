@@ -253,6 +253,11 @@ const syncStyledAssets = (): Plugin => {
   }
 
   let inFlight: Promise<SyncResult> | undefined
+  // 긴 배치 적용 중에는 서버 에셋이 계속 바뀌어, 부팅 동기화 → 파일 쓰기 → Vite 리로드 →
+  // 재부팅 동기화가 맞물리면 새로고침이 반복된다. 부팅 경로는 쿨다운으로 묶고,
+  // 명시적 시점(최종 적용·되돌리기)만 ?force=1로 즉시 동기화한다.
+  let lastSyncAt = 0
+  let lastResult: SyncResult | undefined
 
   const runSync = async (): Promise<SyncResult> => {
     const response = await fetch(`${styleServiceUrl}/styled-assets`)
@@ -352,9 +357,17 @@ const syncStyledAssets = (): Plugin => {
           res.end()
           return
         }
+        const force = (req.url ?? '').includes('force')
+        if (!force && lastResult && Date.now() - lastSyncAt < 60_000) {
+          res.setHeader('Content-Type', 'application/json')
+          res.end(JSON.stringify({ ...lastResult, cached: true }))
+          return
+        }
         const task = inFlight ?? (inFlight = runSync().finally(() => { inFlight = undefined }))
         task
           .then((result) => {
+            lastSyncAt = Date.now()
+            lastResult = result
             if (result.updated.length > 0 || result.failed.length > 0) {
               server.config.logger.info(
                 `  ➜  스타일 에셋 동기화: 갱신 ${result.updated.length} · 동일 ${result.unchanged.length} · 실패 ${result.failed.length}`

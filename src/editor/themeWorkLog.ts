@@ -23,6 +23,8 @@ export type ThemeWorkLogEntry = {
   explanations: { direction: string; quest: string; styles: string }
   // 신규 보상 아이템이 함께 생성된 적용에만 존재한다.
   reward_item?: { item_id: string; label: string; icon_path: string }
+  // 부분 실패가 있었던 적용에만 존재한다.
+  failed_targets?: string[]
 }
 
 export const loadThemeWorkLog = (): ThemeWorkLogEntry[] => {

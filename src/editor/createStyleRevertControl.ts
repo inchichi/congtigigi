@@ -190,7 +190,7 @@ export const createStyleRevertControl = (): StyleRevertControl => {
       const result = (await response.json()) as { reverted: string[]; failed: Array<{ path: string }> }
       try {
         // 서버에서 복원된 원본을 로컬 게임 파일에도 반영한다(원격 GPU 구성용 dev 엔드포인트).
-        await fetch('/__sync-styled-assets', { method: 'POST' })
+        await fetch('/__sync-styled-assets?force=1', { method: 'POST' })
       } catch {
         // 미러 동기화 실패가 되돌리기 결과 표시를 막지는 않는다.
       }

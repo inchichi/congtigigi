@@ -67,7 +67,6 @@ import {
   setQuestDefinitionVisibilityFilter
 } from './questLog'
 import {
-  clearPendingQuests,
   loadPendingQuests,
   PENDING_QUESTS_STORAGE_KEY
 } from '../../editor/pendingQuests'
@@ -241,9 +240,8 @@ const applyPendingQuests = (): void => {
   clearDynamicQuestDefinitions()
   registerDynamicQuestDefinitions(pendingQuests)
   setQuestDefinitionVisibilityFilter(pendingQuests.map((quest) => quest.id))
-  if (pendingQuests.length > 0) {
-    clearPendingQuests()
-  }
+  // 생성 퀘스트는 소비하지 않고 유지한다 — 새로고침해도 살아있고,
+  // 에디터의 '퀘스트 되돌리기' 버튼이 지울 때만 사라진다.
   questLog = ensureQuestProgressEntries(questLog)
 }
 applyPendingQuests()

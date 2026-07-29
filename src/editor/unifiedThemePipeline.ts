@@ -325,7 +325,7 @@ export const generateUnifiedThemePlan = ({
       'Turn one natural-language theme into one coherent quest and a small set of FLUX image-editing operations.',
       'Keep the quest story, NPC motivation, environment mood, and art direction consistent with the requested theme.',
       'Use only exact game ids for the quest. Do not invent ids.',
-      'Write game-facing quest text in English because the runtime font is ASCII-oriented.',
+      'Write game-facing quest text in natural Korean; ids stay in English snake_case.',
       'Write every style target prompt in English for FLUX. Preserve pixel-art readability, transparency, identity, canvas dimensions, and frame/tile layout.',
       `Return schema_version=${MY_SAMPLE_RPG_THEME_SCHEMA_VERSION} and game_id="${MY_SAMPLE_RPG_GAME_ID}" exactly.`,
       `Return concise JSON. Use exactly 1 objective, exactly 1 short sentence in each dialogue array, and at most ${MAX_STYLE_TARGETS} style targets. If a target is not useful for the theme, do not include it.`,
@@ -381,7 +381,7 @@ export const generateUnifiedThemeQuest = ({
       createQuestSystemPrompt(profile, entity),
       'Implement the accepted My Sample RPG theme direction as exactly one playable quest.',
       'Use exactly one objective so the user can review one clear gameplay loop before applying it.',
-      'Use short English dialogue lines because the runtime font is ASCII-oriented.',
+      'Write every player-facing text in natural Korean: title, request_text, guide_text, all dialogue lines, and objective labels. Keep each dialogue line short. Ids stay in English (snake_case).',
       'Fill "explanation" with 2-3 short Korean sentences that explain the quest flow and why it fits the theme. Only "explanation" is Korean; every other quest text stays English.',
       'Do not invent IDs and return only the quest JSON object.',
       `Accepted theme direction:\n${JSON.stringify(direction, null, 2)}`
@@ -473,7 +473,7 @@ export const generateUnifiedThemeRewardItem = ({
       `Design one new quest reward item for ${MY_SAMPLE_RPG_GAME_ID}.`,
       'The item is granted when the player completes the quest, so it must fit the quest story and the theme.',
       'item_id: new snake/kebab id that does not look like an existing game id.',
-      'label: short English item name because the runtime font is ASCII-oriented.',
+      'label: short Korean item name (예: 달빛 수정검), matching how existing game items are named.',
       'base_icon_ref: pick the existing weapon or armor icon that is closest to the new item, from the catalog below. The icon will be edited by FLUX using icon_prompt.',
       'icon_prompt: English editing instruction for FLUX. Preserve pixel-art identity, transparency, canvas size, and item silhouette; change colors/material/details to match the theme.',
       'Fill "explanation" with 2-3 short Korean sentences that explain the item and icon choice. Only "explanation" is Korean.',
@@ -616,15 +616,14 @@ const resolveStyleTarget = (
   return undefined
 }
 
+// CLIP 텍스트 인코더는 77토큰 이후를 잘라낸다. 실제 지시(대상 프롬프트)가 잘리지 않게
+// 맨 앞에 두고, 아트 디렉션과 보존 지침은 압축해 뒤에 붙인다.
 const buildFluxPrompt = (plan: UnifiedThemePlan, targetPrompt: string, kind: 'asset' | 'object'): string => [
-  'Target game: My Sample RPG (TypeScript + Vite + PixiJS).',
-  `Art direction: ${plan.art_direction.style}.`,
-  `Mood: ${plan.art_direction.mood}.`,
-  `Palette: ${plan.art_direction.palette}.`,
+  targetPrompt,
+  `Style: ${plan.art_direction.style}. Mood: ${plan.art_direction.mood}. Palette: ${plan.art_direction.palette}.`,
   kind === 'object'
-    ? 'Preserve the exact object silhouette, transparent background, tile placement, and pixel-art proportions.'
-    : 'Preserve the exact canvas dimensions, transparency, sprite frame layout, tile grid, and subject identity.',
-  targetPrompt
+    ? 'Keep pixel-art look, object silhouette, and transparent background.'
+    : 'Keep pixel-art look, canvas size, transparency, and subject identity.'
 ].join(' ')
 
 export const applyUnifiedThemeStyles = async (
