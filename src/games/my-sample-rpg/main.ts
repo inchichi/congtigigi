@@ -60,12 +60,15 @@ import {
 // Lua 퍼사드 경유 시 안 보임 — 퀘스트 호출부는 TS 유지). 아래 facade import에서는 제외했다.
 import {
   createInitialQuestLog,
-  clearDynamicQuestDefinitions,
   ensureQuestProgressEntries,
   recordSceneEnterQuestProgress,
-  registerDynamicQuestDefinitions,
   setQuestDefinitionVisibilityFilter
 } from './questLog'
+// 동적 퀘스트 등록/해제는 반드시 Lua 파사드 경유 — TS 레지스트리와 Lua 퀘스트 런타임을 함께 갱신한다.
+import {
+  clearDynamicQuestDefinitions,
+  registerDynamicQuestDefinitions
+} from './lua/luaGameLogic'
 import {
   loadPendingQuests,
   PENDING_QUESTS_STORAGE_KEY

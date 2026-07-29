@@ -253,6 +253,8 @@ import {
   createInitialQuestLog as tsCreateInitialQuestLog,
   getQuestProgress as tsGetQuestProgress,
   getQuestDefinition as tsGetQuestDefinition,
+  registerDynamicQuestDefinitions as tsRegisterDynamicQuestDefinitions,
+  clearDynamicQuestDefinitions as tsClearDynamicQuestDefinitions,
   startQuest as tsStartQuest,
   recordQuestObjectiveProgress as tsRecordQuestObjectiveProgress,
   recordMonsterDefeatQuestProgress as tsRecordMonsterDefeatQuestProgress,
@@ -1121,6 +1123,20 @@ export const createInitialQuestLog = (): QuestLogState =>
   questLogLua
     ? questLogLua.createInitialQuestLog()
     : tsCreateInitialQuestLog()
+
+// 동적(에디터 생성) 퀘스트 등록/해제 — TS 레지스트리와 Lua 퀘스트 런타임을 함께 갱신한다.
+// questLog.ts 쪽만 직접 호출하면 Lua 경로(트래커·퀘스트 창·NPC 상호작용)가 생성 퀘스트를 모른다.
+export const registerDynamicQuestDefinitions = (
+  definitions: QuestDefinition[]
+): void => {
+  tsRegisterDynamicQuestDefinitions(definitions)
+  questLogLua?.syncQuestDefinitions()
+}
+
+export const clearDynamicQuestDefinitions = (): void => {
+  tsClearDynamicQuestDefinitions()
+  questLogLua?.syncQuestDefinitions()
+}
 
 export const getQuestProgress = (
   questLog: QuestLogState,

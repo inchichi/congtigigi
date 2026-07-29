@@ -323,7 +323,9 @@ function quest_log_get_visible_trackers(quest_log)
           questId = def.id,
           text    = def.trackerLabel .. ' '
                       .. tostring(quest.objectives[objective.id] or 0)
-                      .. '/' .. tostring(objective.required)
+                      .. '/' .. tostring(objective.required),
+          -- TS와 동형: 트래커의 대상 이미지 링크용 활성 목표 정의를 함께 내보낸다.
+          objective = objective
         }
       elseif quest.status == 'ready-to-turn-in' then
         local text

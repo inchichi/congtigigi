@@ -69,6 +69,14 @@ export const MONSTER_EQUIPMENT_DROP_DEFINITIONS: MonsterEquipmentDropDefinition[
   }
 ]
 
+// 퀘스트 "아이템 획득" 목표가 특정 장비를 요구할 때, 드롭 품목을 그 장비로 바꾸기 위한 조회.
+export const findMonsterEquipmentDropByItemId = (
+  itemId: string
+): MonsterEquipmentDropDefinition | undefined =>
+  MONSTER_EQUIPMENT_DROP_DEFINITIONS.find(
+    (definition) => definition.itemId === itemId
+  )
+
 export const rollMonsterEquipmentDrop = (
   random: () => number = Math.random
 ): MonsterEquipmentDropDefinition | undefined => {

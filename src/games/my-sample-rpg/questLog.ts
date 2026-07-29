@@ -583,6 +583,27 @@ export const registerDynamicQuestDefinitions = (
   }
 }
 
+// 진행 중(수락됨·미완료)인 "아이템 획득" 목표가 요구하는 아이템 id 목록.
+// 몬스터 드롭이 이 아이템을 우선 떨어뜨리게 해, 랜덤 드롭 사이에서 퀘스트 진행이 운에 막히지 않게 한다.
+export const getActiveItemAcquireItemIds = (questLog: QuestLogState): string[] => {
+  const itemIds: string[] = []
+  for (const definition of getAllQuestDefinitions()) {
+    const progress = questProgressOrUndefined(questLog, definition.id)
+    if (!progress || progress.status !== 'active') {
+      continue
+    }
+    for (const objective of definition.objectives) {
+      if (objective.type !== 'item-acquire' || !objective.target.itemId) {
+        continue
+      }
+      if ((progress.objectives[objective.id] ?? 0) < objective.required) {
+        itemIds.push(objective.target.itemId)
+      }
+    }
+  }
+  return itemIds
+}
+
 // 등록된 퀘스트 중 진행도 항목이 없는 것만 채운다(기존 진행도는 절대 덮어쓰지 않음). 동적 퀘스트는
 // createInitialQuestLog 이후에 등록되므로, 등록 직후 이 함수로 진행도를 보강해야 추적이 시작된다.
 export const ensureQuestProgressEntries = (

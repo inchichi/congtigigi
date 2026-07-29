@@ -78,6 +78,7 @@ import {
   formatQuestTextLines,
   getNextQuestInteractionForNpc,
   getQuestNpcBadgeKindForNpc,
+  getActiveItemAcquireItemIds,
   recordItemAcquireQuestProgress,
   recordItemUseQuestProgress,
   recordMonsterDefeatQuestProgress,
@@ -92,7 +93,7 @@ import {
 // 팀원(develop-chich) Lua 방식: 모듈별 Lua 래퍼 인스턴스 + 비변환 함수는 TS에서.
 import { createLuaPlayerStatEffects } from '../playerStatEffectsLua'
 import { grantPlayerExperience } from '../playerExperience'
-import { rollMonsterEquipmentDrop } from '../monsterEquipmentDrops'
+import { findMonsterEquipmentDropByItemId, rollMonsterEquipmentDrop } from '../monsterEquipmentDrops'
 import { grantPlayerSkillPoints } from '../playerProgression'
 import {
   createMonsterPatrolState,
@@ -4497,7 +4498,19 @@ export const createPixiTiledMapView = async ({
       )
       syncPlayerUiOverlays()
 
-      const equipmentDrop = rollMonsterEquipmentDrop(Math.random)
+      let equipmentDrop = rollMonsterEquipmentDrop(Math.random)
+
+      // 진행 중인 "아이템 획득" 목표가 있으면 그 아이템을 우선 드롭한다. 드롭 발생 확률은
+      // 기존 규칙 그대로 두고 품목만 바꿔, 퀘스트가 랜덤 11종 사이에서 운에 막히지 않게 한다.
+      if (equipmentDrop) {
+        const neededItemId = getActiveItemAcquireItemIds(currentQuestLog)[0]
+        const neededDrop = neededItemId
+          ? findMonsterEquipmentDropByItemId(neededItemId)
+          : undefined
+        if (neededDrop) {
+          equipmentDrop = neededDrop
+        }
+      }
 
       if (equipmentDrop) {
         spawnMonsterEquipmentDrop(characterId, equipmentDrop, dropPosition, now)

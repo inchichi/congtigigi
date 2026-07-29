@@ -6,6 +6,7 @@ import questLogLuaSource from '../assets/lua/quest-log.lua?raw'
 
 import {
   QUEST_DEFINITIONS,
+  getAllQuestDefinitions,
   FIRST_SLIME_HUNT_QUEST_ID,
   POTION_SURVIVAL_BASICS_QUEST_ID,
   PIG_TROUBLE_QUEST_ID,
@@ -39,6 +40,7 @@ import {
 } from './luaLogicHost'
 
 export type QuestLogLua = {
+  syncQuestDefinitions: () => void
   createInitialQuestLog: () => QuestLogState
   getQuestProgress: (questLog: QuestLogState, questId: string) => QuestProgress
   getQuestDefinition: (questId: string) => QuestDefinition
@@ -127,10 +129,16 @@ export const createQuestLogLua = async (
 ): Promise<QuestLogLua> => {
   const host = input.host ?? (await createLuaLogicHost(input))
   host.runModule(questLogLuaSource, '@quest-log.lua')
-  // init-with-data: QUEST_DEFINITIONS를 Lua에 주입
-  host.callJson('quest_log_init', QUEST_DEFINITIONS)
+  // init-with-data: 정적+동적(에디터 생성) 퀘스트 정의 전체를 Lua에 주입.
+  // 정적 QUEST_DEFINITIONS만 넣으면 생성 퀘스트가 Lua 경로(트래커·퀘스트 창)에서 보이지 않는다.
+  host.callJson('quest_log_init', getAllQuestDefinitions())
 
   return {
+    // 동적 퀘스트 등록/해제 후 호출 — Lua 쪽 정의 테이블을 최신 전체 목록으로 교체한다.
+    syncQuestDefinitions: (): void => {
+      host.callJson('quest_log_init', getAllQuestDefinitions())
+    },
+
     createInitialQuestLog: (): QuestLogState =>
       host.callJson<QuestLogState>('quest_log_create_initial'),
 
